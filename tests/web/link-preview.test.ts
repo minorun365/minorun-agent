@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { previewGift } from '../../web/src/link-preview';
+import { characterGift, previewGift } from '../../web/src/link-preview';
 
 const card = { url: 'https://github.com/minorun365/minorun-agent', image: 'https://opengraph.githubassets.com/hash/minorun365/minorun-agent', title: 'みのるんエージェント', label: 'GitHubを開く' };
 test('最終回答の出典に対応する画像を貼り紙へ変える', () => {
@@ -16,4 +16,12 @@ test('追加調査で消えた出典・他人のページ・不正な画像は�
     assert.equal(previewGift({ ...card, url }, [url]), undefined);
   }
   assert.equal(previewGift({ ...card, image: 'javascript:alert(1)' }, [card.url]), undefined);
+});
+test('カグカグに触れた質問・回答には紹介記事のサムネイルを貼る', () => {
+  const result = characterGift('KAGのカグカグってどんなキャラ？');
+  assert.equal(result?.source, 'https://note.kddi-agdc.com/n/n2a781e331dd0');
+  assert.equal(result?.preview, true);
+  assert.ok(result?.image?.startsWith('https://assets.st-note.com/'));
+  assert.ok(characterGift('公式キャラは KAGKAG です'));
+  assert.equal(characterGift('re:Invent の会場は？'), undefined);
 });

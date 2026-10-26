@@ -8,6 +8,17 @@ const paths: Record<string, RegExp> = {
   'minoruonda.com': /^\/$/, 'www.minoruonda.com': /^\/$/,
 };
 const titles: Record<string, string> = { 'qiita.com': '私の記事', 'speakerdeck.com': '私の登壇資料', 'github.com': '公開コード' };
+// KAGの公式キャラクター「カグカグ」の話をした回答には、紹介記事のサムネイルを貼る（みのるん指示）。
+const KAGKAG = {
+  url: 'https://note.kddi-agdc.com/n/n2a781e331dd0',
+  image: 'https://assets.st-note.com/production/uploads/images/143826704/rectangle_large_type_2_7b91c9650159330829e4a87cc5e7fbdb.jpeg?fit=bounds&quality=85&width=1280',
+  title: 'KAGのゆるキャラ『カグカグ』を紹介します！',
+};
+export function characterGift(text: string): Surprise | undefined {
+  if (!/カグカグ|kagkag/i.test(text)) return;
+  return { id: 'preview:kagkag', title: 'KAGの公式キャラ', text: KAGKAG.title, image: KAGKAG.image,
+    source: KAGKAG.url, sourceLabel: '記事を読む', preview: true, pose: 'pc' };
+}
 export function previewGift(preview: LinkPreview, sources: string[]): Surprise | undefined {
   try {
     const url = new URL(preview.url), image = new URL(preview.image);
