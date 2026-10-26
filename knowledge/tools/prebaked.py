@@ -104,6 +104,11 @@ def check(topic, stamp=False, urls=None):
             errs.append(f"{topic}: 外した理由が無い「{s['q']}」")
     for item in data.get("items", []):
         q = item["q"]
+        # 画面の候補と同じ上限（tests/web/starters.test.ts）
+        if len(q) > 22:
+            errs.append(f"{q}: 用意した質問は22字以内")
+        if re.search(r"教えて|ですか|ますか|りる？|る？る？", q):
+            errs.append(f"{q}: 依頼形・崩れた語尾に見える")
         if not 1 <= len(item.get("heading", "")) <= 15:
             errs.append(f"{q}: heading は1〜15字")
         errs += check_answer(q, item, topic, urls)
