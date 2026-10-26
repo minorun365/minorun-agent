@@ -1,0 +1,28 @@
+{
+  "name": "minorun-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "infra:synth": "cdkd synth",
+    "infra:diff": "cdkd diff",
+    "infra:deploy": "cdkd deploy --full-wait",
+    "infra:bootstrap": "cdkd bootstrap --region us-west-2",
+    "probe:entry": "uv run --with boto3 python infra/scripts/probe_entry.py",
+    "typecheck": "tsc --noEmit",
+    "web:dev": "vite web",
+    "web:build": "vite build web",
+    "web:typecheck": "tsc -p web --noEmit",
+    "test": "node --import tsx --test tests/web/*.test.ts && npm run test:agent",
+    "test:agent": "cd agent && AWS_REGION=us-west-2 uv run -q --with-requirements requirements.txt python -m unittest discover -s ../tests/agent -t ../tests/agent",
+    "test:e2e": "python3 tests/e2e/run.py"
+  },
+  "devDependencies": {
+    "@go-to-k/cdkd": "0.302.4",
+    "@types/node": "^24.10.9",
+    "aws-cdk-lib": "2.274.0",
+    "constructs": "^10.4.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5"
+  }
+}

@@ -1,0 +1,245 @@
+*,*::before,*::after{box-sizing:border-box}
+:root{color-scheme:light;--bg:#fff;--card:#fff;--cloud:#f0f1f3;--mark:#dbe9ff;--edge-x:18px;--edge-y:10px;--edge-b:16px;--ink:#16181d;--sub:#5b616e;--mut:#9aa0ab;--line:#eceef2;--soft:#f5f6f8;--accent:#0a64d8;--vvh:100dvh}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overscroll-behavior:none}
+body{position:absolute;inset:0;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  -webkit-font-smoothing:antialiased;font-feature-settings:"palt" 1;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
+.stage{position:absolute;left:0;right:0;top:0;height:var(--vvh);overflow:hidden}
+
+/* 上端：アプリ名と2つの時計（小さく） */
+.top{position:absolute;left:0;right:0;top:0;z-index:5;display:flex;justify-content:space-between;align-items:flex-start;
+  padding:calc(env(safe-area-inset-top,0px) + var(--edge-y)) var(--edge-x) 0;font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+.top b{color:var(--ink);font-size:15px;letter-spacing:.02em;line-height:1.4}
+/* iOSのホーム画面起動では上端を画面へ直接固定する。
+   overflow:hiddenのstage内のstickyでは、画面端の固定要素として認識されない場合がある。 */
+@media (display-mode:standalone) and (pointer:coarse){
+  @supports (-webkit-touch-callout:none){
+    .top{position:fixed;background:var(--bg)}
+  }
+}
+/* 時計は2行に縦に並べて右寄せ */
+.clocks{display:flex;flex-direction:column;align-items:flex-end;line-height:1.4}
+.clocks i{font-style:normal;margin-right:5px}
+
+/* キャラ：ずっとふわふわ。位置と大きさは stage.js の layout() が、見えている高さと場面から決める */
+.chara{position:absolute;left:var(--cx,50%);top:var(--ct,30%);height:var(--ch,50%);aspect-ratio:3/4;transform:translateX(-50%);
+  transition:top .6s cubic-bezier(.2,.8,.2,1),height .6s cubic-bezier(.2,.8,.2,1)}
+/* 横の移動は最初の配置が決まってから（読み込んだ瞬間に中央から滑らせない） */
+.stage.ready .chara{transition:top .6s cubic-bezier(.2,.8,.2,1),height .6s cubic-bezier(.2,.8,.2,1),left .6s cubic-bezier(.2,.8,.2,1)}
+.chara .float{position:absolute;inset:0;animation:float 3.6s ease-in-out infinite}
+.chara img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;transition:opacity .35s ease}
+.chara img.on{opacity:1}
+.chara .shadow{position:absolute;left:24%;right:24%;bottom:3%;height:5%;border-radius:50%;background:rgba(22,24,29,.08);
+  animation:shadow 3.6s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3.2%)}}
+@keyframes shadow{0%,100%{transform:scaleX(1);opacity:1}50%{transform:scaleX(.86);opacity:.7}}
+.stage.thinking .chara .float{animation-duration:2.2s}
+.stage.idea .chara .float{animation:pop .5s cubic-bezier(.2,1.6,.4,1) 1}
+@keyframes pop{0%{transform:scale(.97)}60%{transform:scale(1.04)}100%{transform:scale(1)}}
+
+/* 頭の上の「考えごと」：送った質問を雲形の吹き出しに包み、頭へ向かう小さな丸2つでつなぐ */
+.thought{position:absolute;left:var(--tx,50%);z-index:3;width:max-content;max-width:74%;display:flex;flex-direction:column;align-items:center;pointer-events:none;
+  opacity:0;transform:translate(-50%,8px) scale(.6);transform-origin:50% 100%;
+  transition:opacity .45s ease,transform .55s cubic-bezier(.2,1.4,.4,1),top .6s cubic-bezier(.2,.8,.2,1)}
+.thought.on{opacity:1;transform:translate(-50%,0) scale(1)}
+.thought .cloud{position:relative;padding:16px 26px 17px;animation:drift 3s ease-in-out infinite}
+/* 雲の形は stage.js が文字の幅に合わせて SVG で描く（円を並べて1つの影でまとめる） */
+.thought .cloud svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;z-index:0}
+.thought .cloud span{position:relative;z-index:1;display:-webkit-box;max-width:236px;font-size:13.5px;line-height:1.45;color:#50545c;text-align:center;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;animation:haze 2.6s ease-in-out infinite}
+.thought i{display:block;border-radius:50%;background:var(--cloud);box-shadow:0 2px 6px rgba(20,22,28,.14)}
+.thought .d1{width:12px;height:12px;margin-top:6px;margin-left:var(--d1,-26px);animation:drift 3s ease-in-out .2s infinite}
+.thought .d2{width:7px;height:7px;margin-top:4px;margin-left:var(--d2,-40px);animation:drift 3s ease-in-out .4s infinite}
+@keyframes drift{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes haze{0%,100%{filter:blur(0);opacity:.95}50%{filter:blur(.6px);opacity:.75}}
+
+/* 何をしているかの1行（キャラの足元） */
+.doing{position:absolute;left:0;right:0;z-index:3;text-align:center;font-size:13px;color:var(--mut);opacity:0;transition:opacity .3s,top .6s cubic-bezier(.2,.8,.2,1)}
+.doing.on{opacity:1}
+
+/* 吹き出し：下端をキャラの頭に付け、文字が増えると上へ伸びる。伸びきったらキャラが小さくなり、それでも入らなければ中だけスクロール */
+.bubble{position:absolute;left:0;right:0;margin:0 auto;width:min(560px,calc(100% - 28px));bottom:var(--bb,50%);z-index:4;
+  background:var(--card);border-radius:24px;box-shadow:0 10px 40px rgba(22,24,29,.10),0 0 0 1px var(--line);
+  transform-origin:50% 100%;transform:translateY(24px) scale(.6);opacity:0;filter:blur(8px);pointer-events:none;
+  transition:transform .55s cubic-bezier(.2,1.2,.3,1),opacity .35s ease,filter .45s ease,bottom .6s cubic-bezier(.2,.8,.2,1)}
+.stage.composing .bubble{opacity:0;transform:translateY(10px) scale(.96);filter:blur(6px);pointer-events:none}
+.bubble.on{transform:none;opacity:1;filter:none;pointer-events:auto}
+.bubble::after{content:"";position:absolute;left:50%;bottom:-11px;width:22px;height:22px;margin-left:-11px;background:var(--card);
+  transform:rotate(45deg);border-radius:0 0 6px 0;box-shadow:1px 1px 0 var(--line)}
+.bubble .in{position:relative;z-index:1;max-height:var(--bubble-max,40vh);overflow-y:auto;padding:16px 18px 14px;
+  font-size:16px;line-height:1.75;overscroll-behavior:contain;scrollbar-width:none;border-radius:24px;-webkit-overflow-scrolling:touch}
+/* 入りきらないときは、切れている側の端をぼかして「続きがある」と見せる */
+.bubble.ovb .in{-webkit-mask-image:linear-gradient(#000 calc(100% - 56px),transparent);mask-image:linear-gradient(#000 calc(100% - 56px),transparent)}
+.bubble.ovt .in{-webkit-mask-image:linear-gradient(transparent,#000 40px);mask-image:linear-gradient(transparent,#000 40px)}
+.bubble.ovt.ovb .in{-webkit-mask-image:linear-gradient(transparent,#000 40px,#000 calc(100% - 56px),transparent);mask-image:linear-gradient(transparent,#000 40px,#000 calc(100% - 56px),transparent)}
+.bubble ul{margin:.2em 0 .7em;padding-left:1.1em}
+.bubble li{margin:0 0 .45em}
+.bubble li::marker{color:var(--mut)}
+.bubble .in::-webkit-scrollbar{display:none}
+.bubble p{margin:0 0 .55em}
+.bubble b{font-weight:700;background:linear-gradient(transparent 64%,var(--mark) 64%)}
+.bubble .share{display:block;flex:none;white-space:nowrap;word-break:normal;text-align:right;font-size:12.5px;color:var(--accent);text-decoration:none;font-weight:600;margin-top:6px}
+.bubble .foot{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:8px}
+.bubble .foot .share{margin:0}
+.rate{display:flex;align-items:center;gap:2px;min-width:0}
+.rate button{flex:none;border:0;background:none;padding:7px;margin:-7px 0;color:#b4b9c2;cursor:pointer;border-radius:999px;line-height:0;-webkit-tap-highlight-color:transparent;transition:color .2s,opacity .2s}
+.rate button.down svg{transform:scale(-1,-1)}
+.rate button[aria-pressed=true]{color:var(--ink)}
+.rate button[aria-pressed=true] svg{fill:currentColor}
+.rate[data-v=good] button[data-v=bad],.rate[data-v=bad] button[data-v=good]{opacity:.3}
+.rate .thx{display:none;font-size:11.5px;color:var(--mut);margin-left:6px;opacity:0;transition:opacity .3s}
+.rate.thanks .thx{display:inline;opacity:1}
+.bubble .seeking{margin:.4em 0 0;font-size:13px;color:var(--mut)}
+.caret{display:inline-block;width:.45em;height:1em;vertical-align:-2px;margin-left:2px;background:currentColor;opacity:.4;animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+/* 回答の形：セッションは横にめくるカード、比較は表 */
+.cards{display:flex;gap:8px;overflow-x:auto;margin:8px -18px 0;padding:0 18px 4px;scroll-snap-type:x mandatory;scrollbar-width:none}
+.cards::-webkit-scrollbar{display:none}
+.card{flex:none;width:72%;scroll-snap-align:start;background:var(--soft);border-radius:16px;padding:11px 13px;opacity:0;transform:translateY(6px);
+  transition:opacity .35s ease,transform .35s ease}
+.card.in2{opacity:1;transform:none}
+.card .t{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.1}
+.card .t small{font-size:12px;color:var(--mut);font-weight:600;margin-left:3px}
+.card .j{font-size:11.5px;color:var(--accent);font-weight:700;margin-top:3px}
+.card h3{margin:6px 0 2px;font-size:13.5px;line-height:1.4}
+.card .v{font-size:11.5px;color:var(--sub)}
+table{width:100%;border-collapse:collapse;font-size:14px;margin:6px 0 2px}
+th{font-size:11.5px;color:var(--mut);font-weight:600;text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
+td{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td:first-child{font-weight:700;white-space:nowrap}
+
+/* 下部：もやっと広がる入力。境界の線を持たない */
+.dock{position:absolute;left:0;right:0;bottom:0;z-index:6;padding:0 16px calc(env(safe-area-inset-bottom,0px) + var(--edge-b))}
+.suggest{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:620px;margin:0 auto;transition:opacity .3s,transform .3s}
+.chip{font:inherit;font-size:14px;border:0;border-radius:999px;padding:11px 16px;background:var(--soft);color:var(--ink);cursor:pointer}
+/* 「質問する」も候補と同じ形の1つとして並べる。鉛筆の印と縁取りで見分ける */
+.chip.ask{background:#fff;color:var(--ink);font-weight:700;box-shadow:inset 0 0 0 1.5px var(--ink);display:inline-flex;align-items:center;gap:6px}
+.chip.ask::before{content:"";width:13px;height:13px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4' fill='none' stroke='black' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4' fill='none' stroke='black' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat}
+.stage.composing .suggest,.stage.busy .suggest{opacity:0;transform:translateY(10px);pointer-events:none}
+.mist{position:absolute;left:-10%;right:-10%;bottom:0;height:190px;z-index:-1;pointer-events:none;
+  background:radial-gradient(60% 42% at 50% 35%,rgba(10,100,216,.07),rgba(10,100,216,.025) 45%,rgba(255,255,255,0) 78%);
+  transform:scale(.25);transform-origin:50% 35%;opacity:0;transition:transform .7s cubic-bezier(.2,.9,.2,1),opacity .5s ease}
+.stage.composing .mist{transform:scale(1);opacity:1}
+.stage.kbd .dock{padding-bottom:0}
+.stage.kbd .write{bottom:0}
+.write{position:absolute;left:12px;right:12px;max-width:640px;margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b));display:flex;align-items:flex-end;gap:6px;
+  opacity:0;pointer-events:none;transition:opacity .4s ease .15s}
+/* 入力中はホームバー用余白を重ねない。アプリ内ブラウザのキーボード判定に依存させない。 */
+.stage.composing .dock{padding-bottom:0}
+.stage.composing .write{opacity:1;pointer-events:auto;bottom:0}
+.write::before{content:"";flex:none;width:46px}
+.write textarea{flex:1;min-width:0;font:inherit;font-size:18px;line-height:1.5;text-align:center;resize:none;border:0;outline:none;background:transparent;
+  color:var(--ink);caret-color:var(--accent);max-height:6em;padding:9px 2px;overflow-y:auto}
+.write textarea::placeholder{color:#b8bdc6}
+.send{flex:none;width:46px;height:46px;border-radius:50%;border:0;background:var(--ink);color:#fff;display:grid;place-items:center;cursor:pointer;
+  transform:scale(0);transition:transform .35s cubic-bezier(.2,1.6,.4,1)}
+.send.on{transform:scale(1)}
+.stage.limited .suggest,.stage.limited .write{display:none}
+
+/* 飛んでいく質問：文字が縮んで玉になり、右側を回って頭の上へ */
+.fly{position:fixed;z-index:9;font-size:16px;font-weight:600;color:var(--ink);white-space:nowrap;pointer-events:none;will-change:transform,opacity;
+  padding:9px 15px;border-radius:999px;background:#fff;box-shadow:0 4px 18px rgba(22,24,29,.12)}
+.fly-ball{position:fixed;z-index:9;width:22px;height:22px;border-radius:50%;pointer-events:none;will-change:transform,opacity;
+  background:radial-gradient(circle,#fff 0,rgba(255,255,255,.95) 22%,rgba(214,232,255,.75) 45%,rgba(190,218,255,.3) 66%,rgba(190,218,255,0) 80%);
+  box-shadow:0 0 18px 8px rgba(196,222,255,.32);filter:blur(.6px)}
+:root[data-theme=dark] .fly-ball{box-shadow:0 0 14px 4px rgba(140,190,255,.45)}
+
+/* ここから下は本番で足したもの */
+.bubble a{color:var(--accent);word-break:break-all}
+.bubble .h{font-weight:700;margin:.6em 0 .2em}
+.bubble ol{margin:.2em 0 .7em;padding-left:1.3em}
+.bubble figure{margin:8px 0 10px}
+.bubble figure img{width:100%;height:auto;border-radius:12px;display:block;box-shadow:0 0 0 1px var(--line);cursor:zoom-in}
+.bubble figcaption{font-size:11.5px;color:var(--mut);margin-top:4px}
+.bubble .update{margin:10px 0 2px;padding:10px 12px;border-radius:14px;background:#fff6e0;font-size:14px;line-height:1.6}
+.bubble .update b{background:none}
+.bubble .update ul{margin:.3em 0 0}
+.bubble .oops{color:var(--sub)}
+/* 地図の全画面表示：指で広げて拡大、ずらして移動 */
+.zoom{position:fixed;inset:0;z-index:20;background:rgba(255,255,255,.98);display:none;touch-action:none;overflow:hidden}
+.zoom.on{display:block}
+.zoom img{position:absolute;left:0;top:0;transform-origin:0 0;max-width:none;user-select:none;-webkit-user-drag:none}
+.zoom .close{position:absolute;right:14px;top:calc(env(safe-area-inset-top,0px) + 10px);z-index:2;border:0;border-radius:999px;background:var(--ink);color:#fff;
+  font:inherit;font-size:14px;font-weight:700;padding:9px 16px}
+.zoom .hint{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);text-align:center;font-size:12px;color:var(--mut)}
+/* 出典：該当する文の末尾に小さなラベル。押すと別タブで開く */
+.bubble a.src{display:inline-block;margin:0 0 0 5px;padding:1px 8px;border-radius:999px;background:var(--soft);color:var(--sub);
+  font-size:11px;font-weight:600;line-height:1.7;text-decoration:none;white-space:nowrap;vertical-align:1px;word-break:normal}
+.bubble a.src:hover{background:#e8ecf3;color:var(--ink)}
+/* 入力を開いたときだけ、入力欄のすぐ上に出す注意書き */
+.notice{position:absolute;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 58px);margin:0;text-align:center;
+  font-size:11.5px;line-height:1.6;color:var(--mut);opacity:0;transform:translateY(6px);pointer-events:none;transition:opacity .4s ease .2s,transform .4s ease .2s}
+.stage.composing .notice{opacity:1;transform:none}
+.stage.kbd .notice{bottom:68px}
+/* 開いて少ししてから左上に出るあいさつ（キャラの方へしっぽを向ける） */
+/* 位置は main.ts の layout() が頭の座標から決める */
+.greet{position:absolute;z-index:4;left:12px;top:0;max-width:235px;margin:0;
+  padding:9px 13px;border-radius:15px;background:var(--card);box-shadow:0 6px 22px rgba(22,24,29,.10),0 0 0 1px var(--line);
+  font-size:13px;line-height:1.6;color:var(--sub);opacity:0;transform:translateY(6px) scale(.92);transform-origin:85% 100%;pointer-events:none;
+  transition:opacity .5s ease,transform .6s cubic-bezier(.2,1.4,.4,1)}
+.greet::after{content:"";position:absolute;right:24px;bottom:-6px;width:12px;height:12px;background:var(--card);transform:rotate(45deg);
+  box-shadow:1px 1px 0 var(--line)}
+.greet.on{opacity:1;transform:none}
+.stage.side .greet{transform-origin:100% 50%}
+.stage.side .greet::after{right:-6px;bottom:auto;top:50%;margin-top:-6px;transform:rotate(-45deg)}
+.stage.started .greet,.stage.composing .greet{opacity:0;transform:translateY(6px) scale(.92)}
+/* PC：見出し・時計・下の候補を端から少し内側へ寄せる */
+@media (min-width:768px){
+  .top b{font-size:17px}
+  :root{--edge-x:clamp(28px,6vw,96px);--edge-y:24px;--edge-b:clamp(28px,6vh,64px)}
+}
+/* PCは画面の広さではなく、中央の会話領域を基準に全パーツを配置する。 */
+@media (min-width:768px) and (hover:hover) and (pointer:fine){
+  :root{--edge-x:32px;--edge-y:24px;--edge-b:32px}
+  .stage{width:min(1040px,calc(100% - 64px));height:min(820px,calc(var(--vvh) - 64px));
+    margin: max(32px,calc((var(--vvh) - 820px) / 2)) auto 0}
+  .stage.composing .dock{padding-bottom:var(--edge-b)}
+  .stage.composing .write{bottom:var(--edge-b)}
+}
+/* ダークモードの案（?theme=dark で表示。iOS のダークの地色 #000 につなげる） */
+:root[data-theme=dark]{color-scheme:dark;--bg:#000;--card:#1c1c1e;--cloud:#2c2c2e;--mark:rgba(78,161,255,.35);
+  --ink:#f2f2f7;--sub:#c7c7cc;--mut:#8e8e93;--line:#2c2c2e;--soft:#1c1c1e;--accent:#4ea1ff}
+:root[data-theme=dark] .bubble{box-shadow:0 10px 40px rgba(0,0,0,.6),0 0 0 1px var(--line)}
+:root[data-theme=dark] .thought .cloud span{color:#d1d1d6}
+:root[data-theme=dark] .chara .shadow{background:rgba(255,255,255,.07)}
+:root[data-theme=dark] .chip{background:#1c1c1e;color:var(--ink)}
+:root[data-theme=dark] .chip.ask{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
+:root[data-theme=dark] .send{background:var(--ink);color:#000}
+:root[data-theme=dark] .write textarea::placeholder{color:#636366}
+:root[data-theme=dark] .greet,:root[data-theme=dark] .greet::after,:root[data-theme=dark] .fly{background:var(--card);color:var(--sub)}
+:root[data-theme=dark] .fly{color:var(--ink)}
+:root[data-theme=dark] .bubble a.src{background:#2c2c2e;color:#c7c7cc}
+:root[data-theme=dark] .bubble .update{background:#3a2f12}
+:root[data-theme=dark] .zoom{background:rgba(0,0,0,.97)}
+:root[data-theme=dark] .mist{background:radial-gradient(60% 42% at 50% 35%,rgba(78,161,255,.12),rgba(78,161,255,.04) 45%,rgba(0,0,0,0) 78%)}
+:root[data-theme=dark] .chara img{filter:drop-shadow(0 0 1.5px rgba(255,255,255,.55)) drop-shadow(0 0 14px rgba(120,170,255,.12))}
+/* ログイン：時計の右の丸いアイコンと、押すと出る小さなカード */
+.top .right{display:flex;align-items:flex-start;gap:12px}
+.me{flex:none;width:32px;height:32px;margin-top:1px;padding:0;border:0;border-radius:50%;background:var(--soft);color:var(--sub);
+  display:grid;place-items:center;cursor:pointer;overflow:hidden;box-shadow:0 0 0 1px var(--line);transition:box-shadow .2s}
+.me:hover,.me[aria-expanded=true]{box-shadow:0 0 0 2px var(--accent)}
+.me.in{background:var(--ink);color:#fff;box-shadow:none}
+.mepop{position:absolute;z-index:8;right:var(--edge-x);top:calc(env(safe-area-inset-top,0px) + var(--edge-y) + 42px);width:min(280px,calc(100% - 32px));
+  padding:16px 16px 14px;border-radius:18px;background:var(--card);box-shadow:0 12px 40px rgba(22,24,29,.14),0 0 0 1px var(--line);
+  opacity:0;transform:translateY(-6px) scale(.97);transform-origin:90% 0;pointer-events:none;transition:opacity .2s ease,transform .25s cubic-bezier(.2,1.2,.3,1)}
+.mepop.on{opacity:1;transform:none;pointer-events:auto}
+.gbtn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 14px;border-radius:999px;border:0;
+  background:var(--card);color:var(--ink);font:inherit;font-size:14px;font-weight:600;cursor:pointer;box-shadow:inset 0 0 0 1px #dadce0}
+.gbtn:hover{background:var(--soft)}
+.gbtn svg{width:18px;height:18px;flex:none}
+.mepop .out{display:block;margin:4px auto 0;border:0;background:none;color:var(--sub);font:inherit;font-size:13px;cursor:pointer;text-decoration:underline}
+.mepop .lead{margin:0 0 14px;font-size:13.5px;line-height:1.7;color:var(--sub)}
+/* 低い画面（X のアプリ内ブラウザなど）：みのるんは右下、吹き出しは左側を縦に長く。しっぽは右へ向けて頭を指す */
+.stage.side .bubble{margin:0 0 0 14px;width:var(--bw,calc(100% - 28px));transition:transform .55s cubic-bezier(.2,1.2,.3,1),opacity .35s ease,filter .45s ease,bottom .6s cubic-bezier(.2,.8,.2,1),width .6s cubic-bezier(.2,.8,.2,1)}
+.stage.side .bubble::after{left:auto;right:-9px;bottom:var(--tail-b,40px);margin:0;transform:rotate(-45deg)}
+.stage.side .bubble{transform-origin:100% 100%}
+.stage.side .thought .cloud{padding:13px 21px 14px}
+.stage.side .thought .cloud span{max-width:196px;font-size:12.5px}
+.stage.side .doing{left:clamp(98px,var(--cx),calc(100% - 98px));right:auto;width:180px;max-width:calc(100% - 16px);transform:translateX(-50%);text-align:center}
+
+/* 読む・入力する間は控えめに。調査中は既存のリズムを使う。 */
+.stage:not(.idea)[data-pose-state="answering"] .chara .float,.stage:not(.idea)[data-pose-state="composing"] .chara .float{animation-name:float-soft;animation-duration:4s}
+.stage[data-pose="coffee"] .chara .float{animation-name:float-soft;animation-duration:5s}
+@keyframes float-soft{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.2%)}}
+.stage[data-pose-state="error"] .chara .float,.stage[data-pose-state="error"] .chara .shadow{animation:none}
+@media(prefers-reduced-motion:reduce){.chara .float,.chara .shadow,.stage.idea .chara .float{animation:none!important}.chara img{transition:none}}

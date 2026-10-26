@@ -1,0 +1,12 @@
+{
+  "app": "npx tsx infra/bin/app.ts",
+  "output": "cdk.out",
+  "context": {
+    "@aws-cdk/core:validateAgainstDefaultRules": true,
+    "@aws-cdk/core:defaultCrossStackReferences": "strong",
+    "cdkd": {
+      "statePrefix": "minorun-agent"
+    },
+    "runtimeActive": "V2"
+  }
+}

@@ -1,0 +1,27 @@
+node_modules/
+cdk.out/
+cdk.out.*/
+dist/
+.env
+.env.*
+!.env.op
+*.log
+.DS_Store
+tmp/
+.local/
+__pycache__/
+tests/e2e/reports/
+
+# 知識の中身（形式は knowledge/README.md）
+knowledge/sources/
+knowledge/entries/
+knowledge/assets/
+knowledge/dist/
+knowledge/tools/year_overrides.json
+
+# 環境ごとに違う値（infra/scripts/*.py が書く）
+infra/.auth.json
+infra/.edge.json
+infra/.watch-token
+
+*.local.txt

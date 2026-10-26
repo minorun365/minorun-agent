@@ -1,0 +1,81 @@
+{
+ "images": [
+  {
+   "id": "campus-map-2026",
+   "file": "campus-map-2026.png",
+   "pdf": "campus-map-2026.pdf",
+   "source_url": "https://static.rainfocus.com/awsevents/reinvent2026/static/staticfile/staticfile/CampusMap_1781250393177001i6ru.png",
+   "source_pdf_url": "https://static.rainfocus.com/awsevents/reinvent2026/static/staticfile/staticfile/CampusMap%20%281%29_1781251537990001Fr4N.pdf",
+   "page_url": "https://registration.awsevents.com/flow/awsevents/reinvent2026/venueshotel/page/venuehotel",
+   "owner": "AWS",
+   "year": 2026,
+   "retrieved": "2026-10-25",
+   "width": 1200,
+   "height": 674,
+   "alt": "AWS re:Invent 2026 のキャンパスマップ。ラスベガス・ストリップ沿いの会場6か所（黄色）と宿泊専用ホテル14軒（水色）",
+   "caption": "re:Invent 2026 公式キャンパスマップ（出典：AWS re:Invent 2026 Venues & Hotels）",
+   "show_when": [
+    "会場の位置関係・会場間の移動・歩く距離を聞かれたとき",
+    "どのホテルに泊まるか、ホテルと会場の近さを聞かれたとき",
+    "シャトルの有無、どの会場が離れているかを聞かれたとき"
+   ],
+   "covers": [
+    "Encore",
+    "Wynn",
+    "The Venetian",
+    "Caesars Forum",
+    "Caesars Palace",
+    "MGM Grand",
+    "Fontainebleau",
+    "Treasure Island",
+    "Harrah's",
+    "The LINQ",
+    "Flamingo",
+    "Bellagio",
+    "Vdara",
+    "The Cosmopolitan",
+    "Horseshoe",
+    "Paris",
+    "Planet Hollywood",
+    "ARIA",
+    "Park MGM / Nomad",
+    "Signature at MGM"
+   ],
+   "not_covers": "会場内のフロアマップとシャトルの路線図は載っていない。例年は会期直前に公式アプリと Know before you go で出る"
+  },
+  {
+   "id": "architecture",
+   "file": "architecture.png",
+   "source_url": "https://github.com/minorun365/minorun-agent",
+   "page_url": "https://github.com/minorun365/minorun-agent",
+   "owner": "みのるん",
+   "year": 2026,
+   "retrieved": "2026-10-25",
+   "width": 1600,
+   "height": 811,
+   "alt": "みのるんエージェントのアーキテクチャ図。CloudFront → AgentCore Gateway → AgentCore Runtime（Strands Agents）→ ツールの Gateway（Managed KB・Web Search）など",
+   "caption": "みのるんエージェントのアーキテクチャ図",
+   "show_when": [
+    "このアプリ（みのるんエージェント）の作り・構成・使っている技術を聞かれたとき"
+   ],
+   "covers": [
+    "CloudFront",
+    "S3",
+    "AgentCore Gateway",
+    "Lambda（確認役）",
+    "DynamoDB",
+    "AgentCore Runtime",
+    "Strands Agents",
+    "Amazon Bedrock（Sonnet 5.5・Haiku 5.5）",
+    "Managed Knowledge Base",
+    "AgentCore Web Search",
+    "AgentCore Memory",
+    "公式セッションカタログ API"
+   ],
+   "not_covers": [
+    "WAF・ダッシュボードなど見張りの部品",
+    "Brave・What's New・AWS ブログの検索"
+   ]
+  }
+ ]
+}

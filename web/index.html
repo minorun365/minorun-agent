@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#ffffff">
+<meta name="robots" content="noindex">
+<title>みのるんエージェント</title>
+<meta name="description" content="AWS re:Invent 2026 に日本から参加する人の質問に、日本語で答えるAIエージェント（非公式）。準備・会場・移動・セッションのことを何でも聞けます。">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="みのるん">
+<!-- SNS のカード：X は小さいカード（summary）。画像は正方形512px（Slack のスマホ版は横長に切り抜くので、顔を中央に置いている） -->
+<meta property="og:site_name" content="みのるんエージェント">
+<meta property="og:title" content="みのるんエージェント">
+<meta property="og:description" content="AWS re:Invent 2026 に日本から参加する人の質問に、日本語で答えるAIエージェント（非公式）。準備・会場・移動・セッションのことを何でも聞けます。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://agent.minoruonda.com/">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:image" content="https://agent.minoruonda.com/ogp.jpg?v=2">
+<meta property="og:image:secure_url" content="https://agent.minoruonda.com/ogp.jpg?v=2">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="腕を組んだみのるんのキャラクター">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:site" content="@minorun365">
+<meta name="twitter:creator" content="@minorun365">
+<meta name="twitter:title" content="みのるんエージェント">
+<meta name="twitter:description" content="AWS re:Invent 2026 に日本から参加する人の質問に、日本語で答えるAIエージェント（非公式）。準備・会場・移動・セッションのことを何でも聞けます。">
+<meta name="twitter:image" content="https://agent.minoruonda.com/ogp.jpg?v=2">
+<meta name="twitter:image:alt" content="腕を組んだみのるんのキャラクター">
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<div class="stage" id="stage">
+  <header class="top"><b>みのるんエージェント</b><span class="right"><span class="clocks" id="clocks"></span><button class="me" id="me" type="button" aria-label="ログイン" aria-expanded="false"></button></span></header>
+  <div class="mepop" id="mepop" role="dialog" aria-label="ログイン"></div>
+  <p class="greet" id="greet">こんにちは、みのるんです。<br>AWS re:Invent 2026 のことなど、気軽に聞いてくださいね！</p>
+  <div class="bubble" id="bubble"><div class="in" id="answer"></div></div>
+  <div class="thought" id="thought"><div class="cloud"><span id="thoughtText"></span></div><i class="d1"></i><i class="d2"></i></div>
+  <div class="chara" id="chara">
+    <div class="shadow"></div>
+    <div class="float">
+      <img data-pose="idle" class="on" alt="" src="/chara/idle.webp">
+      <img data-pose="think" alt="" src="/chara/think.webp">
+      <img data-pose="think2" alt="" src="/chara/think2.webp">
+      <img data-pose="book" alt="" src="/chara/book.webp">
+      <img data-pose="pc" alt="" src="/chara/pc.webp">
+      <img data-pose="phone" alt="" src="/chara/phone.webp">
+      <img data-pose="catalog" alt="" src="/chara/catalog.webp">
+      <img data-pose="idea" alt="" src="/chara/idea.webp">
+    </div>
+  </div>
+  <div class="doing" id="doing"></div>
+  <div class="dock">
+    <div class="mist"></div>
+    <div class="suggest" id="suggest"></div>
+    <p class="notice">個人情報や機密情報は送らないでください</p>
+    <div class="write">
+      <textarea id="q" rows="1" placeholder="質問を入力" enterkeyhint="send" aria-label="質問" maxlength="1000"></textarea>
+      <button class="send" id="send" type="button" aria-label="送信"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+  </div>
+</div>
+<div class="zoom" id="zoom"><img id="zoomImg" alt=""><button class="close" id="zoomClose" type="button">閉じる</button><p class="hint">指で広げると拡大できます</p></div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
