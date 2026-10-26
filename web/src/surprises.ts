@@ -1,8 +1,9 @@
 // 回答のおまけ。本人の体験は公開資料で確認した文だけを使う。
-export interface Surprise { id: string; title: string; text: string; english?: string; source?: string; sourceLabel?: string; image?: string; preview?: boolean; links?: { label: string; url: string }[]; pose: 'idea' | 'pc' }
+export interface Surprise { id: string; title: string; text: string; english?: string; source?: string; sourceLabel?: string; image?: string; preview?: boolean; pose: 'idea' | 'pc' }
 const slides = 'https://speakerdeck.com/minorun365/';
 export const gifts: Record<string, Surprise> = {
-  support: { id: 'support', title: '応援してね', text: '気に入ってもらえたら、GitHub Sponsors や X のサブスクリプションで応援してもらえるとうれしいです！', links: [{ label: 'GitHub Sponsors', url: 'https://github.com/sponsors/minorun365' }, { label: 'X のサブスクリプション', url: 'https://x.com/minorun365/subs' }], pose: 'pc' },
+  'support-github': { id: 'support-github', title: '応援してね', text: 'GitHub Sponsors で応援してもらえるとうれしいです！', source: 'https://github.com/sponsors/minorun365', pose: 'pc' },
+  'support-x': { id: 'support-x', title: '応援してね', text: 'X のサブスクで応援してもらえるとうれしいです！', source: 'https://x.com/minorun365/subs', pose: 'pc' },
   experience: { id: 'experience', title: '私の失敗談', text: '2024年、ワーナーのキーノートにレシーバーなしで臨んだら、英語が聞き取れませんでした。', source: slides + 'mi-zhao-bedrockergare-invent-2024deguo-gosita5ri-jian-woshao-jie', pose: 'idea' },
   english: { id: 'english', title: '通ですね！', text: '短いデモを見せてもらえますか？', english: 'Could you show me a quick demo?', pose: 'idea' },
   slide: { id: 'slide', title: '2025年の登壇資料より', text: 're:Invent エージェントの開発秘話', image: 'https://files.speakerdeck.com/presentations/e51d54203aca4064a54d1a33be539437/slide_0.jpg', source: slides + 'awsnoxin-ji-neng-wohuruhuo-yong-sita-re-inventeziento-kai-fa-mi-hua', pose: 'pc' },
@@ -10,13 +11,15 @@ export const gifts: Record<string, Surprise> = {
 };
 export interface GiftState { turns: number; lastTurn: number; lastAt: number; seen: string[] }
 export const freshState = (): GiftState => ({ turns: 0, lastTurn: -3, lastAt: 0, seen: [] });
+export const isSupport = (id: string): boolean => id === 'support' || id === 'support-github' || id === 'support-x';
 export const SUPPORT_INTERVAL = 7 * 24 * 60 * 60 * 1000;
 // 支援案内には初回の強制表示を適用せず、保存不可・破損時も控える。
 export function chooseSupport(state: GiftState, lastShown: number | null, now: number, random: () => number = Math.random): Surprise | undefined {
-  if (lastShown === null || !Number.isFinite(lastShown) || lastShown < 0 || state.turns < 5 || state.seen.includes('support')) return;
+  if (lastShown === null || !Number.isFinite(lastShown) || lastShown < 0 || state.turns < 5 || state.seen.some(isSupport)) return;
   if (lastShown > 0 && now - lastShown < SUPPORT_INTERVAL) return;
   if (state.seen.length >= 3 || state.turns - state.lastTurn < 2 || (state.seen.length > 0 && now - state.lastAt < 60_000)) return;
-  return random() < .1 ? gifts.support : undefined;
+  if (random() >= .1) return;
+  return random() < .5 ? gifts['support-github'] : gifts['support-x'];
 }
 export function chooseGift(state: GiftState, candidates: Surprise[], now: number, random: () => number = Math.random, chance = .4): Surprise | undefined {
   if (state.turns < 1 || state.seen.length >= 3 || state.turns - state.lastTurn < 2 || (state.seen.length > 0 && now - state.lastAt < 60_000)) return;

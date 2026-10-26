@@ -8,7 +8,7 @@ import { bookGift } from './book-preview';
 import { POSES, PoseDirector, PosePicker, type Pose } from './poses';
 import { visibleHeight } from './viewport';
 import { useSideLayout } from './layout-mode';
-import { candidatesFor, chooseGift, chooseSupport, freshState, gifts, type GiftState, type Surprise } from './surprises';
+import { candidatesFor, chooseGift, chooseSupport, isSupport, freshState, gifts, type GiftState, type Surprise } from './surprises';
 import { esc, md } from './markdown';
 import { pickStarters } from './starters';
 import { bindSubmitButton } from './submit-button';
@@ -328,21 +328,18 @@ function showGift(candidates: Surprise[], feedback = false, linked?: Surprise) {
   const support = !feedback && !side ? chooseSupport(giftState, lastSupportShown(), now) : undefined;
   const chosen = linked ?? (preview && gifts[preview] ? gifts[preview] : support ?? chooseGift(giftState, eligible, now, Math.random, feedback ? .5 : .4));
   if (!chosen || (side && !chosen.image)) return;
-  if (chosen.id === 'support' && !preview) {
+  if (isSupport(chosen.id) && !preview) {
     try { localStorage.setItem(supportKey, String(now)); } catch { return; }
   }
   gift.style.maxHeight = '';
   gift.className = 'surprise' + (chosen.image ? ' photo' : '') + (chosen.preview ? ' link-preview' : '');
-  gift.innerHTML = `<button class="dismiss" type="button" aria-label="おまけを閉じる">×</button>` +
-    (chosen.image ? (chosen.preview
-      ? `<a class="picture" href="${esc(chosen.source!)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(chosen.text)}"><img src="${esc(chosen.image)}" alt="" referrerpolicy="no-referrer"></a>`
-      : `<button class="picture" type="button" aria-label="スライドを拡大"><img src="${esc(chosen.image)}" alt="${esc(chosen.text)}" width="1600" height="900"></button>`) : '') +
+  const content = (chosen.image ? `<span class="picture"><img src="${esc(chosen.image)}" alt="" referrerpolicy="no-referrer"></span>` : '') +
     `<h3>${esc(chosen.title)}</h3>` + (chosen.english ? `<strong lang="en">${esc(chosen.english)}</strong>` : '') +
-    (chosen.image ? '' : `<p>${esc(chosen.text)}</p>`) +
-    (chosen.source ? `<a href="${esc(chosen.source)}" target="_blank" rel="noopener noreferrer">${esc(chosen.sourceLabel ?? (chosen.image ? '資料を開く' : '私の登壇資料より'))}</a>` : '') +
-    (chosen.links?.length ? '<div class="support-links">' + chosen.links.map(link => `<a class="support-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(link.label)}" title="${esc(link.label)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${link.url.startsWith('https://github.com/') ? 'M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.23c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.49.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.34-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.6-2.81 5.63-5.49 5.93.43.37.82 1.1.82 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z' : 'M18.9 2H22l-6.77 7.74L23.2 22h-6.24l-4.89-7.42L5.58 22H2.45l7.17-8.2L1.8 2h6.4l4.42 6.77L18.9 2ZM17.8 20h1.73L7.25 3.88H5.4L17.8 20Z'}"/></svg></a>`).join('') + '</div>' : '');
+    (chosen.image ? '' : `<p>${esc(chosen.text)}</p>`);
+  gift.classList.toggle('linked', Boolean(chosen.source));
+  gift.innerHTML = `<button class="dismiss" type="button" aria-label="おまけを閉じる">×</button>` +
+    (chosen.source ? `<a class="gift-link" href="${esc(chosen.source)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(chosen.title + '：' + chosen.text)}">${content}</a>` : content);
   gift.querySelector('.dismiss')!.addEventListener('click', closeGift);
-  if (!chosen.preview) gift.querySelector('.picture')?.addEventListener('click', () => openZoom({ src: chosen.image!, alt: chosen.text, caption: chosen.title, width: 1600, height: 900, source_url: chosen.source! }));
   gift.querySelector('img')?.addEventListener('error', closeGift, { once: true });
   gift.querySelector('img')?.addEventListener('load', relayout, { once: true });
   activeGift = chosen; layout();

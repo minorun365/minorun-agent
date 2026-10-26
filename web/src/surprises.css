@@ -8,7 +8,7 @@
 .surprise a{display:block;font-size:11px;line-height:1.4;color:#0a64d8;text-decoration:none}
 .surprise .dismiss{position:absolute;right:0;top:0;width:32px;height:32px;border:0;background:transparent;color:#70664c;font-size:20px;cursor:pointer}
 .surprise.photo{background:#fff;transform:rotate(-3deg);padding:25px 8px 10px}
-.surprise .picture{border:0;padding:0;background:none;cursor:zoom-in;width:100%;display:block}
+.surprise .picture{border:0;padding:0;background:none;width:100%;display:block}
 .surprise img{display:block;width:100%;height:auto;margin-bottom:7px}
 .surprise.photo h3{margin-right:0;font-size:12px}
 .surprise-thanks{position:absolute;z-index:4;padding:6px 10px;border-radius:18px;background:var(--card);color:var(--ink);box-shadow:0 3px 16px #2222;font-size:13px;white-space:nowrap}
@@ -20,11 +20,6 @@
 
 .surprise{overflow:auto;overscroll-behavior:contain}
 
-/* 支援先は引用ラベルと同じ控えめな丸。名前は読み上げとホバーで伝える。 */
-.surprise .support-links{display:flex;gap:8px;align-items:center}
-.surprise a.support-link{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:var(--soft);color:var(--sub)}
-.surprise a.support-link:hover{background:#e8ecf3;color:var(--ink)}
-.surprise .support-link svg{width:14px;height:14px;fill:currentColor}
 .surprise h3{word-break:keep-all;overflow-wrap:anywhere}
 .surprise.link-preview .picture{cursor:pointer}
 .surprise.link-preview img{max-height:120px;object-fit:contain}
@@ -38,9 +33,18 @@
 
 /* 狭い左右配置では画像だけを残す。文字の付箋は抽選・表示とも控える。 */
 .stage.side .surprise.photo h3,
-.stage.side .surprise.photo > a:not(.picture),
 .stage.side .surprise.photo strong,
 .stage.side .surprise.photo p,
-.stage.side .surprise.photo .support-links,
 .stage.side .surprise-thanks{display:none}
 .stage.side .surprise img{margin-bottom:0}
+
+/* リンクの当たり判定を余白まで広げ、閉じるボタンはその上へ置く。 */
+.surprise .gift-link{color:inherit;font-size:inherit;line-height:inherit;touch-action:manipulation}
+.surprise .gift-link::after{content:'';position:absolute;inset:0}
+.surprise .dismiss{z-index:2}
+.surprise.linked{cursor:pointer;transition:translate .18s ease,box-shadow .18s ease,scale .12s ease}
+@media(hover:hover){.surprise.linked:has(.gift-link:hover){translate:0 -4px;box-shadow:0 11px 25px #2223}}
+.surprise.linked:has(.gift-link:focus-visible){outline:2px solid #0a64d8;outline-offset:3px;translate:0 -4px}
+.surprise.linked:has(.gift-link:active){scale:.97;translate:0 -1px}
+.surprise .gift-link:focus-visible{outline:none}
+@media(prefers-reduced-motion:reduce){.surprise.linked{transition:none}.surprise.linked:has(.gift-link){translate:none;scale:none}}
