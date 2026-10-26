@@ -4,6 +4,7 @@
 
 import './surprises.css';
 import { characterGift, previewGift, type LinkPreview } from './link-preview';
+import { bookGift } from './book-preview';
 import { POSES, PoseDirector, PosePicker, type Pose } from './poses';
 import { visibleHeight } from './viewport';
 import { useSideLayout } from './layout-mode';
@@ -608,7 +609,8 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link') {
     currentGiftCandidates = candidatesFor(text, currentTopic, expoDepth);
     giftEligible = figures.length === 0 && !answer.querySelector('img, figure, table');
     layout();
-    const linked = (linkPreview && previewGift(linkPreview, Array.from(answer.querySelectorAll<HTMLAnchorElement>('a.src')).map(a => a.href))) || characterGift(text + '\n' + raw);
+    const sources = Array.from(answer.querySelectorAll<HTMLAnchorElement>('a.src')).map(a => a.href);
+    const linked = bookGift(raw, sources) || (linkPreview && previewGift(linkPreview, sources)) || characterGift(text + '\n' + raw);
     if (linked && giftEligible) {
       // 画素が用意できてから貼る。別の質問や入力に移ったら古い画像を差し込まない。
       const image = new Image(); image.referrerPolicy = 'no-referrer'; image.src = linked.image!;
