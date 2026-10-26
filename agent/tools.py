@@ -93,7 +93,8 @@ def now() -> dict:
 
 
 @tool
-def search_sessions(query: str = "", day: str = "", venue: str = "", session_type: str = "") -> dict:
+def search_sessions(query: str = "", day: str = "", venue: str = "", session_type: str = "",
+                    start_after: str = "", start_before: str = "") -> dict:
     """re:Invent 2026 の公式セッションカタログ（全件の控え）を検索する。
     参加者と会う方法・みのるんの参加スタイルや連絡先は search_2026 で調べる。
 
@@ -101,9 +102,12 @@ def search_sessions(query: str = "", day: str = "", venue: str = "", session_typ
         query: 英語のキーワード（例: "AgentCore", "serverless", "keynote"）かセッションコード（例: "KEY001"）。登壇者名や会社名も可
         day: ラスベガス時間の日付 YYYY-MM-DD（2026-11-30〜2026-12-04）。絞らないなら空
         venue: 会場名の一部（MGM Grand / Venetian / Wynn / Caesars Forum / Caesars Palace）。絞らないなら空
-        session_type: 形式の一部（Breakout / Chalk talk / Workshop / Builders / Lightning / Code talk / Keynote）。絞らないなら空
+        session_type: 形式の一部（Breakout / Chalk talk / Workshop / Builders / Lightning / Code talk / Keynote / Gamified learning / Featured experience）。絞らないなら空
+        start_after: この時刻以降に始まる回だけ（ラスベガス時間 HH:MM。「昼食後」なら "13:00"、「夕方」なら "16:00"）。絞らないなら空
+        start_before: この時刻より前に始まる回だけ（ラスベガス時間 HH:MM。「午前」なら "12:00"）。絞らないなら空
     """
-    retrieved, total, hits = catalog.search(query, day, venue, session_type)
+    retrieved, total, hits = catalog.search(query, day, venue, session_type,
+                                            start_after=start_after, start_before=start_before)
     turn = Turn.current
     if turn is not None and hits and turn.verify is None:
         turn.verify = catalog.start_verify([h["code"] for h in hits], query)

@@ -52,3 +52,11 @@ test('太字に囲まれたURLを正しい出典として表示する', () => {
   assert.match(html, /href="https:\/\/minoruonda.com\/"/);
   assert.doesNotMatch(html, /\*\*/);
 });
+
+test('ラベルが別のサイト名なら、URL のドメインからラベルを作り直す', () => {
+  assert.deepEqual(srcLabels(md('資料です。[Speaker Deck](https://dev.classmethod.jp/articles/a/)')), ['DevelopersIO']);
+  assert.deepEqual(srcLabels(md('KAGです。[AWS公式ではなくKAG](https://kddi-agile.com/news)')), ['kddi-agile']);
+  assert.deepEqual(srcLabels(md('参加登録です。[AWS公式](https://registration.awsevents.com/a)')), ['AWS公式']);
+  assert.deepEqual(srcLabels(md('紹介です。[KAG note](https://note.com/kddi_agile/n/1)')), ['KAG note']);
+  assert.deepEqual(srcLabels(md('記事です。[SpeakerDeck](https://speakerdeck.com/a/b)')), ['SpeakerDeck']);
+});

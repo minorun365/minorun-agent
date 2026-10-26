@@ -87,15 +87,26 @@ def view(s, full=False):
 WORD = re.compile(r"[a-z0-9][a-z0-9:+.#-]*")
 
 
-def search(query="", day="", venue="", session_type="", limit=8):
+def _hhmm(value):
+    """「13:00」「9:30」「13」を HH:MM にそろえる。読めなければ空。"""
+    m = re.fullmatch(r"\s*(\d{1,2})(?::(\d{2}))?\s*", value or "")
+    return f"{int(m.group(1)):02d}:{m.group(2) or '00'}" if m and int(m.group(1)) < 24 else ""
+
+
+def search(query="", day="", venue="", session_type="", limit=8, start_after="", start_before=""):
     snap = snapshot()
     words = [w for w in WORD.findall(query.lower()) if len(w) > 1]
     codes = {w.upper() for w in words}
+    after, before = _hhmm(start_after), _hhmm(start_before)
     hits = []
     for s in snap["sessions"].values():
-        if day and not any(t["date"] == day for t in s.get("times") or []):
-            continue
-        if venue and not any(venue.lower() in (t.get("room") or "").lower() for t in s.get("times") or []):
+        # 日付・会場・時刻は同じ回（times の1件）でそろって満たす必要がある
+        slots = [t for t in s.get("times") or []
+                 if (not day or t.get("date") == day)
+                 and (not venue or venue.lower() in (t.get("room") or "").lower())
+                 and (not after or (t.get("start") or "") >= after)
+                 and (not before or (t.get("start") or "99") < before)]
+        if (day or venue or after or before) and not slots:
             continue
         if session_type and session_type.lower() not in (s.get("type") or "").lower():
             continue
@@ -110,7 +121,7 @@ def search(query="", day="", venue="", session_type="", limit=8):
                 continue
         else:
             score = 1
-        first = min((t.get("utc_start") or "9" for t in s.get("times") or []), default="9")
+        first = min((t.get("utc_start") or "9" for t in slots or s.get("times") or []), default="9")
         hits.append((-score, first, s))
     hits.sort(key=lambda h: (h[0], h[1]))
     return snap["retrieved"], len(hits), [h[2] for h in hits[:limit]]

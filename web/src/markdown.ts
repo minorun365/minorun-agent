@@ -13,11 +13,23 @@ function siteLabel(url: string) {
   return SITES.find(([re]) => re.test(host))?.[1] ?? host.split('.').slice(-2, -1)[0] ?? host;
 }
 const srcTag = (url: string, label: string) => `<a class="src" href="${url}" target="_blank" rel="noopener">${label}</a>`;
+// モデルが付けたラベルが別のサイト名（URL は DevelopersIO なのに「Speaker Deck」など）や、
+// 言い訳を含む長い名前なら、URL のドメインから作り直す
+const KNOWN = new Map(SITES.map(([, l]) => [l.replace(/\s/g, '').toLowerCase(), l]));
+function srcLabel(label: string, url: string) {
+  if (label.length > 14 || /ではなく|じゃなく/.test(label)) return siteLabel(url);
+  const named = KNOWN.get(label.replace(/\s/g, '').toLowerCase());
+  if (!named) return label;
+  // AWS のイベント・Builder Center など aws を含むドメインは「AWS公式」のままでよい
+  if (named === 'AWS公式' && /aws/i.test(url)) return label;
+  const actual = siteLabel(url);
+  return named === actual ? label : actual;
+}
 export function inline(t: string) {
   const keep: string[] = [];
   const hold = (h: string) => `\u0000${keep.push(h) - 1}\u0000`;
   return esc(t)
-    .replace(/\[([^\]\n]{1,30})\]\((https?:\/\/[^\s)]+)\)/g, (_, l: string, u: string) => hold(srcTag(u, l.length <= 14 ? l : siteLabel(u))))
+    .replace(/\[([^\]\n]{1,30})\]\((https?:\/\/[^\s)]+)\)/g, (_, l: string, u: string) => hold(srcTag(u, srcLabel(l, u))))
     .replace(/https?:\/\/[^\s<>()（）「」、。*`\u0000]+/g, (u) => hold(srcTag(u, siteLabel(u))))
     .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
     // 「出典:」などの前置きは要らない（ラベルだけを出す）
