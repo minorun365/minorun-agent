@@ -8,6 +8,7 @@ import topics
 SEARCH_TOOLS = frozenset({
     "search_sessions", "search_2026", "search_past", "search_web", "search_recent",
     "search_whats_new", "search_aws_blog", "get_announcements",
+    "search_japanese", "search_x_users", "search_x_posts",
 })
 
 CHECK = (Path(__file__).with_name("check.local.txt").read_text().strip() if Path(__file__).with_name("check.local.txt").exists() else "")

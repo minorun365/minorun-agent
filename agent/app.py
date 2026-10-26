@@ -14,6 +14,7 @@
   {"type": "done"}
 返し終えた後、話題の整理・会話の控えの保存・1問1行の記録を裏で行う。
 """
+from pathlib import Path
 
 import time
 
@@ -51,6 +52,9 @@ LABELS = {
     "search_past": "過去の参加記を調べています",
     "search_web": "Web を調べています",
     "search_recent": "最新のニュースを調べています",
+    "search_japanese": "日本語のWebを調べています",
+    "search_x_users": "Xのプロフィールを調べています",
+    "search_x_posts": "Xの最新投稿を調べています",
     "get_announcements": "現地からの速報を見ています",
     "search_whats_new": "AWS の新着情報を調べています",
     "search_aws_blog": "AWS ブログを調べています",
@@ -61,13 +65,7 @@ VERIFY_WAIT = 6.0
 FOLLOW_UP_LEAD = "もう少し追加で調べてみますね…"
 FOLLOW_UP_FAILED = "追加で調べようとしましたが、うまくいきませんでした。"
 # 利用者には見せない指示（会話の履歴には残る）
-FOLLOW_UP = ("（自動の追加調査）直前の質問に対して不足している点を、質問に適した情報源で必ず調べ直してください。セッションの日時・会場・形式はsearch_sessions、参加情報や人物の公開情報はsearch_2026・search_past、AWSの更新はsearch_whats_new・search_aws_blog、現地の速報はget_announcementsを使えます。専用検索で根拠が揃えばWeb検索は不要です。不足が残る場合はWebで補います。search_webはBedrockのWeb検索、search_recentはBraveの直近1週間の検索です。鮮度が必要ならsearch_recent、一般の公開情報ならsearch_webを使い、空振りなら検索語や検索先を変えます。直近1週間以外の情報をsearch_recentだけで諦めずsearch_webでも調べます。既に調べた検索語を繰り返さず、不足した属性に絞ります。"
-             "利用者が質問した対象と適用条件を引き継ぎ、検索結果の各記述がその対象・条件についての根拠か照合します。"
-             "私自身のことなら本名「御田稔」を検索語に入れます。"
-             "この回答は直前の回答全体と置き換わります。最初の質問に答える独立した回答として、"
-             "対象と根拠を確認できた元の要点と追加情報をまとめ直し、誤りがあれば訂正して、60〜120字・2〜3文（最大150字）にしてください。"
-             "前置き・謝罪・調査経緯は書かず、出典は該当する文の末尾に付けます。"
-             "Web でも見つからなければ、既に分かっている要点を残し、未確認の点だけを短く伝えます。")
+FOLLOW_UP = (Path(__file__).with_name("follow_up.local.txt").read_text().strip() if Path(__file__).with_name("follow_up.local.txt").exists() else "")
 
 
 
@@ -495,7 +493,7 @@ async def invoke(payload, context):
             conv.agent.messages = conv.agent.messages[:turn_start]
             conv.last_context = previous_context
         row = {"anon": actor, "user": user or None, "memories": len(memories), "question": question, "answer": "".join(answer), "first_ms": first_ms,
-               "total_ms": store.elapsed_ms(started), "tools": turn.tools_used, "catalog": catalog_state,
+               "total_ms": store.elapsed_ms(started), "tools": turn.tools_used, "x_search": turn.x_usage, "catalog": catalog_state,
                "model": MODEL_MAIN, "effort": MAIN_EFFORT, "status": "error" if failed else "ok",
                "_usage": ledger, "initial_answer": initial_answer, "research": research_audit, "follow_up": followed, **({"tid": tid} if tid else {}), **({"via": via} if via else {})}
         task_id = app.add_async_task("after_answer", {"session": session})
@@ -509,7 +507,7 @@ async def invoke(payload, context):
 
 
 def _require_configuration():
-    if not all((prompt.BASE, research.CHECK, topics.JUDGE, topics.NEXT, topics.SUMMARY, topics.SUMMARY_GROUNDING)):
+    if not all((FOLLOW_UP, prompt.BASE, research.CHECK, topics.JUDGE, topics.NEXT, topics.SUMMARY, topics.SUMMARY_GROUNDING)):
         raise RuntimeError("agent の *.local.txt を設定してください")
 
 

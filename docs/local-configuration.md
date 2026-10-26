@@ -5,6 +5,7 @@
 | 配置先 | 用途 |
 |---|---|
 | agent/base.local.txt | 回答生成 |
+| agent/follow_up.local.txt | 追加調査を実行する際の指示 |
 | agent/check.local.txt | 追加調査の判定。needed と reason を持つJSONを返す |
 | agent/judge.local.txt | 話題の判定。decision・heading・back_index を持つJSONを返す |
 | agent/summary_grounding.local.txt | 会話を圧縮する際の指示 |

@@ -12,5 +12,5 @@ class Configuration(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 app._require_configuration()
     def test_configured_values_are_accepted(self):
-        with patch.object(prompt, "BASE", "test answer"), patch.object(research, "CHECK", "test check"), patch.object(topics, "JUDGE", "test judge"), patch.object(topics, "NEXT", "test next"), patch.object(topics, "SUMMARY", "test summary"), patch.object(topics, "SUMMARY_GROUNDING", "test grounding"):
+        with patch.object(app, "FOLLOW_UP", "test follow up"), patch.object(prompt, "BASE", "test answer"), patch.object(research, "CHECK", "test check"), patch.object(topics, "JUDGE", "test judge"), patch.object(topics, "NEXT", "test next"), patch.object(topics, "SUMMARY", "test summary"), patch.object(topics, "SUMMARY_GROUNDING", "test grounding"):
             app._require_configuration()

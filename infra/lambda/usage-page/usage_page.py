@@ -75,7 +75,7 @@ MODELS = {"sonnet": "global.anthropic.claude-sonnet-5-5", "haiku": "global.anthr
 TOKEN_METRICS = {"in": "InputTokenCount", "out": "OutputTokenCount",
                  "cache_read": "CacheReadInputTokenCount", "cache_write": "CacheWriteInputTokenCount"}
 LABELS = {"sonnet": "Sonnet 5.5（回答）", "haiku": "Haiku 5.5（判定・要約・候補）", "runtime": "AgentCore Runtime",
-          "web_search": "AgentCoreWebSearch", "brave": "Brave", "kb": "ナレッジベースの検索"}
+          "web_search": "AgentCoreWebSearch", "brave": "Brave", "x": "X検索", "kb": "ナレッジベースの検索"}
 REASONS = {"per_minute": "1分の上限", "daily_limit": "1日の上限", "bad_id": "IDの形", "too_long": "文字数", "stopped": "停止中", "banned": "利用停止"}
 FLAG_LABELS = {"off_topic": "目的外", "injection": "指示の書き換え", "personal_info": "個人情報", "bug_report": "不具合の報告", "abuse": "良識の逸脱（利用停止）"}
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
@@ -195,11 +195,17 @@ def _tool_costs(rows):
     for r in rows:
         for t in r.get("tools") or []:
             counts[t] = counts.get(t, 0) + 1
-    return counts, counts.get("search_recent", 0) * PRICE["brave"], \
+    return counts, (counts.get("search_recent", 0) + counts.get("search_japanese", 0)) * PRICE["brave"], \
         (counts.get("search_2026", 0) + counts.get("search_past", 0)) * PRICE["kb_retrieve"]
 
 
-def _cost(m, when, brave, kb, since=None):
+def _x_cost(rows):
+    """取得件数からの概算。失敗時は事前予約額が記録されていれば安全側に含める。"""
+    return sum(float(item.get("estimated_usd") if item.get("estimated_usd") is not None else item.get("reserved_usd") or 0)
+               for row in rows for item in row.get("x_search", []))
+
+
+def _cost(m, when, brave, kb, since=None, x=0):
     """when の時台（None なら全部。since があればその時台以降）の概算コストの内訳"""
     def s(key):
         series = m[key]
@@ -210,6 +216,7 @@ def _cost(m, when, brave, kb, since=None):
     cost["runtime"] = s("vcpu") * PRICE["vcpu_hour"] + s("gb") * PRICE["gb_hour"]
     cost["web_search"] = s("web") * PRICE["web_search"]
     cost["brave"] = brave
+    cost["x"] = x
     cost["kb"] = kb
     return cost
 
@@ -226,12 +233,12 @@ def _pace(now):
     since = COST_SINCE
     week = max(since, (now - datetime.timedelta(days=7)).replace(minute=0, second=0, microsecond=0))
     m = _metrics(since, now, 3600)
-    rows = _rows(since, now, ["created_at", "tools"])
+    rows = _rows(since, now, ["created_at", "tools", "x_search"])
     recent = [r for r in rows if datetime.datetime.fromisoformat(r["created_at"]) >= week]
     _, brave, kb = _tool_costs(rows)
     _, wbrave, wkb = _tool_costs(recent)
-    total = sum(_cost(m, None, brave, kb).values())
-    week_usd = sum(_cost(m, None, wbrave, wkb, since=week).values())
+    total = sum(_cost(m, None, brave, kb, x=_x_cost(rows)).values())
+    week_usd = sum(_cost(m, None, wbrave, wkb, since=week, x=_x_cost(recent)).values())
     days = max((now - week).total_seconds() / 86400, 1)
     out = {"since": since.isoformat(timespec="minutes"), "total_usd": total, "week_usd": week_usd,
            "week_days": min(days, 7), "day_usd": week_usd / days, "month_usd": week_usd / days * 30}
@@ -242,9 +249,9 @@ def _pace(now):
 def summary(day=None):
     now, start, end = _day(day)
     m = _metrics(start, end, 86400)
-    rows = _rows(start, end, ["created_at", "anon", "tools", "first_ms", "feedback", "via"])
+    rows = _rows(start, end, ["created_at", "anon", "tools", "first_ms", "feedback", "via", "x_search"])
     tools, brave, kb = _tool_costs(rows)
-    cost = _cost(m, None, brave, kb)
+    cost = _cost(m, None, brave, kb, x=_x_cost(rows))
     firsts = sorted(r["first_ms"] for r in rows if r.get("first_ms") is not None)
     return {"now": now, "day": start, "questions": len(rows), "users": len({r.get("anon") for r in rows}),
             "first_p50": statistics.median(firsts) if firsts else None, "rejected": _rejected(start, end),
@@ -257,7 +264,7 @@ def summary(day=None):
 def hours(day):
     now, start, end = _day(day)
     m = _metrics(start, end, 3600)
-    rows = _rows(start, end, ["created_at", "pk", "tools"])
+    rows = _rows(start, end, ["created_at", "pk", "tools", "x_search"])
     by_hour = {}
     for r in rows:
         h = datetime.datetime.fromisoformat(r["created_at"]).replace(minute=0, second=0, microsecond=0)
@@ -267,7 +274,7 @@ def hours(day):
         rs = by_hour.get(h, [])
         _, brave, kb = _tool_costs(rs)
         out.append({"hour": h, "sessions": len({r.get("pk") for r in rs}), "questions": len(rs),
-                    "usd": sum(_cost(m, h, brave, kb).values())})
+                    "usd": sum(_cost(m, h, brave, kb, x=_x_cost(rs)).values())})
         h += datetime.timedelta(hours=1)
     total = {"sessions": len({r.get("pk") for r in rows}), "questions": len(rows), "usd": sum(x["usd"] for x in out)}
     return now, start, list(reversed(out)), total
@@ -275,7 +282,7 @@ def hours(day):
 
 def questions(day):
     now, start, end = _day(day)
-    rows = _rows(start, end, ["created_at", "question", "answer", "topic", "tools", "first_ms", "flag", "flag_reason", "anon", "user", "pk", "feedback", "via", "prebaked", "usage"])
+    rows = _rows(start, end, ["created_at", "question", "answer", "topic", "tools", "first_ms", "flag", "flag_reason", "anon", "user", "pk", "feedback", "via", "prebaked", "usage", "x_search"])
     rows.sort(key=lambda r: r["created_at"], reverse=True)
     return now, start, rows
 
@@ -610,15 +617,15 @@ def report(day=None, u="general"):
         rs = groups.get(h, [])
         selected = [r for r in rs if _selected(r, u)]
         _, brave, kb = _tool_costs(rs)
-        hc = _cost(m, h, brave, kb)
+        hc = _cost(m, h, brave, kb, x=_x_cost(rs))
         # 検索2種類は回数が行に残るので、その利用者に直接紐づける。
-        shared = {k: v for k, v in hc.items() if k not in ("brave", "kb")}
+        shared = {k: v for k, v in hc.items() if k not in ("brave", "kb", "x")}
         per_question = sum(shared.values()) / len(rs) if rs else 0.0
         if not rs:
             unallocated += sum(hc.values())
         for r in rs:
             _, b, k = _tool_costs([r])
-            r["estimated_usd"] = per_question + b + k
+            r["estimated_usd"] = per_question + b + k + _x_cost([r])
             person = people.setdefault(r["identifier"], {"audience": r["audience"], "identifier": r["identifier"], "questions": 0, "estimated_usd": 0.0})
             person["questions"] += 1
             person["estimated_usd"] += r["estimated_usd"]
@@ -1329,9 +1336,9 @@ def _rolling_cost(now):
     """直近30日間の利用量の積算。1時間単位で集計し、予測月額とは分ける。"""
     start = max(COST_SINCE, (now - datetime.timedelta(days=30)).replace(minute=0, second=0, microsecond=0))
     metrics = _metrics(start, now, 3600)
-    rows = _rows(start, now, ["created_at", "tools"])
+    rows = _rows(start, now, ["created_at", "tools", "x_search"])
     _, brave, kb = _tool_costs(rows)
-    return sum(_cost(metrics, None, brave, kb).values())
+    return sum(_cost(metrics, None, brave, kb, x=_x_cost(rows)).values())
 
 
 def handler(event, _context):

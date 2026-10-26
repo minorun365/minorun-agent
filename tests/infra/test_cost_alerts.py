@@ -22,10 +22,10 @@ class CostAlertTests(unittest.TestCase):
         start = dt.datetime(2026, 11, 10, 12, tzinfo=m.JST)
         metrics = {k:{} for k in [(model,kind) for model in m.MODELS for kind in m.TOKEN_METRICS]+['vcpu','gb','web']}
         metrics[('sonnet','in')] = {start: 1000000}
-        with patch.object(m, '_metrics', return_value=metrics) as get, patch.object(m, '_rows', return_value=[{'tools':['search_2026','search_recent']}]) as rows:
-            self.assertAlmostEqual(m._rolling_cost(now), 2.006)
+        with patch.object(m, '_metrics', return_value=metrics) as get, patch.object(m, '_rows', return_value=[{'tools':['search_2026','search_recent','search_japanese'], 'x_search': [{'estimated_usd': .15}]}]) as rows:
+            self.assertAlmostEqual(m._rolling_cost(now), 2.161)
             get.assert_called_once_with(start, now, 3600)
-            rows.assert_called_once_with(start, now, ['created_at','tools'])
+            rows.assert_called_once_with(start, now, ['created_at','tools','x_search'])
 
     def test_before_thirty_days_starts_at_launch(self):
         m = self.m

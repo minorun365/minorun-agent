@@ -51,6 +51,8 @@ class Turn:
         self.verify = None
         self.tool_calls = 0
         self.tools_used = []
+        self.x_calls = 0
+        self.x_usage = []
         # 保管庫の鍵を読むための通行証。Runtime が質問ごとにヘッダーで渡す
         self.workload_token = None
 
@@ -152,7 +154,7 @@ def search_web(query: str) -> dict:
 _brave_key = None
 
 
-def _brave(query):
+def _brave(query, freshness="pw"):
     global _brave_key
     if _brave_key is None:
         from bedrock_agentcore.services.identity import IdentityClient
@@ -160,8 +162,10 @@ def _brave(query):
         if not token:
             raise RuntimeError("workload token が無い")
         _brave_key = IdentityClient(REGION).get_api_key(provider_name="brave", agent_identity_token=token)
-    q = urllib.parse.urlencode({"q": query, "country": "JP", "search_lang": "jp", "ui_lang": "ja-JP",
-                                "freshness": "pw", "count": WEB_RESULTS})
+    params = {"q": query, "country": "JP", "search_lang": "jp", "ui_lang": "ja-JP", "count": WEB_RESULTS}
+    if freshness:
+        params["freshness"] = freshness
+    q = urllib.parse.urlencode(params)
     req = urllib.request.Request("https://api.search.brave.com/res/v1/web/search?" + q,
                                  headers={"Accept": "application/json", "X-Subscription-Token": _brave_key})
     with urllib.request.urlopen(req, timeout=10) as res:
@@ -179,6 +183,52 @@ def search_recent(query: str) -> dict:
     return {"period": "直近1週間", "results": [
         {"title": r.get("title"), "url": r.get("url"), "age": r.get("age") or r.get("page_age"),
          "text": (r.get("description") or "")[:500]} for r in data.get("web", {}).get("results", [])]}
+
+
+@tool
+def search_japanese(query: str) -> dict:
+    """期間を絞らず日本語の公開Web情報を探す。人物の名前・通称・ブログ・XのIDを探すとき、知識ベースで答えが足りなければ使う。
+
+    Args:
+        query: 人物名やキーワード。所属や活動分野が分かれば含める
+    """
+    data = _brave(query, freshness="")
+    return {"results": [{"title": r.get("title"), "url": r.get("url"),
+                         "text": (r.get("description") or "")[:700]}
+                        for r in data.get("web", {}).get("results", [])]}
+
+
+def _x_search(operation, args):
+    turn = Turn.current
+    if turn is None or turn.x_calls >= 2:
+        return {"status": "turn_limit", "results": []}
+    turn.x_calls += 1
+    data = _call("x___" + operation, args)
+    turn.x_usage.append({"operation": operation, "status": data.get("status"),
+                        "estimated_usd": data.get("estimated_usd"),
+                        "reserved_usd": data.get("reserved_usd")})
+    return data
+
+
+@tool
+def search_x_users(query: str) -> dict:
+    """Xの公開プロフィールを検索する。人物名・通称で日本語Web検索し、公開リンクから見つけた@IDで照会する。同名の候補は同一人物と決めつけない。
+
+    Args:
+        query: @から始まる正確なユーザーID（名前や通称はsearch_japaneseで先に調べる）
+    """
+    return _x_search("users", {"query": query})
+
+
+@tool
+def search_x_posts(query: str, hours: int = 24) -> dict:
+    """Xの最新の公開投稿をキーワードで検索する。会期中の現地の様子・速報・最新の話題や、利用者がXの投稿を求めたときに使う。既定は過去24時間、新しい順で最大10件。公式情報と体験談を区別し、投稿時刻とURLを添えて答える。
+
+    Args:
+        query: キーワード。例: 'reInvent lang:ja -is:retweet'。確認済みの投稿者はfrom:ID、話題の別名はORで指定できる
+        hours: 遡る時間（1〜167）。今日の状況には24、直近数日なら72など。7日より古い投稿は対象外
+    """
+    return _x_search("posts", {"query": query, "hours": hours})
 
 
 # AWS What's New の RSS（直近100件・約10日分）。10分だけ手元に持つ
@@ -323,4 +373,4 @@ image_catalog_description = "\n画像一覧：\n" + "\n".join(
     for m in MAPS)
 show_map = tool(description=show_map.__doc__.split("Args:")[0].strip() + image_catalog_description)(show_map)
 
-ALL = [now, search_sessions, search_2026, search_past, search_web, search_recent, search_whats_new, search_aws_blog, get_announcements, show_map]
+ALL = [now, search_sessions, search_2026, search_past, search_web, search_recent, search_japanese, search_x_users, search_x_posts, search_whats_new, search_aws_blog, get_announcements, show_map]

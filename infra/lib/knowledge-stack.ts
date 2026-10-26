@@ -7,6 +7,8 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
@@ -185,6 +187,46 @@ export class KnowledgeStack extends cdk.Stack {
         configurations: [{ name: 'WebSearch', parameterValues: {} }],
       } } },
     });
+
+    const xBudget = new dynamodb.Table(this, 'XSearchBudget', {
+      tableName: 'minorun-agent-x-search',
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    const xSecret = secretsmanager.Secret.fromSecretNameV2(this, 'XSearchSecret', 'minorun-agent/x-search');
+    const xSearch = new lambda.Function(this, 'XSearch', {
+      functionName: 'minorun-agent-x-search', runtime: lambda.Runtime.PYTHON_3_14,
+      architecture: lambda.Architecture.ARM_64, handler: 'x_search.handler',
+      code: lambda.Code.fromAsset(path.join(currentDir, '../lambda/x-search')),
+      timeout: cdk.Duration.seconds(20), memorySize: 128,
+      environment: { X_SECRET_ID: xSecret.secretName, X_BUDGET_TABLE: xBudget.tableName, X_DAILY_CENTS: '500' },
+      logGroup: new logs.LogGroup(this, 'XSearchLogs', {
+        logGroupName: '/aws/lambda/minorun-agent-x-search', retention: logs.RetentionDays.ONE_MONTH,
+      }),
+    });
+    xSecret.grantRead(xSearch);
+    xBudget.grant(xSearch, 'dynamodb:UpdateItem');
+    const xInvoke = xSearch.grantInvoke(toolsRole);
+    // 初回のみ権限を先にデプロイし、IAMの反映を待ってからターゲットを登録できる。
+    if (this.node.tryGetContext('xSearchTarget') !== 'false') {
+      const xTarget = new agentcore.CfnGatewayTarget(this, 'ToolsTarget-x', {
+        gatewayIdentifier: this.toolsGateway.attrGatewayIdentifier, name: 'x',
+        credentialProviderConfigurations: [{ credentialProviderType: 'GATEWAY_IAM_ROLE' }],
+        targetConfiguration: { mcp: { lambda: {
+          lambdaArn: xSearch.functionArn,
+          toolSchema: { inlinePayload: [
+            { name: 'users', description: 'Xの公開プロフィールを@IDで照会',
+              inputSchema: { type: 'object', properties: { query: { type: 'string', description: '@から始まる正確なユーザーID' } }, required: ['query'] } },
+            { name: 'posts', description: 'Xの公開投稿を新しい順で検索。過去1〜167時間、最大10件',
+              inputSchema: { type: 'object', properties: { query: { type: 'string', description: '検索キーワード' },
+                hours: { type: 'integer', description: '過去何時間か（1〜167、既定24）' } }, required: ['query'] } },
+          ] },
+        } } },
+      });
+
+      xInvoke.applyBefore(xTarget);
+    }
 
     new cdk.CfnOutput(this, 'ToolsGatewayUrl', { value: this.toolsGateway.attrGatewayUrl });
     new cdk.CfnOutput(this, 'ToolsGatewayRoleArn', { value: toolsRole.roleArn });
