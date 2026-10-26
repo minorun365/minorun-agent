@@ -78,7 +78,7 @@ TOKEN_METRICS = {"in": "InputTokenCount", "out": "OutputTokenCount",
 LABELS = {"sonnet": "Sonnet 5.5（回答）", "haiku": "Haiku 5.5（判定・要約・候補）", "runtime": "AgentCore Runtime",
           "web_search": "AgentCoreWebSearch", "brave": "Brave", "x": "X検索", "kb": "ナレッジベースの検索"}
 REASONS = {"per_minute": "1分の上限", "daily_limit": "1日の上限", "bad_id": "IDの形", "too_long": "文字数", "stopped": "停止中", "banned": "利用停止"}
-FLAG_LABELS = {"off_topic": "目的外", "injection": "指示の書き換え", "personal_info": "個人情報", "bug_report": "不具合の報告", "abuse": "良識の逸脱（利用停止）"}
+FLAG_LABELS = {"off_topic": "目的外", "injection": "指示の書き換え", "personal_info": "個人情報", "bug_report": "不具合の報告", "abuse": "良識の逸脱"}
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 PHONE = re.compile(r"(\+?\d[\d\- ]{8,}\d)")
 

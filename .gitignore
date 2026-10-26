@@ -25,3 +25,4 @@ infra/.edge.json
 infra/.watch-token
 
 *.local.txt
+moderation.local.json

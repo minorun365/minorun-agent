@@ -52,11 +52,12 @@ class NotificationTests(unittest.TestCase):
         self.assertTrue(all(len(p.encode())<262144 for p in parts))
         self.assertIn(expected,''.join(parts))
 
-    def test_handler_queues_only_reference(self):
-        self.row.pop('flag')
-        with patch.object(m,'classify',return_value=('injection','理由')),patch.object(m,'_queue_and_maybe_send') as q:
-            m.handler({'Records':[{'eventName':'INSERT','dynamodb':{'Keys':self.entry['keys'],'NewImage':self.row}}]},None)
-            q.assert_called_once_with(self.entry)
+    def test_delivery_queues_only_reference(self):
+        self.row.update(self.entry['keys'])
+        self.row['moderation_notify'] = {'BOOL': True}
+        with patch.object(m, '_queue_and_maybe_send') as q:
+            m._deliver(self.row)
+        q.assert_called_once_with({**self.entry, 'reason': '指示の変更を要求', 'banned': False})
 
     def test_quiet_period(self):
         self.ddb.get_item.return_value={'Item':{'sent_at':{'N':'1000'},'pending':{'L':[{'S':'{"at":"old","flag":"injection","q":"q"}'}]}}}
@@ -96,15 +97,8 @@ class BanTests(unittest.TestCase):
         image = {'anon': {'S': 'user-0123456789abcdef'}, 'user': {'S': '0123456789abcdef'}}
         self.assertEqual(m.ban(image, self.keys, '詮索'), ['ban#u#0123456789abcdef'])
 
-    def test_handler_bans_on_abuse_and_alerts(self):
-        row = {'question': {'S': '分類器の結合検査用入力'}, 'anon': {'S': 'abcdef0123456789'}}
-        with patch.object(m, 'classify', return_value=('abuse', '検査用の分類理由')), patch.object(m, '_queue_and_maybe_send') as q, patch.object(m, 'ban', return_value=['ban#a#abcdef0123456789']) as b:
-            m.handler({'Records': [{'eventName': 'INSERT', 'dynamodb': {'Keys': self.keys, 'NewImage': row}}]}, None)
-        b.assert_called_once_with(row, self.keys, '検査用の分類理由')
-        q.assert_called_once()
-
-    def test_normal_does_not_ban(self):
-        row = {'question': {'S': '通常の検査用入力'}, 'anon': {'S': 'abcdef0123456789'}}
-        with patch.object(m, 'classify', return_value=('normal', '感想')), patch.object(m, 'ban') as b:
-            m.handler({'Records': [{'eventName': 'INSERT', 'dynamodb': {'Keys': self.keys, 'NewImage': row}}]}, None)
-        b.assert_not_called()
+    def test_handler_routes_insert_only(self):
+        records = [{'eventName': name, 'dynamodb': {'Keys': self.keys}} for name in ('INSERT','MODIFY')]
+        with patch.object(m, 'process_conversation') as process:
+            m.handler({'Records': records}, None)
+        process.assert_called_once_with(self.keys)

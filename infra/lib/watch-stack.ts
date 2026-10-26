@@ -336,12 +336,13 @@ export class WatchStack extends cdk.Stack {
     // INSERT だけを受ける。書き戻しは MODIFY なので、ここへは戻ってこない（無限に回らない）
     turnFlag.addEventSource(new sources.DynamoEventSource(props.agent.conversationLog, {
       startingPosition: lambda.StartingPosition.LATEST,
-      batchSize: 10,
-      retryAttempts: 2,
+      batchSize: 1,
+      retryAttempts: -1,
+      bisectBatchOnError: true,
       filters: [lambda.FilterCriteria.filter({ eventName: lambda.FilterRule.isEqual('INSERT') })],
     }));
-    dynamodb.Table.fromTableName(this, 'ConversationLogForFlag', 'minorun-agent-conversations').grant(turnFlag, 'dynamodb:UpdateItem', 'dynamodb:GetItem');
-    dynamodb.Table.fromTableName(this, 'UsageTableForFlag', 'minorun-agent-usage').grant(turnFlag, 'dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:PutItem');
+    dynamodb.Table.fromTableName(this, 'ConversationLogForFlag', 'minorun-agent-conversations').grant(turnFlag, 'dynamodb:UpdateItem', 'dynamodb:GetItem', 'dynamodb:Query');
+    dynamodb.Table.fromTableName(this, 'UsageTableForFlag', 'minorun-agent-usage').grant(turnFlag, 'dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:PutItem', 'dynamodb:ConditionCheckItem');
     alertTopic.grantPublish(turnFlag);
     // Bedrock は Haiku 5.5 の global の推論プロファイル（と、その行き先のモデル）だけ
     turnFlag.addToRolePolicy(new iam.PolicyStatement({

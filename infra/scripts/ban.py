@@ -6,12 +6,13 @@
 
 停止の行は回数の表（minorun-agent-usage）の pk=ban#a#… / ban#u#… に置き、期限を付けない。
 入口の確認役がこの行を見て、評価・先読みを含むすべての要求を 403 で断る。
-同じ人の匿名IDとログインは確認役がつなげて両方を止めるので、解除するときは list で linked の行も消す。
+同じ人の匿名IDとログインは確認役がつなげて両方を止めるので、解除するときは関連する停止も消し、累積点数をリセットする。
 """
 
 import datetime
 import re
 import sys
+import uuid
 
 import boto3
 
@@ -48,7 +49,37 @@ elif cmd == "add" and len(sys.argv) >= 3:
                          "at": datetime.datetime.now(JST).isoformat(timespec="seconds")})
     print("停止した", sys.argv[2])
 elif cmd == "remove" and len(sys.argv) >= 3:
-    TABLE.delete_item(Key={"pk": _pk(sys.argv[2])})
+    pk = _pk(sys.argv[2])
+    items, kwargs = [], {"FilterExpression": "begins_with(pk, :p)", "ExpressionAttributeValues": {":p": "ban#"}, "ConsistentRead": True}
+    while True:
+        page = TABLE.scan(**kwargs)
+        items.extend(page["Items"])
+        if not page.get("LastEvaluatedKey"):
+            break
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+    targets = {pk}
+    while True:
+        previous = set(targets)
+        decisive = {(r.get("conv_pk"), r.get("conv_sk")) for r in items if r["pk"] in targets and r.get("conv_pk") and r.get("conv_sk")}
+        for row in items:
+            if row.get("linked_from") in targets or (row.get("conv_pk"), row.get("conv_sk")) in decisive:
+                targets.add(row["pk"])
+            if row["pk"] in targets and row.get("linked_from"):
+                targets.add(row["linked_from"])
+        if targets == previous:
+            break
+    if len(targets) > 50:
+        sys.exit("関連する停止IDが50件を超えるため、一括解除の対象を確認してください")
+    now = datetime.datetime.now(JST).isoformat(timespec="milliseconds")
+    epoch = str(uuid.uuid4())
+    actions = []
+    for target in sorted(targets):
+        actions.extend([
+            {"Delete": {"TableName": TABLE.name, "Key": {"pk": target}}},
+            {"Put": {"TableName": TABLE.name, "Item": {
+                "pk": "moderation-reset#"+target[4:], "epoch": epoch, "cutoff": now}}},
+        ])
+    TABLE.meta.client.transact_write_items(TransactItems=actions)
     print("解除した", sys.argv[2])
 else:
     sys.exit(__doc__)
