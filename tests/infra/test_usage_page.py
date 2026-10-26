@@ -171,7 +171,7 @@ class UsagePageTests(unittest.TestCase):
         links=Links();links.feed(page)
         target=next(link for link in links.links if link['data-person']==person)
         self.assertEqual(parse_qs(urlsplit(target['href']).query),
-                         {'d':['2026-10-25'],'v':['list'],'f':['typed'],'u':[person]})
+                         {'v':['list'],'f':['typed'],'u':[person]})
         self.assertIn('value="person" selected',page)
         self.assertIn('value="'+person+'"',page)
         self.assertIn('0問',page)

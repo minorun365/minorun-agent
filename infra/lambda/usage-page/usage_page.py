@@ -32,6 +32,7 @@ import urllib.request
 import uuid
 
 import boto3
+import periods
 from transport_errors import read_errors, error_card, error_details
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
@@ -89,13 +90,7 @@ ddb = boto3.client("dynamodb")
 def _day(d):
     """d（YYYY-MM-DD か None）→ その日の日本時間0時と、終わり（今日なら今）"""
     now = datetime.datetime.now(JST)
-    try:
-        start = datetime.datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=JST) if d else None
-    except ValueError:
-        start = None
-    if start is None or start > now:
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = min(start + datetime.timedelta(days=1), now)
+    _, start, end = periods.bounds(d, now, COST_SINCE)
     return now, start, end
 
 
@@ -120,20 +115,33 @@ def _metrics(start, end, period):
         "Resource": TOOLS_GATEWAY_ARN, "Operation": "InvokeGateway", "Method": "tools/call",
         "Protocol": "MCP", "Name": "web___WebSearch"})
     out = {k: {} for k in keys}
-    res = cw.get_metric_data(MetricDataQueries=queries, StartTime=start, EndTime=end)
-    for r in res["MetricDataResults"]:
-        series = out[keys[int(r["Id"][1:])]]
-        for t, v in zip(r["Timestamps"], r["Values"]):
-            hour = t.astimezone(JST).replace(minute=0, second=0, microsecond=0)
-            series[hour] = series.get(hour, 0.0) + float(v)
+    kwargs = dict(MetricDataQueries=queries, StartTime=start, EndTime=end)
+    while True:
+        res = cw.get_metric_data(**kwargs)
+        for r in res["MetricDataResults"]:
+            series = out[keys[int(r["Id"][1:])]]
+            for t, v in zip(r["Timestamps"], r["Values"]):
+                hour = t.astimezone(JST).replace(minute=0, second=0, microsecond=0)
+                series[hour] = series.get(hour, 0.0) + float(v)
+        if not res.get("NextToken"):
+            break
+        kwargs["NextToken"] = res["NextToken"]
     return out
 
 
 def _rejected(start, end):
-    res = cw.get_metric_data(MetricDataQueries=[{
-        "Id": "r", "Expression": "SEARCH('{MinorunAgent,reason} MetricName=\"Rejected\"', 'Sum', 86400)", "ReturnData": True}],
+    kwargs = dict(MetricDataQueries=[{
+        "Id": "r", "Expression": "SEARCH('{MinorunAgent,reason} MetricName=\"Rejected\"', 'Sum', 3600)", "ReturnData": True}],
         StartTime=start, EndTime=end)
-    return {r["Label"]: int(sum(r["Values"])) for r in res["MetricDataResults"] if r["Values"]}
+    counts = {}
+    while True:
+        res = cw.get_metric_data(**kwargs)
+        for r in res["MetricDataResults"]:
+            if r["Values"]:
+                counts[r["Label"]] = counts.get(r["Label"], 0) + int(sum(r["Values"]))
+        if not res.get("NextToken"):
+            return counts
+        kwargs["NextToken"] = res["NextToken"]
 
 
 def _rows(start, end, fields):
@@ -305,7 +313,7 @@ def _registered_users():
                 username = user["Username"]
                 if username.lower().startswith("google_"):
                     key = "user-" + hashlib.sha256(f"user:{username}".encode()).hexdigest()[:16]
-                    users[key] = {}
+                    users[key] = {"registered_at": user["UserCreateDate"].astimezone(JST).isoformat()} if user.get("UserCreateDate") else {}
             if not res.get("PaginationToken"):
                 break
             kwargs["PaginationToken"] = res["PaginationToken"]
@@ -598,7 +606,8 @@ def report(day=None, u="general"):
     """画面と JSON が共有する1回の取得結果。費用は時台ごとの質問数で按分する。"""
     u = u or "general"
     now, start, rows = questions(day)
-    end = min(start + datetime.timedelta(days=1), now)
+    mode, _, period_end = periods.bounds(day, now, COST_SINCE)
+    end = min(start + datetime.timedelta(days=1), now) if mode == "day" else period_end
     m = _metrics(start, end, 3600)
     registered = _registered_users()
     owners = _owner_actors()
@@ -609,8 +618,8 @@ def report(day=None, u="general"):
         groups.setdefault(h, []).append(r)
         r["identifier"] = _identifier(_actor(r))
         r["question_id"] = _question_id(r)
-    people = {_identifier(a): {"identifier": _identifier(a), "questions": 0, "estimated_usd": 0.0}
-              for a in (registered or {})}
+    people = {_identifier(a): {"identifier": _identifier(a), "questions": 0, "estimated_usd": 0.0, "registered": True, **info}
+              for a, info in (registered or {}).items()}
     costs = {k: 0.0 for k in LABELS}
     unallocated, hourly = 0.0, []
     h = start
@@ -635,13 +644,22 @@ def report(day=None, u="general"):
             costs[k] += v
         hourly.append({"hour": h, "sessions": len({r.get("pk") for r in selected if r.get("pk")}),
                        "users": len({_actor(r) for r in selected if _actor(r) != "unknown"}),
-                       "questions": len(selected), "usd": sum(sc.values())})
+                       "questions": len(selected), "usd": sum(sc.values()),
+                       "user_ids": {_actor(r) for r in selected if _actor(r) != "unknown"},
+                       "session_ids": {r.get("pk") for r in selected if r.get("pk")}})
         h += datetime.timedelta(hours=1)
     selected = [r for r in rows if _selected(r, u)]
     firsts = [r["first_ms"] for r in selected if r.get("first_ms") is not None]
     tools, _, _ = _tool_costs(selected)
     active = {_actor(r) for r in rows if _actor(r).startswith("user-")}
-    d = {"now": now, "day": start, "questions": len(selected),
+    new_users = {_identifier(a) for a, info in (registered or {}).items()
+                 if info.get("registered_at") and start <= datetime.datetime.fromisoformat(info["registered_at"]) < end}
+    for person in people.values():
+        person["new"] = person["identifier"] in new_users
+        person["active"] = person["identifier"] in {_identifier(a) for a in active}
+    d = {"now": now, "day": start, "end": end, "period": mode,
+         "selection": periods.key(mode, start, now), "new_google": len(new_users) if registered is not None else None,
+         "questions": len(selected),
          "users": len({_actor(r) for r in selected if _actor(r) != "unknown"}),
          "first_p50": statistics.median(firsts) if firsts else None,
          "rejected": _rejected(start, end), "tools": tools, "cost": costs,
@@ -656,7 +674,7 @@ def report(day=None, u="general"):
 
 
 def _people_html(d, view, f):
-    ds, u = ("" if d.get("follow_today") else d["day"].strftime("%Y-%m-%d")), d.get("u") or "general"
+    ds, u = d["selection"], d.get("u") or "general"
     groups = [("利用区分", list(AUDIENCES.items())),
               ("ログイン種別", [("google", "Google登録者"), ("anonymous", "匿名利用者")])]
     individual = u not in {key for _, choices in groups for key, _ in choices}
@@ -669,13 +687,20 @@ def _people_html(d, view, f):
     links = []
     for person in people:
         actor = person["identifier"]
-        href = "?" + urllib.parse.urlencode({"d": ds, "v": view, "f": f or "", "u": actor})
+        href = "?" + urllib.parse.urlencode({"d": ds, "v": "list", "f": f or "", "u": actor})
         links.append(f'<a href="{html.escape(href, quote=True)}" data-person="{html.escape(actor, quote=True)}">'
                      f'<span>{html.escape(actor)}</span><small>{person["questions"]}問 · 約{_yen(person["estimated_usd"])}</small></a>')
     owner_note = "登録あり" if d["owner_registered"] else "未登録"
-    registered = f'{d["registered_google"]}<small>人</small>' if d["registered_google"] is not None else '<span>取得できませんでした</span>'
+    scope = "この日" if d["period"] == "day" else "この期間"
+    stats = []
+    for group, label, count in (("registered", "現在の登録総数", d["registered_google"]),
+                                ("new", scope + "の新規登録", d["new_google"]),
+                                ("active", scope + "の利用", d["active_google"])):
+        number = str(count) + '<small>人</small>' if count is not None else '<span>取得できませんでした</span>'
+        href = html.escape(_url(v="people", d=ds, g=group, u=u))
+        stats.append(f'<a href="{href}"><span>{label}</span><strong>{number}</strong></a>')
     return f'''<div class="people-panel">
-<div class="people-stats" id="people-counts"><div class="people-label">Google登録者</div><div class="people-pair"><div><span>現在の登録総数</span><strong>{registered}</strong></div><div><span>この日の利用</span><strong>{d["active_google"]}<small>人</small></strong></div></div></div>
+<div class="people-stats" id="people-counts"><div class="people-label">Google登録者</div><div class="people-pair">{"".join(stats)}</div></div>
 <form class="people-filter" id="people-form" method="get"><input type="hidden" name="d" value="{ds}"><input type="hidden" name="v" value="{view}"><input type="hidden" name="f" value="{html.escape(f or '', quote=True)}"><input type="hidden" name="u" id="people-value" value="{html.escape(u, quote=True)}">
 <label class="people-label" for="who">質問の表示対象</label><div class="people-select"><select id="who">{opts}<option value="person"{" selected" if individual else ""}>利用者を指定…</option></select></div>
 <div class="people-search" id="person-search"{"" if individual else " hidden"}><label for="person-query">利用者IDを検索</label><input id="person-query" type="search" autocomplete="off" placeholder="G- または A- のID" value="{html.escape(u if individual else '', quote=True)}"><div class="people-results" id="person-results">{"".join(links)}</div><p class="people-empty" id="person-empty" role="status" hidden>該当する利用者はいません</p></div></form>
@@ -942,13 +967,13 @@ REFRESH_SCRIPT = """<script id="dashboard-refresh">
       if (!response.ok || response.redirected) return;
       let next = new DOMParser().parseFromString(await response.text(), 'text/html');
       const changedDay = next.body.dataset.day && next.body.dataset.day !== document.body.dataset.day;
-      if (changedDay && document.body.dataset.followToday === 'true' && (url.searchParams.has('p') || url.searchParams.has('q'))) {
+      if (changedDay && (url.searchParams.has('p') || url.searchParams.has('q'))) {
         url.searchParams.delete('p'); url.searchParams.delete('q');
         response = await fetch(url, {cache: 'no-store', signal: AbortSignal.timeout(12000)});
         if (!response.ok || response.redirected) return;
         next = new DOMParser().parseFromString(await response.text(), 'text/html');
       }
-      const selectors = ['#summary-panel', '#errors-panel', '#hours-panel', '#list-panel', 'header .at', '#people-counts', 'header .day', 'nav.tabs'];
+      const selectors = ['#summary-panel', '#people-panel', '#errors-panel', '#hours-panel', '#list-panel', 'header .at', '#people-counts', 'header .day', 'nav.tabs'];
       if (selectors.some(s => !next.querySelector(s))) return;
       if (next.querySelector('#owner-csrf')) document.querySelector('#owner-csrf').value = next.querySelector('#owner-csrf').value;
       const search = document.querySelector('#person-search');
@@ -966,6 +991,7 @@ REFRESH_SCRIPT = """<script id="dashboard-refresh">
       // 展開中の行がページ境界から落ちる場合は、一覧を次回まで保つ。
       const nextKeys = new Set([...next.querySelectorAll('.list details')].map(e => e.dataset.row));
       for (const selector of selectors) {
+        if (selector === 'header .day' && document.querySelector(selector).contains(document.activeElement)) continue;
         if (selector === '#list-panel' && [...opened].some(key => !nextKeys.has(key))) continue;
         document.querySelector(selector).replaceChildren(...next.querySelector(selector).childNodes);
       }
@@ -1061,7 +1087,7 @@ def _summary_html(d, ban=None):
         return f'<div class="metric{extra}"><div class="k">{label}</div><div class="v">{usd(v) if v is not None else "—"}</div></div>'
     pace = (metric("公開から現在までの累計", "total_usd") + metric("月額予測（直近7日平均）", "month_usd", " monthly"))
     good, bad = d["feedback"]["good"], d["feedback"]["bad"]
-    ds = "" if d.get("follow_today") else d["day"].strftime("%Y-%m-%d")
+    ds = d.get("selection", "" if d.get("follow_today") else d["day"].strftime("%Y-%m-%d"))
     fb_link = (f'<a href="{html.escape(_url(v="list", d=ds, f="bad", u=d.get("u")))}">良くないを見る ›</a>' if bad
                else (f'<a href="{html.escape(_url(v="list", d=ds, f="rated", u=d.get("u")))}">評価ありを見る ›</a>' if good else "まだ評価なし"))
     fb_card = (f'<div class="card stat fbcard{" hot" if bad else ""}"><div class="k">この日の回答の評価</div>'
@@ -1084,21 +1110,30 @@ def _summary_html(d, ban=None):
 <div class="card breakdown"><h2>この日の費用内訳</h2><table>{cost_rows}</table></div>"""
 
 
-def _hours_html(rows, total, date_tabs=""):
+def _hours_html(rows, total, date_tabs="", multi=False):
     def cell(usd):
         return f"{_yen(usd)} <small>${usd:,.2f}</small>"
     lines = [f'<tr class="sum"><td>合計</td><td>{total["users"]}</td><td>{total["sessions"]}</td><td>{total["questions"]}</td><td>{cell(total["usd"])}</td></tr>']
+    if multi:
+        daily = {}
+        for r in rows:
+            bucket = daily.setdefault(r["hour"].date(), {"hour": r["hour"], "questions": 0, "usd": 0, "users_set": set(), "sessions_set": set()})
+            bucket["questions"] += r["questions"]
+            bucket["usd"] += r["usd"]
+            bucket["users_set"].update(r.get("user_ids", []))
+            bucket["sessions_set"].update(r.get("session_ids", []))
+        rows = [dict(r, users=len(r["users_set"]), sessions=len(r["sessions_set"])) for r in daily.values()]
     for r in rows:
         zero = ' class="zero"' if not r["questions"] else ""
-        lines.append(f'<tr{zero}><td>{r["hour"]:%-H}時台</td><td>{r["users"]}</td><td>{r["sessions"]}</td><td>{r["questions"]}</td><td>{cell(r["usd"])}</td></tr>')
-    return (f'<div class="card"><h2>1時間ごと</h2>{date_tabs}<div class="hour-rows"><table><tr><th>時台</th><th>セッション</th><th>会話</th><th>質問</th><th>全利用の費用</th></tr>{"".join(lines)}</table></div>'
-            '<p class="note inline">セッションは識別できた利用者の数（合計は1日で重複を除く）。ログイン前後・匿名の別ブラウザは別に数える。会話は会話IDの数。質問0件の時台にも、会話の後処理や他のアプリの分が少し乗ることがある。</p></div>')
+        lines.append(f'<tr{zero}><td>{periods.date_label(r["hour"]) if multi else str(r["hour"].hour) + "時台"}</td><td>{r["users"]}</td><td>{r["sessions"]}</td><td>{r["questions"]}</td><td>{cell(r["usd"])}</td></tr>')
+    return (f'<div class="card"><h2>{"日ごと" if multi else "1時間ごと"}</h2>{date_tabs}<div class="hour-rows"><table><tr><th>{"日付" if multi else "時台"}</th><th>セッション</th><th>会話</th><th>質問</th><th>全利用の費用</th></tr>{"".join(lines)}</table></div>'
+            '<p class="note inline">セッションは識別できた利用者の数（合計は選択期間で重複を除く）。ログイン前後・匿名の別ブラウザは別に数える。会話は会話IDの数。質問0件の時台にも、会話の後処理や他のアプリの分が少し乗ることがある。</p></div>')
 
 
-def _list_html(start, all_rows, page, f, u=None, qid=None, banned=frozenset(), follow_today=False):
+def _list_html(start, all_rows, page, f, u=None, qid=None, banned=frozenset(), follow_today=False, selection=None, multi=False):
     f = f if f in FILTERS else None
     rows = [r for r in all_rows if _keep(r, f, banned) and (not qid or _question_id(r) == qid)]
-    d = "" if follow_today else start.strftime("%Y-%m-%d")
+    d = selection if selection is not None else ("" if follow_today else start.strftime("%Y-%m-%d"))
     counts = {k: sum(1 for r in all_rows if _keep(r, k, banned)) for k in FILTERS}
     filt = "".join(
         f'<a class="{" ".join(c for c in ("on" if k == f else "", "hot" if k in ("bad", "banned") and counts[k] else "") if c)}" '
@@ -1109,6 +1144,8 @@ def _list_html(start, all_rows, page, f, u=None, qid=None, banned=frozenset(), f
     items = []
     for r in rows[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]:
         t = datetime.datetime.fromisoformat(r["created_at"]).strftime("%H:%M")
+        if multi:
+            t = periods.date_label(datetime.datetime.fromisoformat(r["created_at"])) + " " + t
         parts = [t, AUDIENCES.get(r.get("audience"), ""), VIA_LABELS.get(r.get("via"), ""), "事前回答" if r.get("prebaked") else "", r.get("topic") or "", "・".join(x for x in (r.get("tools") or []) if x),
                  f"{len(r.get('answer') or '')}字"]
         meta = '<span class="dot">·</span>'.join(html.escape(x) for x in parts if x)
@@ -1161,39 +1198,109 @@ def _date_tabs(now, start, view, u, f):
     return '<nav class="date-tabs" aria-label="集計日">' + "".join(links) + '</nav>'
 
 
-def render(view, day, page, f=None, u=None, qid=None):
+def _period_errors(start, end, now):
+    # 記録の保持期間は90日。日別キーを使い、期間外の全表走査を避ける。
+    from concurrent.futures import ThreadPoolExecutor
+    day = max(start, (now - datetime.timedelta(days=90)).replace(hour=0, minute=0, second=0, microsecond=0))
+    days = []
+    while day < end:
+        days.append(day.date().isoformat())
+        day += datetime.timedelta(days=1)
+    if not days:
+        return []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(read_errors, days))
+    if any(r is None for r in results):
+        return None
+    return sorted((r for result in results for r in result), key=lambda r: r['at'], reverse=True)
+
+
+def _people_list(d, group):
+    group = group if group in ('registered', 'new', 'active') else 'registered'
+    titles = {'registered': '現在のGoogle登録者', 'new': '選択期間の新規登録者', 'active': '選択期間に利用したGoogle登録者'}
+    people = [p for p in d['people'] if p.get(group)]
+    content = []
+    for person in people:
+        href = html.escape(_url(v='list', d=d['selection'], u=person['identifier']))
+        registered = person.get('registered_at')
+        at = periods.date_label(datetime.datetime.fromisoformat(registered)) if registered else '不明'
+        content.append(f'<a class="user-row" href="{href}"><strong>{html.escape(person["identifier"])}</strong><span>登録日 {at}</span><span>選択期間 {person["questions"]}問 ›</span></a>')
+    missing = group in ('registered', 'new') and d['registered_google'] is None
+    body = ''.join(content) or ('<p>登録情報を取得できませんでした。</p>' if missing else '<p>該当する利用者はいません。</p>')
+    tabs = ''.join(f'<a class="btn" href="{html.escape(_url(v="people", d=d["selection"], g=g, u=d["u"]))}"' + (' aria-current="page"' if group == g else '') + f'>{title}</a>' for g, title in (('registered', '総登録者'), ('new', '新規登録者'), ('active', '利用者')))
+    return f'<div class="card user-directory"><h2>{titles[group]} <small>{"—" if missing else len(people)}人</small></h2><nav>{tabs}</nav>{body}</div>'
+
+
+# 集計に数秒かかるので、押した瞬間にボタンを選択状態へ替えて、読み込み中だと分かるようにする。
+PERIOD_PRESS = html.escape("const a=event.target.closest('a');if(!a)return;this.querySelectorAll('a').forEach(x=>x.removeAttribute('aria-current'));a.setAttribute('aria-current','true');document.querySelector('.period-nav')?.classList.add('loading')")
+
+
+def _period_controls(d, view, u, f, group):
+    mode, start, now = d['period'], d['day'], d['now']
+    def href(m, at):
+        if m == 'all':
+            key = 'all'
+        else:
+            _, s, _ = periods.bounds(m + ':' + at.date().isoformat() if m != 'day' else at.date().isoformat(), now, COST_SINCE)
+            key = periods.key(m, s, now)
+        return html.escape(_url(v=view, d=key, u=u, f=f, g=group if view == 'people' else None))
+    # 単位を替えるときは、今日を含む期間なら今日を、過去の期間ならその初日を起点にする。
+    anchor = now if mode == 'all' or d['end'] >= now else start
+    units = ''.join(f'<a href="{href(key, anchor)}"' + (' aria-current="true"' if key == mode else '') + f'>{label}</a>'
+                    for key, label in (('day', '日'), ('week', '週'), ('month', '月'), ('all', '全期間')))
+    if mode == 'all':
+        nav = '<b>公開から現在まで</b>'
+    else:
+        words = {'day': ('前日', '翌日'), 'week': ('前週', '翌週'), 'month': ('前月', '翌月')}[mode]
+        prev, nxt = periods.shift(mode, start, -1), periods.shift(mode, start, 1)
+        back = (f'<a class="step" href="{href(mode, prev)}" aria-label="{words[0]}">‹</a>' if start > COST_SINCE
+                else '<span class="step off" aria-hidden="true">‹</span>')
+        fwd = (f'<a class="step" href="{href(mode, nxt)}" aria-label="{words[1]}">›</a>' if nxt <= now
+               else '<span class="step off" aria-hidden="true">›</span>')
+        nav = f'{back}<b>{periods.short_label(mode, start, d["end"])}</b>{fwd}'
+    quick = _date_tabs(now, start, view, u, f) if mode == 'day' else ''
+    return (f'<nav class="period-units" aria-label="集計期間" onclick="{PERIOD_PRESS}">{units}</nav>'
+            f'<div class="period-nav">{nav}</div>{quick}')
+
+
+def render(view, day, page, f=None, u=None, qid=None, group="registered"):
     d, hrs, total, rows = report(day, u)
     u = d["u"]
     now, start = d["now"], d["day"]
     ban = _ban_summary(bans(), now)
-    errors = read_errors(start.strftime("%Y-%m-%d"))
-    view = view if view in ("hours", "list", "errors") else "sum"
+    errors = _period_errors(start, d["end"], now)
+    view = view if view in ("hours", "list", "errors", "people") else "sum"
     on = lambda v: " on" if v == view else ""  # noqa: E731
-    follow_today = start.date() == now.date()
+    multi = d["period"] != "day"
+    follow_today = not multi and start.date() == now.date()
     d["follow_today"] = follow_today
-    ds = "" if follow_today else start.strftime("%Y-%m-%d")
-    date_tabs = _date_tabs(now, start, view, u, f)
+    ds = d["selection"]
+    date_tabs = ""
     tabs = "".join(f'<a class="{on(v).strip()}" href="{html.escape(_url(v=None if v == "sum" else v, d=ds, u=u, f=f, q=qid))}">{n}</a>'
-                   for v, n in (("sum", "要約"), ("hours", "1時間ごと"), ("list", "質問の一覧")))
+                   for v, n in (("sum", "要約"), ("hours", "日ごと" if multi else "1時間ごと"), ("list", "質問の一覧")))
     keep = None if view == "sum" else view
-    prev_d = (start - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-    next_d = start + datetime.timedelta(days=1)
-    nxt = (f'<a class="btn" href="{html.escape(_url(v=keep, d="" if next_d.date() == now.date() else next_d.strftime("%Y-%m-%d"), u=u, f=f, q=qid))}">翌日 ›</a>'
-           if next_d <= now else '<a class="btn off">翌日 ›</a>')
-    w = "月火水木金土日"[start.weekday()]
+    controls = _period_controls(d, view, u, f, group)
+    summary_html = _summary_html(d, ban)
+    list_html = _list_html(start, rows, page, f, u, qid, ban["ids"], follow_today, ds, multi)
+    if multi:
+        summary_html = summary_html.replace("この日の", "この期間の").replace("この日に", "この期間に")
+        list_html = list_html.replace("この日の", "この期間の").replace("この日は", "この期間は")
+    error_summary = error_card(errors, ds).replace("この日の", "この期間の" if multi else "この日の")
+    error_list = error_details(errors).replace("この日の", "この期間の" if multi else "この日の")
     return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <meta name="theme-color" content="#ffffff"><title>監視ダッシュボード</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22%23c55a11%22%2F%3E%3Cpath%20d%3D%22M8%2024V17M16%2024V8M24%2024V12%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E"><style>{CSS}</style></head><body data-day="{start:%Y-%m-%d}" data-follow-today="{str(follow_today).lower()}"><div class="wrap">
 <header class="top dashboard-top"><div class="dashboard-title"><h1><span>みのるんエージェント</span> <span>監視ダッシュボード</span></h1><div class="at">日本時間 {now:%-m/%-d}（{"月火水木金土日"[now.weekday()]}）{now:%H:%M:%S} 時点</div></div>
-<a class="btn quiet logout" href="logout">ログアウト</a><div class="day"><a class="btn" href="{html.escape(_url(v=keep, d=prev_d, u=u, f=f, q=qid))}">‹ 前日</a><b>{start:%-m/%-d}（{w}）</b>{nxt}</div></header>
+<a class="btn quiet logout" href="logout">ログアウト</a><div class="day">{controls}</div></header>
 <nav class="tabs">{tabs}</nav>
 {_people_html(d, view, f)}
 {_owner_script()}
-<section id="summary-panel" class="panel{on('sum')}">{error_card(errors, ds)}{_summary_html(d, ban)}</section>
-<div class="cols"><section id="hours-panel" class="panel{on('hours')}">{_hours_html(hrs, total, date_tabs)}</section>
-<section id="list-panel" class="panel{on('list')}">{_list_html(start, rows, page, f, u, qid, ban["ids"], follow_today)}</section></div>
-<section id="errors-panel" class="panel{on('errors')}">{error_details(errors)}</section>
+<section id="summary-panel" class="panel{on('sum')}">{error_summary}{summary_html}</section>
+<div class="cols"><section id="hours-panel" class="panel{on('hours')}">{_hours_html(hrs, total, date_tabs, multi)}</section>
+<section id="list-panel" class="panel{on('list')}">{list_html}</section></div>
+<section id="errors-panel" class="panel{on('errors')}">{error_list}</section>
+<section id="people-panel" class="panel{on('people')}">{_people_list(d, group)}</section>
 <p class="note">質問一覧のモデル費用は、回答・候補生成・判定・要約などの記録済み使用量から計算した概算です。事前回答はモデルを呼ばないため0円。記録がない・不完全な質問は未計測と表示します。サーバー・検索などの費用は含みません。利用者別の費用は時間帯の費用を質問数で按分した目安です（Braveとナレッジベースの検索は記録回数から計算）。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。確定値は AWS Budgets（1日 $30）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
 </div>{REFRESH_SCRIPT}</body></html>"""
 
@@ -1213,6 +1320,8 @@ def as_json(day, u="all"):
                 "model_usd": _model_usd(r)}
     items = [item(r) for r in rows]
     return {
+        "period": d["period"], "period_end": d["end"].isoformat(), "selection": d["selection"],
+        "new_google": d["new_google"],
         "generated_at": now.isoformat(), "day": start.strftime("%Y-%m-%d"), "yen_per_usd": YEN,
         "user_filter": u, "cost_scope": "all", "people": d["people"], "cost_basis": "hourly_question_share",
         "question_model_cost_basis": "recorded_model_usage",
@@ -1220,7 +1329,7 @@ def as_json(day, u="all"):
         "summary": {"questions": d["questions"], "users": d["users"], "first_ms_p50": d["first_p50"],
                     "rejected": d["rejected"], "tools": d["tools"], "cost_usd": d["cost"], "total_usd": d["total"],
                     "feedback": d["feedback"], "pace": d["pace"], "via": d["via"]},
-        "hours": {"total": total, "rows": [{"hour": h["hour"].strftime("%H"), "sessions": h["sessions"], "users": h["users"],
+        "hours": {"total": total, "rows": [{"at": h["hour"].isoformat(), "hour": h["hour"].strftime("%H"), "sessions": h["sessions"], "users": h["users"],
                                             "questions": h["questions"], "usd": h["usd"]} for h in hrs]},
         "questions": items,
         "bans": bans(),
@@ -1400,7 +1509,7 @@ def handler(event, _context):
         page = 1
     if view == "bans":
         return _html(render_bans(q.get("u"), page))
-    return _html(render(view, day, page, q.get("f"), q.get("u"), q.get("q")))
+    return _html(render(view, day, page, q.get("f"), q.get("u"), q.get("q"), q.get("g", "registered")))
 
 CSS += """
 .cost .monthly{grid-column:1/-1;text-align:center;background:#f3f4f6;border-radius:8px;padding:12px 8px;margin-top:4px}
@@ -1418,4 +1527,28 @@ CSS += """
 .error-card{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 20px;margin-bottom:20px;color:var(--ink);flex-wrap:wrap}
 .error-card strong{font-size:28px}.error-card small{font-size:14px}.error-card .warn,#errors-panel .warn{color:var(--warn)}
 #errors-panel .list{max-height:none;overflow:visible}#errors-panel .ans{overflow-wrap:anywhere}
+"""
+
+CSS += """
+header.dashboard-top .day{display:grid;grid-template-columns:auto minmax(0,1fr);width:100%;min-width:0;align-items:center;gap:12px 24px}
+.period-units{display:inline-flex;background:#eef1f5;border-radius:10px;padding:3px;gap:2px;justify-self:start}
+.period-units a{min-width:64px;min-height:38px;display:flex;align-items:center;justify-content:center;padding:0 14px;border-radius:8px;font-size:14px;font-weight:600;color:var(--sub)}
+.period-units a:hover{color:var(--ink)}
+.period-units a[aria-current]{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(16,24,40,.12)}
+.period-nav{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-width:0}
+.period-nav b{font-size:15px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums;padding:0 6px}
+.period-nav .step{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:8px;font-size:22px;line-height:1;color:var(--ink)}
+.period-nav a.step:hover{background:#eef1f5}.period-nav .step.off{color:#d0d5dd}.period-nav.loading{opacity:.35;transition:opacity .15s}
+.day .date-tabs{grid-column:1/-1;max-width:100%;margin:0}
+.people-pair{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.people-pair>a{display:flex;flex-direction:column;align-items:flex-start;min-width:0;color:var(--ink);text-decoration:none;border-radius:6px}
+.people-pair>a:hover{background:#edf2f7}.people-pair span{white-space:normal}.people-pair strong{line-height:36px}
+.people-panel{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr)}
+.user-directory{padding:20px}.user-directory nav{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.user-directory [aria-current=page]{color:var(--accent);font-weight:600}
+.user-row{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:18px 0;border-bottom:1px solid var(--line);font-size:14px;overflow-wrap:anywhere}
+.user-row span{color:var(--sub)}
+@media(max-width:1050px){.people-panel{grid-template-columns:1fr 1fr}.people-stats{grid-column:1/-1}.people-owner{grid-column:auto;display:block}.people-owner button{width:100%}}
+@media(max-width:899px){header.dashboard-top .day{grid-template-columns:1fr;gap:10px}.period-units{display:grid;grid-template-columns:repeat(4,1fr);width:100%}.period-units a{min-width:0;padding:0 4px}.period-nav{justify-content:space-between}.period-nav b{flex:1;min-width:0;font-size:13px}}
+@media(max-width:699px){.people-panel{grid-template-columns:1fr}.people-pair{gap:10px}.user-directory{padding:14px}.user-row{display:grid}}
 """
