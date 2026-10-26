@@ -17,7 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_URL = os.environ.get("ENTRY_URL", "")
-INTERNAL = re.compile(r"search_\w+|get_announcements|show_map|\bnow\b\(|ツールを(使|呼)|知識ベースに|インターセプター")
+INTERNAL = re.compile(r"search_\w+|get_announcements|show_map|\bnow\b\(|ツールを(使|呼)|ナレッジベースに|インターセプター")
 ASKING = re.compile(r"(調べ|取得し|確認し|検索し)ましょうか")
 LINK = re.compile(r"\[([^\]\n]{1,30})\]\((https?://[^\s)]+)\)")
 SYSTEM_LEAK = re.compile(r"# 人柄|# 答える範囲|# ツールの使い方|あなたは「みのるんエージェント」です")

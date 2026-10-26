@@ -1,5 +1,5 @@
 // 最初に出す質問の例。自動生成する knowledge/starters.json と、選定した starters-curated.json を
-// ビルド時に読み込む。知識ベースの外の道具や最新情報を調べる問いはここで管理する。
+// ビルド時に読み込む。ナレッジベースの外のツールや最新情報を調べる問いはここで管理する。
 import byTopic from '../../knowledge/starters.json';
 import curated from '../../knowledge/starters-curated.json';
 

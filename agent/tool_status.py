@@ -38,6 +38,6 @@ def knowledge_label(name: str, question: str, current: str = "") -> str:
     category = next((label for text in (question, current)
                      for pattern, label in KNOWLEDGE_TOPICS if pattern.search(text)), None)
     if category:
-        prefix = "過去の資料で" if name == "search_past" else "知識ベースで"
+        prefix = "過去の資料で" if name == "search_past" else "ナレッジベースで"
         return f"{prefix}{category}を調べています"
-    return "過去の資料を調べています" if name == "search_past" else "知識ベースで参加情報を調べています"
+    return "過去の資料を調べています" if name == "search_past" else "ナレッジベースで参加情報を調べています"

@@ -137,7 +137,7 @@ export class WatchStack extends cdk.Stack {
       ],
     }));
     // 評価の観点は4つ：役に立つか、調べた結果に沿っているか（でっち上げないか）、
-    // 指示（短さ・出典の付け方）を守ったか、道具の選び方。評価の料金は観点の数に比例する
+    // 指示（短さ・出典の付け方）を守ったか、ツールの選び方。評価の料金は観点の数に比例する
     const evaluators = ['Helpfulness', 'Faithfulness', 'InstructionFollowing', 'ToolSelectionAccuracy'];
     const onlineEval = new agentcore.CfnOnlineEvaluationConfig(this, 'OnlineEvaluation', {
       onlineEvaluationConfigName: 'minorun_agent_quality',
@@ -463,7 +463,7 @@ export class WatchStack extends cdk.Stack {
               rt('UserErrors', 'Runtime の呼び出しエラー'), rt('Throttles', 'Runtime の混雑')],
           }),
           new cw.GraphWidget({
-            title: '道具の呼び出しと失敗', width: 12,
+            title: 'ツールの呼び出しと失敗', width: 12,
             left: [tools('Invocations', '呼び出し')],
             right: [tools('SystemErrors', '内部エラー'), tools('UserErrors', '呼び出しエラー')],
           }),

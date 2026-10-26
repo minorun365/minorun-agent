@@ -1,6 +1,6 @@
-# 知識ベースの元
+# ナレッジベースの元
 
-知識ベースに入れる知識の中身（`sources/` と `entries/`）は、このリポジトリに入っていません。日本語の公開記事から自分の言葉で書き直した事実と出典の集まりで、記事の書き手の文章を含むためです。ここには形式と、知識ベースへの書き出し方だけを置きます。
+ナレッジベースに入れる知識の中身（`sources/` と `entries/`）は、このリポジトリに入っていません。日本語の公開記事から自分の言葉で書き直した事実と出典の集まりで、記事の書き手の文章を含むためです。ここには形式と、ナレッジベースへの書き出し方だけを置きます。
 
 ## 構成
 
@@ -13,7 +13,7 @@
 | `sources/app/<id>.json` | このアプリ自体の作り方（`source_type: app`） |
 | `sources/sessions/latest.json` | 公式セッションカタログの全件の控え（`tools/fetch_sessions.py` が作る） |
 | `tools/year_overrides.json` | 記事の開催年と違う年の話をしている事実の、年の付け替え表 |
-| `dist/kb/<年>/<topic>__<種類>.md` | 知識ベースへ入れる書き出し（`tools/build_kb.py` が作る） |
+| `dist/kb/<年>/<topic>__<種類>.md` | ナレッジベースへ入れる書き出し（`tools/build_kb.py` が作る） |
 
 ## 記事1件のファイル
 
@@ -34,7 +34,7 @@
 - `event_year` は記事が扱う re:Invent の開催年、`facts[].year` はその事実が扱う開催年（既定は `event_year`）
 - `usefulness` は参加者向けの知識としての有用度 0〜3。0 は事実なし
 - `time_sensitive` は会場・時刻・価格・ルールなど、年で変わりうる事実なら true
-- `exclude: true` の記事はまとめにも知識ベースにも入れない
+- `exclude: true` の記事はまとめにもナレッジベースにも入れない
 
 記事の文は写さず、事実を1文ずつ自分の言葉で書き直します。書き手の体験や意見は「筆者は〜した」と書き、一般的な事実と区別します。
 
@@ -46,7 +46,7 @@
 {"metadataAttributes": {"year": {"value": {"type": "NUMBER", "numberValue": 2026}, "includeForEmbedding": false}}}
 ```
 
-ツールの Gateway には、この知識ベースを指すターゲットを2つ作り、`year = 2026` と `year < 2026` の絞り込みをそれぞれ固定しています。エージェントからは「2026年を探す」「過去を探す」の2つの道具に見え、答えも2026年の情報と過去の参考を分けて書きます。
+ツールの Gateway には、このナレッジベースを指すターゲットを2つ作り、`year = 2026` と `year < 2026` の絞り込みをそれぞれ固定しています。エージェントからは「2026年を探す」「過去を探す」の2つのツールに見え、答えも2026年の情報と過去の参考を分けて書きます。
 
 ## 使い方
 
@@ -55,6 +55,6 @@ python3 knowledge/tools/collect_candidates.py   # 記事の候補を集める
 python3 knowledge/tools/fetch_bodies.py practical  # 候補の本文を手元へ取る（sources/cache/。git に入れない）
 python3 knowledge/tools/check_extracted.py --fix   # 書式の検査と、事実ごとの年付け
 python3 knowledge/tools/build_entries.py           # 話題ごとのまとめ（人が読む用）
-python3 knowledge/tools/build_kb.py                # 知識ベースへ入れる書き出し
+python3 knowledge/tools/build_kb.py                # ナレッジベースへ入れる書き出し
 python3 knowledge/tools/fetch_sessions.py          # 公式セッションカタログの全件を取り直す
 ```

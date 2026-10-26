@@ -1,4 +1,4 @@
-"""知識ベースの取り込みと、年の絞り込みの確かめ。
+"""ナレッジベースの取り込みと、年の絞り込みの確かめ。
 
   uv run --with boto3 python infra/scripts/knowledge.py ingest   # S3 の kb/ を取り込み直して終わるまで待つ
   uv run --with boto3 python infra/scripts/knowledge.py check    # 質問20問を year=2026 / year<2026 で引き、年の混ざりを数える
@@ -78,7 +78,7 @@ def check(out):
         print(json.dumps(r, ensure_ascii=False))
     print(f"年の混ざり {bad} 件 ／ 2026年が0件だった質問 {empty} 問 ／ {len(QUESTIONS)} 問")
     if bad or empty:
-        raise RuntimeError("知識ベースの検索検査に失敗")
+        raise RuntimeError("ナレッジベースの検索検査に失敗")
 
 
 def sessions():

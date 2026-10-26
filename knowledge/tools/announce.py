@@ -1,9 +1,9 @@
-"""現地からの速報を足す・一覧する・消す（エージェントの道具 get_announcements が読む）。
+"""現地からの速報を足す・一覧する・消す（エージェントのツール get_announcements が読む）。
 
   uv run --with boto3 python knowledge/tools/announce.py add "Venetian のバッジ受け取りが30分待ち" [--url https://...]
   uv run --with boto3 python knowledge/tools/announce.py list
   uv run --with boto3 python knowledge/tools/announce.py remove <番号>
-置き場は S3 の announcements/latest.json。知識ベースの取り込みは要らず、1分以内にエージェントへ届く。
+置き場は S3 の announcements/latest.json。ナレッジベースの取り込みは要らず、1分以内にエージェントへ届く。
 """
 import argparse
 import datetime

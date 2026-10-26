@@ -1,4 +1,4 @@
-"""知識ベース（Bedrock Managed KB）へ入れるファイルを dist/kb/ に書き出す。
+"""ナレッジベース（Bedrock Managed KB）へ入れるファイルを dist/kb/ に書き出す。
 
 1ファイル＝「話題 × 開催年 × 情報の種類」。本文の先頭に何年の情報かを書き、
 同名の .metadata.json（付箋）に year・topic・source_type を入れる。年を付箋に持たせると、

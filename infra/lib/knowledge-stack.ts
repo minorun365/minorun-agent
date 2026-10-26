@@ -17,7 +17,7 @@ import type { Construct } from 'constructs';
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const knowledgeDir = path.join(currentDir, '../../knowledge');
 
-// 知識の置き場：S3（kb/ は知識ベースの元、sessions/ はセッションカタログの控え）と Managed KB。
+// 知識の置き場：S3（kb/ はナレッジベースの元、sessions/ はセッションカタログの控え）と Managed KB。
 // kb/ の中身は knowledge/dist/kb（`python3 knowledge/tools/build_kb.py` で作る）をそのまま写す。
 // 取り込みの開始と検索の確かめは infra/scripts/knowledge.py で行う。
 export class KnowledgeStack extends cdk.Stack {
@@ -121,7 +121,7 @@ export class KnowledgeStack extends cdk.Stack {
       targets: [new targets.LambdaFunction(refresh, { retryAttempts: 0 })],
     });
 
-    // ツールの Gateway（MCP・IAM 認証）が引き受けるロール。知識ベースの検索と Web 検索だけを許す。
+    // ツールの Gateway（MCP・IAM 認証）が引き受けるロール。ナレッジベースの検索と Web 検索だけを許す。
     const toolsRole = new iam.Role(this, 'ToolsGatewayRole', {
       roleName: 'minorun-agent-tools-gateway',
       assumedBy: new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com', {
@@ -140,7 +140,7 @@ export class KnowledgeStack extends cdk.Stack {
       resources: ['*'],
     }));
 
-    // ツールの Gateway。ターゲットは3つで、知識ベースは1つのまま、年の絞り込みを管理者側で固定した
+    // ツールの Gateway。ターゲットは3つで、ナレッジベースは1つのまま、年の絞り込みを管理者側で固定した
     // Retrieve を2つ並べる（エージェントが渡せるのは質問文だけ。年の書き間違いで過去の情報が混ざらない）。
     //   kb-2026  year = 2026（公式＋2026年の参加者情報）
     //   kb-past  year < 2026（過去の参考）
@@ -148,7 +148,7 @@ export class KnowledgeStack extends cdk.Stack {
     // 2026-10-25 に tools_gateway.py で作ったものを `cdkd import` で取り込んだ（URL は変わっていない）。
     this.toolsGateway = new agentcore.CfnGateway(this, 'ToolsGateway', {
       name: 'minorun-agent-tools',
-      description: 'みのるんエージェントの道具（知識ベースの2026年・過去と Web 検索）',
+      description: 'みのるんエージェントのツール（ナレッジベースの2026年・過去と Web 検索）',
       roleArn: toolsRole.roleArn,
       protocolType: 'MCP',
       authorizerType: 'AWS_IAM',

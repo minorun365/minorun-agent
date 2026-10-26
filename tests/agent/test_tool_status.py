@@ -15,7 +15,7 @@ class ToolStatus(unittest.TestCase):
         ):
             with self.subTest(question=question):
                 self.assertEqual(knowledge_label("search_2026", question),
-                                 f"知識ベースで{expected}を調べています")
+                                 f"ナレッジベースで{expected}を調べています")
 
     def test_follow_up_uses_topic_but_new_question_takes_priority(self):
         self.assertIn("食事・休憩", knowledge_label("search_2026", "おすすめは？", "食事"))
@@ -27,5 +27,5 @@ class ToolStatus(unittest.TestCase):
 
     def test_unknown_input_never_echoes_the_question(self):
         question = "private@example.com <script>alert(1)</script>"
-        self.assertEqual(knowledge_label("search_2026", question), "知識ベースで参加情報を調べています")
+        self.assertEqual(knowledge_label("search_2026", question), "ナレッジベースで参加情報を調べています")
         self.assertEqual(knowledge_label("search_past", "続きは？"), "過去の資料を調べています")

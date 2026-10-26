@@ -96,7 +96,7 @@ def _detail(entry):
         f"加点：{image.get('moderation_delta', {}).get('N', '未記録')}・累計：{image.get('moderation_total', {}).get('N', '未記録')}\n"
         f"利用者：{identifier}（{kind}）\n質問の出どころ：{via}\n"
         f"会話ID：{value('pk', '記録なし')}\n質問ID：{value('tid', '記録なし')}\n"
-        f"使った道具：{tools}\n\n"
+        f"使ったツール：{tools}\n\n"
         f"質問：\n{value('question', '記録なし')}\n\n"
         f"回答：\n{value('answer') or '回答の記録なし'}\n\n"
         f"同じ日の利用者の質問一覧：\n{url}"

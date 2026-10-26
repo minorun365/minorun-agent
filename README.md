@@ -6,7 +6,7 @@ re:Invent 2026 は、2026年11月30日（月）から12月4日（金）までラ
 
 <img src="docs/images/screenshots.png" alt="みのるんエージェントの画面（左がPC、右がスマホ）">
 
-このリポジトリは、アプリの作りを読むためのものです。知識ベースに入れる知識の中身は入っていません。
+このリポジトリは、アプリの作りを読むためのものです。ナレッジベースに入れる知識の中身は入っていません。
 
 ## 主な機能
 
@@ -24,7 +24,7 @@ re:Invent 2026 は、2026年11月30日（月）から12月4日（金）までラ
 
 Gateway には Lambda のインターセプターを付けていて、利用者ごとに質問の回数と文字数を数えています。上限を超えた質問は、エージェントを呼ぶ前にその場で断ります。
 
-エージェントは、知識ベースと Web 検索を、もう1つの AgentCore Gateway 越しに呼びます。知識ベースを2026年の情報で引くか、過去の情報で引くかは Gateway 側で固定してあり、エージェントから渡せるのは質問文だけです。
+エージェントは、ナレッジベースと Web 検索を、もう1つの AgentCore Gateway 越しに呼びます。ナレッジベースを2026年の情報で引くか、過去の情報で引くかは Gateway 側で固定してあり、エージェントから渡せるのは質問文だけです。
 
 作りの要点は [docs/design.md](docs/design.md) にまとめてあります。
 
@@ -46,7 +46,7 @@ Gateway には Lambda のインターセプターを付けていて、利用者�
 | agent | エージェント本体 |
 | infra | CDK のスタック、Lambda、スクリプト |
 | web | 画面 |
-| knowledge | 知識ベースの元を作るスクリプト |
+| knowledge | ナレッジベースの元を作るスクリプト |
 | tests | 単体テストと通しのテスト |
 
 知識の形式は [knowledge/README.md](knowledge/README.md) に書いてあります。
@@ -74,19 +74,19 @@ Google ログインを使わなければ、ログインなしで動きます。
 
 初めて作るときは、次の順に実行します。
 
-1. knowledge/sources に知識を置き、知識ベースの元を書き出す
+1. knowledge/sources に知識を置き、ナレッジベースの元を書き出す
 
    ```sh
    python3 knowledge/tools/build_kb.py
    ```
 
-2. 知識ベースと、検索用の Gateway を作る
+2. ナレッジベースと、検索用の Gateway を作る
 
    ```sh
    npx cdkd deploy MinorunKnowledge
    ```
 
-3. 知識ベースを取り込み、セッション情報の控えを取る
+3. ナレッジベースを取り込み、セッション情報の控えを取る
 
    ```sh
    uv run --with boto3 python infra/scripts/knowledge.py ingest

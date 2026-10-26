@@ -1,9 +1,9 @@
-"""画面が最初に出す質問の例（knowledge/starters.json）を、知識ベースの中身から作り直す。
+"""画面が最初に出す質問の例（knowledge/starters.json）を、ナレッジベースの中身から作り直す。
 
 話題ごとに事実の指紋（全文のハッシュ）を持ち、事実が増えた・変わった話題だけを Haiku 5.5 で作り直す。
 材料は新しく取り込んだ事実を優先する（取得日の新しい順に30件＋残りから10件をランダム）ので、
 拡充した分がそのまま質問の例に出る。変わっていない話題は Bedrock を呼ばない。
-知識ベースに入る事実は build_kb.py と同じものを使う（load() を共有）。
+ナレッジベースに入る事実は build_kb.py と同じものを使う（load() を共有）。
 画面（web/src/starters.ts）はこのファイルをビルド時に読み込み、毎回別々の話題から3つ選ぶ。
 使い方: AWS_PROFILE=sandbox uv run --with boto3 python knowledge/tools/build_starters.py [--force] [話題...]
 """
@@ -100,7 +100,7 @@ def main():
             continue
         new[topic] = {"hash": h, "facts": len(rows), "questions": qs}
         changed.append(f"{topic}（{len(rows)}件）: {' / '.join(qs)}")
-    # 知識ベースから消えた話題は落とす
+    # ナレッジベースから消えた話題は落とす
     OUT.write_text(json.dumps(new, ensure_ascii=False, indent=1) + "\n")
     print(f"作り直した話題 {len(changed)} ／ 全 {len(new)} 話題・{sum(len(v['questions']) for v in new.values())} 問")
     for c in changed:

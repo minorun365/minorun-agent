@@ -1,4 +1,4 @@
-"""エージェントのツール。知識ベースと Web 検索はツールの Gateway（MCP・IAM 認証）越しに呼ぶ。
+"""エージェントのツール。ナレッジベースと Web 検索はツールの Gateway（MCP・IAM 認証）越しに呼ぶ。
 鮮度の問いだけは Brave を直接呼ぶ（キーは AgentCore Identity の保管庫 brave から読む）。
 
 ツールの結果はモデルが読みやすい形に整えて返し、画面へ出す情報（地図・照合の予約）は Turn に積む。
@@ -120,7 +120,7 @@ def search_sessions(query: str = "", day: str = "", venue: str = "", session_typ
 
 @tool
 def search_2026(query: str) -> dict:
-    """2026年の re:Invent の情報（公式サイトの案内と、2026年に向けた参加者の記事）を知識ベースから探す。会場・移動・食事・持ち物・参加の実務はまずこれ。
+    """2026年の re:Invent の情報（公式サイトの案内と、2026年に向けた参加者の記事）をナレッジベースから探す。会場・移動・食事・持ち物・参加の実務はまずこれ。
     みのるん本人が公開したプロフィール・現地の過ごし方・よくいる場所・連絡先も含む。「みのるんと会うには？」はまずこれで探す。
 
     Args:
@@ -131,7 +131,7 @@ def search_2026(query: str) -> dict:
 
 @tool
 def search_past(query: str) -> dict:
-    """2025年以前の re:Invent の参加記・資料を知識ベースから探す。答えでは必ず「◯年は〜だった」と年を付けて過去の参考として使う。
+    """2025年以前の re:Invent の参加記・資料をナレッジベースから探す。答えでは必ず「◯年は〜だった」と年を付けて過去の参考として使う。
 
     Args:
         query: 探したい内容を日本語の自然な文で
@@ -141,7 +141,7 @@ def search_past(query: str) -> dict:
 
 @tool
 def search_web(query: str) -> dict:
-    """Web を検索する。知識ベースに無いこと、最新の発表やニュースを調べるときに使う。
+    """Web を検索する。ナレッジベースに無いこと、最新の発表やニュースを調べるときに使う。
 
     Args:
         query: 検索語（日本語でも英語でも可）
@@ -187,7 +187,7 @@ def search_recent(query: str) -> dict:
 
 @tool
 def search_japanese(query: str) -> dict:
-    """期間を絞らず日本語の公開Web情報を探す。人物の名前・通称・ブログ・XのIDを探すとき、知識ベースで答えが足りなければ使う。
+    """期間を絞らず日本語の公開Web情報を探す。人物の名前・通称・ブログ・XのIDを探すとき、ナレッジベースで答えが足りなければ使う。
 
     Args:
         query: 人物名やキーワード。所属や活動分野が分かれば含める
@@ -317,7 +317,7 @@ def search_aws_blog(query: str, japanese: bool = False) -> dict:
             "posts": posts}
 
 
-# 速報は S3 の1ファイル（knowledge/tools/announce.py が書く）。知識ベースの取り込みを待たずに出せるよう直接読み、1分だけ手元に持つ
+# 速報は S3 の1ファイル（knowledge/tools/announce.py が書く）。ナレッジベースの取り込みを待たずに出せるよう直接読み、1分だけ手元に持つ
 _news = {"at": 0.0, "items": []}
 
 

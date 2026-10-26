@@ -55,7 +55,7 @@ class Lookup(unittest.TestCase):
         events = asyncio.run(self._collect(prebaked.play(item, random.Random(2), sleep)))
         self.assertEqual([e['name'] for e in events if e['type'] == 'tool'], ['search_2026', 'search_past'])
         self.assertEqual(''.join(e['text'] for e in events if e['type'] == 'text'), item['answer'])
-        first = sum(waits[:3])  # 道具2つの表示までと、最初の文字までの待ち
+        first = sum(waits[:3])  # ツール2つの表示までと、最初の文字までの待ち
         self.assertTrue(3.2 <= first <= 4.8, first)
 
     @staticmethod
@@ -96,7 +96,7 @@ class Invoke(unittest.IsolatedAsyncioTestCase):
         events, row, nexts = await self.ask('機内で眠るコツは？')
         kinds = [e['type'] for e in events]
         self.assertEqual(kinds[:2], ['topic', 'tool'])
-        self.assertEqual(events[1]['label'], '知識ベースでフライト・機内の過ごし方を調べています')
+        self.assertEqual(events[1]['label'], 'ナレッジベースでフライト・機内の過ごし方を調べています')
         self.assertEqual(kinds[-2:], ['suggest', 'done'])
         self.assertTrue(events[0]['changed'])
         self.assertEqual(events[0]['heading'], '機内での眠り方')

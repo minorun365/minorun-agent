@@ -27,7 +27,7 @@ MAPS = {m["id"] for m in json.loads((ROOT / "agent" / "maps.json").read_text())[
 LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 # 利用者に見せない内部の言葉。アプリの作りを答える話題だけは仕組みの言葉を使ってよい
 BANNED = ("筆者", "著者", "search_", "詳しくは次", "確認役", "照合済み", "調べましょうか")
-INTERNAL = ("知識ベース", "ツール")
+INTERNAL = ("ナレッジベース", "ツール")
 NEXT_COUNT = 4
 
 
@@ -73,8 +73,8 @@ def check_answer(where, a, topic, urls):
             errs.append(f"{where}: 知識に無いURL {url}")
     if re.search(r"(?<!\])\(?https?://", LINK.sub("", text)):
         errs.append(f"{where}: URLを本文にそのまま書いている")
-    # アプリの作りと技術ナレッジの話題では「ツール」「知識ベース」が本来の技術用語なので禁じない
-    words = BANNED + (() if topic == "about-this-app" or topic.startswith("tech-") or topic == "kag-tech" else INTERNAL)
+    # アプリの作りと技術ナレッジの話題では「ツール」「ナレッジベース」が本来の技術用語なので禁じない
+    words = BANNED + (() if topic == "about-this-app" or topic.startswith("tech-") or topic in ("kag-tech", "recent-updates") else INTERNAL)
     errs += [f"{where}: 使わない言葉「{w}」" for w in words if w in text]
     if re.search(r"^#|^\|", text, re.M):
         errs.append(f"{where}: 見出しや表がある")

@@ -183,7 +183,7 @@ def _transcript(messages):
 
 
 def _drop_old_tools(messages, keep=2):
-    """直近 keep 問より前の道具の呼び出しと結果を外し、各問を「質問＋回答の文」だけにする。
+    """直近 keep 問より前のツールの呼び出しと結果を外し、各問を「質問＋回答の文」だけにする。
     要約で履歴を作り直すときだけ呼ぶ（毎問書き換えるとキャッシュを作り直すことになる）。"""
     starts = [i for i, m in enumerate(messages) if _is_question(m)]
     if len(starts) <= keep:

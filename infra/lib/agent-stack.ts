@@ -90,7 +90,7 @@ export class AgentStack extends cdk.Stack {
     this.conversationLog = log;
     log.grantWriteData(role);
 
-    // 道具：ツールの Gateway、セッションカタログの控え（読む・照合結果を書き戻す）
+    // ツール：ツールの Gateway、セッションカタログの控え（読む・照合結果を書き戻す）
     role.addToPolicy(new iam.PolicyStatement({
       actions: ['bedrock-agentcore:InvokeGateway'],
       resources: [props.toolsGateway.gatewayArn],
@@ -99,7 +99,7 @@ export class AgentStack extends cdk.Stack {
       actions: ['s3:GetObject', 's3:PutObject'],
       resources: [`arn:${this.partition}:s3:::${props.knowledgeBucketName}/sessions/*`],
     }));
-    // 現地からの速報（knowledge/tools/announce.py が書き、道具 get_announcements が読む）
+    // 現地からの速報（knowledge/tools/announce.py が書き、ツール get_announcements が読む）
     role.addToPolicy(new iam.PolicyStatement({
       actions: ['s3:GetObject'],
       resources: [`arn:${this.partition}:s3:::${props.knowledgeBucketName}/announcements/*`],

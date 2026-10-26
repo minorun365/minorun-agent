@@ -16,20 +16,20 @@ CloudFront の `/api/chat` は CloudFront Function で Gateway の `/minorun/inv
 
 Google でログインした人（任意）は、インターセプターが Cognito のアクセストークンを確かめて上限を緩め、利用者を区別するハッシュを本文に入れて Runtime へ渡します。
 
-## 道具
+## ツール
 
-| 道具 | 中身 |
+| ツール | 中身 |
 |---|---|
 | `now` | ラスベガスと日本の日時、会期まであと何日か |
 | `search_sessions` | 公式セッションカタログの控えを手元で検索し、回答後に公式 API で照合する |
-| `search_2026`・`search_past` | 知識ベース（2026年／それより前）。年の絞り込みは Gateway 側で固定 |
+| `search_2026`・`search_past` | ナレッジベース（2026年／それより前）。年の絞り込みは Gateway 側で固定 |
 | `search_web` | AgentCore Web Search |
 | `search_recent` | Brave Search で直近1週間に絞った検索（API キーは AgentCore Identity の保管庫から読む） |
 | `search_whats_new`・`search_aws_blog` | AWS の What's New と AWS ブログ |
 | `get_announcements` | 会期中に現地から足す速報（S3 の JSON。`knowledge/tools/announce.py` で足す） |
 | `show_map` | 回答の吹き出しに地図や図を添える（`agent/maps.json`） |
 
-知識ベースと AgentCore Web Search はツールの Gateway（MCP・IAM 認証）越しに呼びます。1回の質問で道具を呼べる回数には上限を付けています。
+ナレッジベースと AgentCore Web Search はツールの Gateway（MCP・IAM 認証）越しに呼びます。1回の質問でツールを呼べる回数には上限を付けています。
 
 ## 回答の形
 
