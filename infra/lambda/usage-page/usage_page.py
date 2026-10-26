@@ -75,7 +75,7 @@ MODELS = {"sonnet": "global.anthropic.claude-sonnet-5-5", "haiku": "global.anthr
 TOKEN_METRICS = {"in": "InputTokenCount", "out": "OutputTokenCount",
                  "cache_read": "CacheReadInputTokenCount", "cache_write": "CacheWriteInputTokenCount"}
 LABELS = {"sonnet": "Sonnet 5.5（回答）", "haiku": "Haiku 5.5（判定・要約・候補）", "runtime": "AgentCore Runtime",
-          "web_search": "Web Search", "brave": "Brave", "kb": "知識ベースの検索"}
+          "web_search": "AgentCoreWebSearch", "brave": "Brave", "kb": "ナレッジベースの検索"}
 REASONS = {"per_minute": "1分の上限", "daily_limit": "1日の上限", "bad_id": "IDの形", "too_long": "文字数", "stopped": "停止中", "banned": "利用停止"}
 FLAG_LABELS = {"off_topic": "目的外", "injection": "指示の書き換え", "personal_info": "個人情報", "bug_report": "不具合の報告", "abuse": "良識の逸脱（利用停止）"}
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
@@ -667,7 +667,7 @@ def _people_html(d, view, f):
     owner_note = "登録あり" if d["owner_registered"] else "未登録"
     registered = f'{d["registered_google"]}<small>人</small>' if d["registered_google"] is not None else '<span>取得できませんでした</span>'
     return f'''<div class="people-panel">
-<div class="people-stats" id="people-counts"><div class="people-label">Google登録者</div><div class="people-pair"><div><span>登録総数</span><strong>{registered}</strong></div><div><span>この日の利用</span><strong>{d["active_google"]}<small>人</small></strong></div></div></div>
+<div class="people-stats" id="people-counts"><div class="people-label">Google登録者</div><div class="people-pair"><div><span>現在の登録総数</span><strong>{registered}</strong></div><div><span>この日の利用</span><strong>{d["active_google"]}<small>人</small></strong></div></div></div>
 <form class="people-filter" id="people-form" method="get"><input type="hidden" name="d" value="{ds}"><input type="hidden" name="v" value="{view}"><input type="hidden" name="f" value="{html.escape(f or '', quote=True)}"><input type="hidden" name="u" id="people-value" value="{html.escape(u, quote=True)}">
 <label class="people-label" for="who">質問の表示対象</label><div class="people-select"><select id="who">{opts}<option value="person"{" selected" if individual else ""}>利用者を指定…</option></select></div>
 <div class="people-search" id="person-search"{"" if individual else " hidden"}><label for="person-query">利用者IDを検索</label><input id="person-query" type="search" autocomplete="off" placeholder="G- または A- のID" value="{html.escape(u if individual else '', quote=True)}"><div class="people-results" id="person-results">{"".join(links)}</div><p class="people-empty" id="person-empty" role="status" hidden>該当する利用者はいません</p></div></form>
@@ -785,7 +785,7 @@ table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:ta
 td,th{padding:9px 16px;border-top:1px solid var(--line);text-align:right;white-space:nowrap}td:first-child,th:first-child{text-align:left}
 th{font-size:12px;color:var(--sub);font-weight:600;border-top:none;padding-top:4px}
 tr.sum td{font-weight:700;background:var(--soft)}tr.zero td{color:#a0a7b4}
-.breakdown td{padding:9px 0}
+.breakdown td{padding:9px 0}.breakdown td:first-child{white-space:normal;overflow-wrap:anywhere}.breakdown h2{padding-left:0}
 .list{padding:0 8px 8px}
 details{border-top:1px solid var(--line)}details:first-of-type{border-top:none}
 summary{list-style:none;padding:11px 8px;cursor:pointer;border-radius:10px}summary:hover{background:#f8fafc}summary::-webkit-details-marker{display:none}
@@ -1051,29 +1051,29 @@ def _summary_html(d, ban=None):
     def metric(label, key, extra=""):
         v = p.get(key)
         return f'<div class="metric{extra}"><div class="k">{label}</div><div class="v">{usd(v) if v is not None else "—"}</div></div>'
-    pace = (metric("公開からの累計", "total_usd") + metric("このペースでの月額", "month_usd", " monthly"))
+    pace = (metric("公開から現在までの累計", "total_usd") + metric("月額予測（直近7日平均）", "month_usd", " monthly"))
     good, bad = d["feedback"]["good"], d["feedback"]["bad"]
     ds = "" if d.get("follow_today") else d["day"].strftime("%Y-%m-%d")
     fb_link = (f'<a href="{html.escape(_url(v="list", d=ds, f="bad", u=d.get("u")))}">良くないを見る ›</a>' if bad
                else (f'<a href="{html.escape(_url(v="list", d=ds, f="rated", u=d.get("u")))}">評価ありを見る ›</a>' if good else "まだ評価なし"))
-    fb_card = (f'<div class="card stat fbcard{" hot" if bad else ""}"><div class="k">回答の評価</div>'
+    fb_card = (f'<div class="card stat fbcard{" hot" if bad else ""}"><div class="k">この日の回答の評価</div>'
                f'<div class="v"><span class="g">{_thumb("good")}{good}</span><span class="b">{_thumb("bad")}{bad}</span></div>'
                f'<div class="s">{fb_link}</div></div>')
     ban = ban or {"total": 0, "new": 0, "day": None}
     ban_sub = (f'<span class="new">新着 {ban["new"]}</span>' if ban["new"] else "")
     ban_card = (f'<a class="card stat bancard{" hot" if ban["new"] else ""}" href="{html.escape(_url(v="bans"))}">'
-                f'<div class="k">利用停止</div><div class="v">{ban["total"]}<small>ID</small></div><div class="s">{ban_sub}</div></a>'
+                f'<div class="k">現在の利用停止</div><div class="v">{ban["total"]}<small>ID</small></div><div class="s">{ban_sub}</div></a>'
                 if ban["total"] else
-                '<div class="card stat bancard"><div class="k">利用停止</div><div class="v">0<small>ID</small></div></div>')
+                '<div class="card stat bancard"><div class="k">現在の利用停止</div><div class="v">0<small>ID</small></div></div>')
     cost_rows = "".join(f"<tr><td>{LABELS[k]}</td><td>{usd(v, 2)}</td></tr>" for k, v in sorted(d["cost"].items(), key=lambda x: -x[1]))
     return f"""<div class="stats">
-<div class="card stat usage"><div class="metrics"><div class="metric"><div class="k">質問</div><div class="v">{d['questions']}</div></div><div class="metric"><div class="k">利用者</div><div class="v">{d['users']}</div></div></div></div>
+<div class="card stat usage"><div class="metrics"><div class="metric"><div class="k">この日の質問</div><div class="v">{d['questions']}</div></div><div class="metric"><div class="k">この日の利用者</div><div class="v">{d['users']}</div></div></div></div>
 <div class="card stat cost"><div class="metrics"><div class="metric{warn}"><div class="k">この日の概算コスト</div><div class="v">{usd(d['total'])}</div></div>{pace}</div></div>
 {fb_card}
 {ban_card}
-<div class="card stat rejected"><div class="k">断った数（全利用）</div><div class="v">{rej}</div></div>
+<div class="card stat rejected"><div class="k">この日に断った数（全利用）</div><div class="v">{rej}</div></div>
 </div>
-<div class="card breakdown"><table>{cost_rows}</table></div>"""
+<div class="card breakdown"><h2>この日の費用内訳</h2><table>{cost_rows}</table></div>"""
 
 
 def _hours_html(rows, total, date_tabs=""):
@@ -1184,7 +1184,7 @@ def render(view, day, page, f=None, u=None, qid=None):
 <section id="summary-panel" class="panel{on('sum')}">{_summary_html(d, ban)}</section>
 <div class="cols"><section id="hours-panel" class="panel{on('hours')}">{_hours_html(hrs, total, date_tabs)}</section>
 <section id="list-panel" class="panel{on('list')}">{_list_html(start, rows, page, f, u, qid, ban["ids"], follow_today)}</section></div>
-<p class="note">質問一覧のモデル費用は、回答・候補生成・判定・要約などの記録済み使用量から計算した概算です。事前回答はモデルを呼ばないため0円。記録がない・不完全な質問は未計測と表示します。サーバー・検索などの費用は含みません。利用者別の費用は時間帯の費用を質問数で按分した目安です（Braveと知識ベースの検索は記録回数から計算）。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。確定値は AWS Budgets（1日 $30）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
+<p class="note">質問一覧のモデル費用は、回答・候補生成・判定・要約などの記録済み使用量から計算した概算です。事前回答はモデルを呼ばないため0円。記録がない・不完全な質問は未計測と表示します。サーバー・検索などの費用は含みません。利用者別の費用は時間帯の費用を質問数で按分した目安です（Braveとナレッジベースの検索は記録回数から計算）。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。確定値は AWS Budgets（1日 $30）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
 </div>{REFRESH_SCRIPT}</body></html>"""
 
 

@@ -38,7 +38,7 @@ class UsagePageTests(unittest.TestCase):
             calc.assert_called_once_with(tomorrow)
             self.assertEqual(data['pace'], pace)
             self.assertIn('$60', m._summary_html(data))
-            self.assertIn('このペースでの月額', m._summary_html(dict(data, pace=None)))
+            self.assertIn('月額予測（直近7日平均）', m._summary_html(dict(data, pace=None)))
 
     def test_pace_sums_since_launch_and_last_week(self):
         now = dt.datetime(2026, 11, 10, 12, tzinfo=m.JST)
@@ -55,7 +55,7 @@ class UsagePageTests(unittest.TestCase):
         self.assertAlmostEqual(pace['week_usd'], 1.0 + 0.005)
         self.assertAlmostEqual(pace['month_usd'], 1.005 / 7 * 30)
         html_ = m._summary_html(dict(m.report()[0], pace=pace))
-        for label in ('公開からの累計', 'このペースでの月額', 'この日の概算コスト'):
+        for label in ('公開から現在までの累計', '月額予測（直近7日平均）', 'この日の概算コスト'):
             self.assertIn(label, html_)
 
     def test_pace_divides_by_days_since_launch(self):
@@ -384,6 +384,7 @@ class BanReviewTests(unittest.TestCase):
         case=UsagePageTests();case.setUp()
         try:
             page=m._summary_html(m.report()[0])
-            self.assertNotIn('直近7日',page)
+            self.assertIn('月額予測（直近7日平均）',page)
+            self.assertEqual(page.count('class="metric'), 7)
             self.assertIn('metric monthly',page)
         finally:case.doCleanups()
