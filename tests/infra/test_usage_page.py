@@ -9,6 +9,7 @@ import types
 import unittest
 from unittest.mock import MagicMock, patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'infra/lambda/usage-page'))
 os.environ.update(PAGE_TOKEN='test-only', LOG_TABLE='test', RUNTIME_ARN='test', TOOLS_GATEWAY_ARN='test')
 with patch.dict(sys.modules, {'boto3': types.SimpleNamespace(client=lambda *a, **k: MagicMock())}):
     spec = importlib.util.spec_from_file_location('usage_page', Path(__file__).resolve().parents[2] / 'infra/lambda/usage-page/usage_page.py')

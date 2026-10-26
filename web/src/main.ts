@@ -3,6 +3,7 @@
 // 返事は /api/chat の SSE を読む。出来事の形は agent/app.py の冒頭に書いてある。
 
 import './surprises.css';
+import { ChatTransport, TransportError as Refused, type Incident } from './transport';
 import { characterGift, previewGift, type LinkPreview } from './link-preview';
 import { bookGift } from './book-preview';
 import { POSES, PoseDirector, PosePicker, type Pose } from './poses';
@@ -425,40 +426,58 @@ async function fly(text: string, fromEl?: HTMLElement) {
 }
 
 // ---- /api/chat：断られたときの文は確認役が返す（理由ごとに画面の場面を変える） ----
-class Refused extends Error {
-  constructor(public status: number, public reason: string, message: string) { super(message); }
-}
-async function* chat(body: Record<string, unknown>): AsyncGenerator<AgentEvent> {
-  if (params.get('limit')) throw new Refused(429, 'daily_limit', '');
-  const res = await fetch('/api/chat', {
-    method: 'POST',
+async function postChat(body: Record<string, unknown>, signal?: AbortSignal) {
+  const response = await fetch('/api/chat', {
+    method: 'POST', signal,
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'x-anon-id': anonId, ...(await authHeader()),
       'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId },
     body: JSON.stringify(body),
   });
-  if (!res.ok || !res.body) {
-    let data: { error?: string; message?: string } = {};
-    try { data = await res.json(); } catch { /* 本文が JSON でないときは決まった文を出す */ }
-    throw new Refused(res.status, data.error ?? 'http', data.message ?? 'いまうまくつながりませんでした。少し時間をおいて、もう一度送ってください。');
+  if (body.warmup && response.status === 403) {
+    const data = await response.clone().json().catch(() => ({}));
+    if (data.error === 'banned' && data.message) showBanned(data.message);
   }
-  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-  let buf = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += value;
-    let i: number;
-    while ((i = buf.indexOf('\n\n')) >= 0) {
-      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
-      for (const line of chunk.split('\n')) {
-        if (!line.startsWith('data:')) continue;
-        try { yield JSON.parse(line.slice(5).trim()) as AgentEvent; } catch { /* 壊れた行は読み飛ばす */ }
+  return response;
+}
+// 記録は順番に送り、復旧通知が最初の通知より先に保存されるのを防ぐ。
+let reporting = Promise.resolve();
+function reportIncident(incident: Incident) {
+  reporting = reporting.then(async () => {
+    await postChat({ client_error: incident }, AbortSignal.timeout(5000));
+  }).catch(() => {});
+}
+const transport = new ChatTransport(postChat, reportIncident);
+async function* chat(body: Record<string, unknown>): AsyncGenerator<AgentEvent> {
+  if (params.get('limit')) throw new Refused(429, 'daily_limit', '');
+  await startup;
+  const res = await transport.question(body);
+  const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = '', completed = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let i: number;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          let event: AgentEvent;
+          try { event = JSON.parse(line.slice(5).trim()) as AgentEvent; } catch { continue; }
+          if (event.type === 'done') completed = true;
+          if (event.type === 'error') transport.failure(body, 'agent');
+          yield event;
+        }
       }
     }
-  }
+    if (!completed) throw new Error('stream ended before done');
+  } catch (e) {
+    transport.failure(body, 'stream');
+    throw e;
+  } finally { reader.releaseLock(); }
 }
 
-// ---- 1回の質問 ----
 const DAILY_LIMIT = '今日はたくさんお話ししたので、続きは明日にしましょう。日本時間0時（ラスベガス7時）に、またお話しできるようにしておきますね。';
 // この会話で話した話題（エージェントが付ける見出し）。上限に達したときのシェア文に使う
 const topicsSeen: string[] = [];
@@ -654,16 +673,7 @@ function rating(tid: string): HTMLElement {
 
 // 会話ごとに新しい入れ物（microVM）が立ち上がるのに数秒かかるので、ページを開いた時点で先に起こしておく
 async function warmUp() {
-  fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-anon-id': anonId, 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId, ...(await authHeader()) },
-    body: JSON.stringify({ warmup: true }),
-  }).then(async (res) => {
-    // 利用停止の人には、開いた時点で告知だけを出して質問できないようにする
-    if (res.status !== 403) return;
-    const data = await res.json().catch(() => ({})) as { error?: string; message?: string };
-    if (data.error === 'banned' && data.message) showBanned(data.message);
-  }).catch(() => { /* 起こせなくても質問はできる */ });
+  await transport.warmup();
 }
 function showBanned(message: string) {
   closeGift(); cancelIdle(); turnVersion++;
@@ -704,7 +714,7 @@ renderSuggest(pickStarters(3));
 fitViewport();
 layout(); requestAnimationFrame(() => requestAnimationFrame(() => stage.classList.add('ready')));
 // Google から戻ってきたときは、先にトークンを受け取ってから先読みする（ログインした人として数えるため）
-handleRedirect().finally(() => { renderMe(); warmUp(); });
+const startup = handleRedirect().catch(() => {}).then(() => { renderMe(); return warmUp(); });
 // 開いて少ししてから、左上にさりげなくあいさつ。最初の質問を送ったら消す
 setTimeout(() => { if (!has('started')) greet.classList.add('on'); }, 1500);
 

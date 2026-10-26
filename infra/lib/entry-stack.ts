@@ -44,6 +44,15 @@ export class EntryStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    const transportErrors = new dynamodb.Table(this, 'TransportErrors', {
+      tableName: 'minorun-agent-transport-errors',
+      partitionKey: { name: 'day', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: 'expires',
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
     const logGroup = new logs.LogGroup(this, 'InterceptorLogs', {
       logGroupName: '/aws/lambda/minorun-agent-interceptor',
       retention: logs.RetentionDays.SIX_MONTHS,
@@ -60,6 +69,7 @@ export class EntryStack extends cdk.Stack {
       logGroup,
       environment: {
         TABLE_NAME: this.usageTable.tableName,
+        ERROR_TABLE: transportErrors.tableName,
         DAILY_LIMIT: '30',
         MAX_CHARS: '1000',
         // ログインした人の上限（2026-10-25 みのるん指示「少し緩く」）
@@ -70,6 +80,7 @@ export class EntryStack extends cdk.Stack {
       },
     });
     this.usageTable.grantReadWriteData(this.interceptor);
+    transportErrors.grant(this.interceptor, 'dynamodb:UpdateItem');
     this.interceptor.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:Query', 'dynamodb:UpdateItem'],
       resources: [props.conversationLog.tableArn],

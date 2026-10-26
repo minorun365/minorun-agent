@@ -228,6 +228,7 @@ export class WatchStack extends cdk.Stack {
       environment: {
         PAGE_TOKEN: props.pageToken,
         LOG_TABLE: 'minorun-agent-conversations',
+        ERROR_TABLE: 'minorun-agent-transport-errors',
         RUNTIME_ARN: runtimeArn,
         RUNTIME_ARNS: cdk.Fn.join(',', [props.agent.legacyRuntime.attrAgentRuntimeArn, props.agent.runtimeV2.attrAgentRuntimeArn]),
         TOOLS_GATEWAY_ARN: props.knowledge.toolsGateway.attrGatewayArn,
@@ -243,6 +244,7 @@ export class WatchStack extends cdk.Stack {
     });
     // 表は名前で指す（MinorunAgent からの参照を増やすと、そちらを出し直すまでこのスタックを出せない）
     dynamodb.Table.fromTableName(this, 'ConversationLogByName', 'minorun-agent-conversations').grant(usagePage, 'dynamodb:Scan');
+    dynamodb.Table.fromTableName(this, 'TransportErrorsByName', 'minorun-agent-transport-errors').grant(usagePage, 'dynamodb:Query');
     usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['cloudwatch:GetMetricData'], resources: ['*'] }));
     usagePage.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],

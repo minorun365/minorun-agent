@@ -32,6 +32,7 @@ import urllib.request
 import uuid
 
 import boto3
+from transport_errors import read_errors, error_card, error_details
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
 TOKEN = os.environ["PAGE_TOKEN"]
@@ -947,7 +948,7 @@ REFRESH_SCRIPT = """<script id="dashboard-refresh">
         if (!response.ok || response.redirected) return;
         next = new DOMParser().parseFromString(await response.text(), 'text/html');
       }
-      const selectors = ['#summary-panel', '#hours-panel', '#list-panel', 'header .at', '#people-counts', 'header .day', 'nav.tabs'];
+      const selectors = ['#summary-panel', '#errors-panel', '#hours-panel', '#list-panel', 'header .at', '#people-counts', 'header .day', 'nav.tabs'];
       if (selectors.some(s => !next.querySelector(s))) return;
       if (next.querySelector('#owner-csrf')) document.querySelector('#owner-csrf').value = next.querySelector('#owner-csrf').value;
       const search = document.querySelector('#person-search');
@@ -1165,7 +1166,8 @@ def render(view, day, page, f=None, u=None, qid=None):
     u = d["u"]
     now, start = d["now"], d["day"]
     ban = _ban_summary(bans(), now)
-    view = view if view in ("hours", "list") else "sum"
+    errors = read_errors(start.strftime("%Y-%m-%d"))
+    view = view if view in ("hours", "list", "errors") else "sum"
     on = lambda v: " on" if v == view else ""  # noqa: E731
     follow_today = start.date() == now.date()
     d["follow_today"] = follow_today
@@ -1188,9 +1190,10 @@ def render(view, day, page, f=None, u=None, qid=None):
 <nav class="tabs">{tabs}</nav>
 {_people_html(d, view, f)}
 {_owner_script()}
-<section id="summary-panel" class="panel{on('sum')}">{_summary_html(d, ban)}</section>
+<section id="summary-panel" class="panel{on('sum')}">{error_card(errors, ds)}{_summary_html(d, ban)}</section>
 <div class="cols"><section id="hours-panel" class="panel{on('hours')}">{_hours_html(hrs, total, date_tabs)}</section>
 <section id="list-panel" class="panel{on('list')}">{_list_html(start, rows, page, f, u, qid, ban["ids"], follow_today)}</section></div>
+<section id="errors-panel" class="panel{on('errors')}">{error_details(errors)}</section>
 <p class="note">質問一覧のモデル費用は、回答・候補生成・判定・要約などの記録済み使用量から計算した概算です。事前回答はモデルを呼ばないため0円。記録がない・不完全な質問は未計測と表示します。サーバー・検索などの費用は含みません。利用者別の費用は時間帯の費用を質問数で按分した目安です（Braveとナレッジベースの検索は記録回数から計算）。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。確定値は AWS Budgets（1日 $30）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
 </div>{REFRESH_SCRIPT}</body></html>"""
 
@@ -1409,4 +1412,10 @@ CSS += """
 .ban-visits span{display:block;font-size:13px;color:var(--sub)}.ban-visits strong{display:block;font-size:34px;font-weight:600}.ban-visits small{margin-left:6px}
 .ban-cause{background:var(--soft);border-radius:10px;padding:18px;margin:24px 0}.ban-cause h2{padding:0}.ban-cause p{overflow-wrap:anywhere}.ban-wrap .meta{font-size:12px}
 .ban-wrap .list{max-height:none;overflow:visible;padding:0}.ban-wrap section>h2{padding-left:0}.ban-cause .ans{background:#fff}
+"""
+
+CSS += """
+.error-card{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 20px;margin-bottom:20px;color:var(--ink);flex-wrap:wrap}
+.error-card strong{font-size:28px}.error-card small{font-size:14px}.error-card .warn,#errors-panel .warn{color:var(--warn)}
+#errors-panel .list{max-height:none;overflow:visible}#errors-panel .ans{overflow-wrap:anywhere}
 """

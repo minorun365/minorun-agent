@@ -54,6 +54,17 @@ async def verify(call, expected):
         assert any(t['metricName']=='AgentErrors' for f in filters['metricFilters'] for t in f['metricTransformations']), 'エラー計測が欠落'
     function = await api('lambda','GetFunctionConfiguration',FunctionName='minorun-agent-usage-page')
     env = function['Environment']['Variables']
+    error_table = 'minorun-agent-transport-errors'
+    interceptor = await api('lambda', 'GetFunctionConfiguration', FunctionName='minorun-agent-interceptor')
+    assert env.get('ERROR_TABLE') == error_table, '監視のエラー記録先が欠落'
+    assert interceptor['Environment']['Variables'].get('ERROR_TABLE') == error_table, '入口のエラー記録先が欠落'
+    table = (await api('dynamodb', 'DescribeTable', TableName=error_table))['Table']
+    assert table['TableStatus'] == 'ACTIVE' and {k['AttributeName'] for k in table['KeySchema']} == {'day', 'id'}, 'エラー記録表が不一致'
+    ttl = (await api('dynamodb', 'DescribeTimeToLive', TableName=error_table))['TimeToLiveDescription']
+    assert ttl.get('AttributeName') == 'expires' and ttl['TimeToLiveStatus'] in ('ENABLED', 'ENABLING'), 'エラー記録の保持期限が欠落'
+    for fn, action in ((function, 'dynamodb:Query'), (interceptor, 'dynamodb:UpdateItem')):
+        permission = await api('iam', 'SimulatePrincipalPolicy', PolicySourceArn=fn['Role'], ActionNames=[action], ResourceArns=[table['TableArn']])
+        assert permission['EvaluationResults'] and all(x['EvalDecision'] == 'allowed' for x in permission['EvaluationResults']), 'エラー記録の権限不足'
     assert env['RUNTIME_ARN']==active['agentRuntimeArn'], '監視先が不一致'
     assert set(env['RUNTIME_ARNS'].split(','))=={r['agentRuntimeArn'] for r in runtimes}, '移行日の費用集計が欠落'
     return {'active':expected,'runtimes':[{'id':r['agentRuntimeId'],'version':r['agentRuntimeVersion'],'platform':r['platformVersion'],'status':r['status']} for r in runtimes], 'gateway':gateway_id,'checks':'routing, shared storage, request interceptor, invoke policy, retention, errors, cost'}

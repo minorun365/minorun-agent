@@ -175,6 +175,43 @@ def _reject(key, reason, status, anon_id=None):
     }
 
 
+def _client_error(key, request, data, anon_id, user, now):
+    """ブラウザで観測した失敗。質問本文・URL・認証情報は保存しない。"""
+    if _count(f"err#{now:%Y-%m-%dT%H:%M}#{anon_id}", now + datetime.timedelta(minutes=2)) > 20:
+        return _respond(key, 429, {"ok": False})
+    if not isinstance(data, dict):
+        return _respond(key, 400, {"ok": False})
+    sid = _header(request, "x-amzn-bedrock-agentcore-runtime-session-id") or ""
+    ident, at = data.get("id"), data.get("at")
+    if (not isinstance(ident, str) or not re.fullmatch(r"[a-f0-9]{32}", ident) or not SESSION_ID.fullmatch(sid)
+            or type(at) not in (int, float) or not abs(at / 1000 - now.timestamp()) <= 300
+            or data.get("phase") not in ("warmup", "question")
+            or data.get("kind") not in ("session_busy", "http", "network", "stream", "agent")
+            or data.get("state") not in ("retrying", "recovered", "failed")
+            or type(data.get("attempts")) is not int or not 1 <= data["attempts"] <= 4
+            or type(data.get("status")) is not int or data["status"] not in ({0} | set(range(400, 600)))):
+        return _respond(key, 400, {"ok": False})
+    day = datetime.datetime.fromtimestamp(at / 1000, JST).strftime("%Y-%m-%d")
+    actor = f"G-{user}" if user else f"A-{_anon(anon_id)}"
+    ident = hashlib.sha256(f"{actor}:{sid}:{ident}".encode()).hexdigest()
+    tid = str(data.get("tid") or "")
+    if not TURN_ID.fullmatch(tid):
+        tid = ""
+    table = boto3.resource("dynamodb").Table(os.environ["ERROR_TABLE"])
+    try:
+        table.update_item(Key={"day": day, "id": ident},
+            UpdateExpression="SET #at = if_not_exists(#at, :at), updated_at = :at, actor = :actor, session_id = :sid, tid = :tid, #phase = :phase, kind = :kind, #status = :status, #state = :state, attempts = :n, expires = :exp",
+            ConditionExpression="attribute_not_exists(attempts) OR (attempts <= :n AND (#state = :retrying OR #state = :state))",
+            ExpressionAttributeNames={"#at": "at", "#phase": "phase", "#status": "status", "#state": "state"},
+            ExpressionAttributeValues={":at": now.isoformat(timespec="milliseconds"), ":actor": actor, ":sid": sid, ":tid": tid,
+                ":phase": data["phase"], ":kind": data["kind"], ":status": data["status"], ":state": data["state"],
+                ":retrying": "retrying", ":n": data["attempts"], ":exp": int(now.timestamp()) + 90 * 86400})
+    except Exception as exc:
+        if getattr(exc, "response", {}).get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+            raise
+    return _respond(key, 200, {"ok": True})
+
+
 def handler(event, context):
     # 受け取った中身は丸ごと書かない（X-Forwarded-For の IP がログに180日残る）
     key, request = _section(event)
@@ -198,6 +235,8 @@ def handler(event, context):
     if hit:
         _seen(hit, body.get("warmup") is True)
         return _reject(key, "banned", 403, anon_id)
+    if "client_error" in body:
+        return _client_error(key, request, body["client_error"], anon_id, user, now)
     if "feedback" in body:
         # 回答の評価。モデルは呼ばず、ここで会話の表に書いて返す（1日の件数には数えず、連打だけ止める）
         if _count(f"fb#{now:%Y-%m-%dT%H:%M}#{anon_id}", now + datetime.timedelta(minutes=2)) > 20:
