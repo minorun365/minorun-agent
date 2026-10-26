@@ -304,11 +304,14 @@ function placeGift(p: { ct: number; ch: number; dockTop: number; side: boolean; 
   if (!activeGift) return;
   const center = p.width / 2 - Math.min(p.width / 6, 110);
   const left = Math.min(p.width / 2 + Math.min(p.width * .07, 45), p.width - 162);
-  const top = p.side ? header.offsetTop + header.offsetHeight + 18 : p.ct + 12;
   gift.hidden = false;
   if (!p.ans || has('busy') || (p.side && !activeGift.image)) {
     gift.hidden = true; giftThanks.hidden = true; return;
   }
+  const minTop = header.offsetTop + header.offsetHeight + 18;
+  // 頭の上へ寄せる。前の配置の高さ制限を外してから、画像の実際の高さを測る。
+  gift.style.maxHeight = '';
+  const top = p.side ? Math.max(minTop, p.ct - 12 - gift.offsetHeight) : p.ct + 12;
   gift.style.left = (p.side ? p.width - gift.offsetWidth - 18 : left) + 'px'; gift.style.top = top + 'px';
   gift.style.maxHeight = Math.max(60, (p.side ? p.ct - 12 : p.dockTop - 8) - top) + 'px';
   if (p.side) {
