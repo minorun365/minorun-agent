@@ -23,7 +23,8 @@ from strands.tools.mcp.mcp_client import MCPClient
 
 import catalog
 from knowledge_context import compact_sources
-from settings import ASSET_BASE, CONFERENCE_DAYS, JST, KNOWLEDGE_BUCKET, LAS_VEGAS, REGION, TOOLS_GATEWAY_URL
+from settings import (ASSET_BASE, CONFERENCE_DAYS, JST, KB_RESULTS, KNOWLEDGE_BUCKET, LAS_VEGAS, REGION,
+                      TOOLS_GATEWAY_URL, WEB_RESULTS)
 
 _mcp = None
 _mcp_lock = threading.Lock()
@@ -65,7 +66,8 @@ def _call(name, args):
 def _kb(target, query):
     data = _call(f"{target}___Retrieve", {"retrievalQuery": {"text": query}})
     rows = []
-    for r in data.get("retrievalResults", []):
+    # Gateway は8件返す。上位だけを渡し、毎問のトークンを減らす
+    for r in data.get("retrievalResults", [])[:KB_RESULTS]:
         rows.append({"year": int(r.get("metadata", {}).get("year", 0)),
                      "text": r.get("content", {}).get("text", "")[:1500]})
     return rows
@@ -138,7 +140,7 @@ def search_web(query: str) -> dict:
     Args:
         query: 検索語（日本語でも英語でも可）
     """
-    data = _call("web___WebSearch", {"query": query, "maxResults": 6})
+    data = _call("web___WebSearch", {"query": query, "maxResults": WEB_RESULTS})
     return {"results": [{"title": r.get("title"), "url": r.get("url"), "published": r.get("publishedDate"),
                          "text": (r.get("text") or "")[:700]} for r in data.get("results", [])]}
 
@@ -155,7 +157,7 @@ def _brave(query):
             raise RuntimeError("workload token が無い")
         _brave_key = IdentityClient(REGION).get_api_key(provider_name="brave", agent_identity_token=token)
     q = urllib.parse.urlencode({"q": query, "country": "JP", "search_lang": "jp", "ui_lang": "ja-JP",
-                                "freshness": "pw", "count": 6})
+                                "freshness": "pw", "count": WEB_RESULTS})
     req = urllib.request.Request("https://api.search.brave.com/res/v1/web/search?" + q,
                                  headers={"Accept": "application/json", "X-Subscription-Token": _brave_key})
     with urllib.request.urlopen(req, timeout=10) as res:

@@ -184,6 +184,38 @@ def _transcript(messages):
     return "\n".join(lines)
 
 
+def _drop_old_tools(messages, keep=2):
+    """直近 keep 問より前の道具の呼び出しと結果を外し、各問を「質問＋回答の文」だけにする。
+    要約で履歴を作り直すときだけ呼ぶ（毎問書き換えるとキャッシュを作り直すことになる）。"""
+    starts = [i for i, m in enumerate(messages) if _is_question(m)]
+    if len(starts) <= keep:
+        return messages
+    boundary = starts[-keep]
+    out = []
+    # 回答の文が無かった問（エラーなど）は、質問が続かないように短い返事を挟む
+    gap = {"role": "assistant", "content": [{"text": "（この質問には回答できませんでした）"}]}
+    for m in messages[:boundary] + [None]:
+        if m is None or _is_question(m):
+            if out and out[-1]["role"] == "user":
+                out.append(gap)
+            if m is not None:
+                out.append(m)
+            continue
+        texts = [c for c in m["content"] if "text" in c]
+        if m["role"] != "assistant" or not texts:
+            continue
+        if out and out[-1]["role"] == "assistant":
+            out[-1] = {"role": "assistant", "content": out[-1]["content"] + texts}
+        elif out:
+            out.append({"role": "assistant", "content": texts})
+    return out + messages[boundary:]
+
+
+def _question_index(messages, n):
+    """n 問目（0始まり）の質問の位置。"""
+    return [i for i, m in enumerate(messages) if _is_question(m)][n]
+
+
 def _after_answer(conv, task_id, turn_start, judged, row):
     """返し終えた後の裏の処理。終わるまで会話の鍵を持ち、次の質問はそれを待つ。"""
     ledger = row.pop("_usage")
@@ -216,8 +248,13 @@ def _after_answer(conv, task_id, turn_start, judged, row):
                 heading = "これまでの会話" if getattr(conv, "topic_start", 0) > 0 else conv.current
                 summary = topics.summarize(heading, _transcript(messages[:cut]))
                 conv.shelf.append({"heading": f"{heading}（前半）", "summary": summary})
-                conv.agent.messages = messages[cut:]
-                conv.topic_start = max(0, getattr(conv, "topic_start", 0) - cut)
+                kept = messages[cut:]
+                topic_start = max(0, getattr(conv, "topic_start", 0) - cut)
+                # 残した部分も、直近2問より前の検索結果は外す。話題の始まりは何問目かで付け直す
+                nth = sum(1 for m in kept[:topic_start] if _is_question(m))
+                kept = _drop_old_tools(kept)
+                conv.agent.messages = kept
+                conv.topic_start = _question_index(kept, nth) if topic_start else 0
                 conv.last_context = None
                 row["context_trimmed"] = True
         if decision == "back":

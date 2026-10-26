@@ -37,8 +37,8 @@ if (!fs.existsSync(tokenFile)) fs.writeFileSync(tokenFile, crypto.randomBytes(18
 const watch = new WatchStack(app, 'MinorunWatch', {
   env, agent, entry, knowledge,
   budgetEmail: process.env.ALERT_EMAIL ?? 'alerts@example.com',  // 予算とアラームの送り先
-  dailyBudgetUsd: 30,
-  alertUsd: 20,
+  dailyBudgetUsd: 10000 / 150,
+  alertUsd: 10000 / 150,
   adminEmail: process.env.ADMIN_EMAIL ?? 'admin@example.com',  // 利用量ページにログインできる1人
   adminBaseUrl: `https://${edge?.domain ?? 'agent.minoruonda.com'}/admin/`,
   pageToken: fs.readFileSync(tokenFile, 'utf-8').trim(),

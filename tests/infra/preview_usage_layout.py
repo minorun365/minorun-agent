@@ -38,6 +38,16 @@ pages = {str(a): (out / f'{a}-sum.html').read_text() for a in (0, 1234.56, 99999
   await loaded;await frame.contentDocument.fonts.ready;
   const doc=frame.contentDocument,errors=[];
   if(doc.documentElement.scrollWidth>width) errors.push('page overflow');
+  const title=doc.querySelector('header h1'), day=doc.querySelector('header .day'), logout=doc.querySelector('header .logout');
+  if(title.textContent!=='みのるんエージェント 監視ダッシュボード') errors.push('title spacing');
+  if(!logout) errors.push('missing separate logout');
+  else {
+   const dr=day.getBoundingClientRect(), lr=logout.getBoundingClientRect(), tr=title.getBoundingClientRect();
+   const hr=doc.querySelector('header').getBoundingClientRect();
+   if(Math.abs((dr.left+dr.right)/2-width/2)>1) errors.push('date is not centered');
+   if(Math.abs(lr.right-hr.right)>1||Math.abs(lr.top-hr.top)>1) errors.push('logout is not top right');
+   if(tr.right>lr.left||dr.top<lr.bottom) errors.push('header controls overlap');
+  }
   const cards=doc.querySelectorAll('.stat');
   if(cards.length!==5||doc.querySelectorAll('.stat.cost').length!==1) errors.push('missing cards');
   const size=frame.contentWindow.getComputedStyle(cards[0].querySelector('.v')).fontSize;

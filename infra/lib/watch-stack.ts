@@ -168,10 +168,8 @@ export class WatchStack extends cdk.Stack {
         budgetLimit: { amount: props.dailyBudgetUsd, unit: 'USD' },
         costTypes: { includeCredit: false, includeRefund: false },
       },
-      notificationsWithSubscribers: [50, 100].map((threshold) => ({
-        notification: { notificationType: 'ACTUAL', comparisonOperator: 'GREATER_THAN', threshold, thresholdType: 'PERCENTAGE' },
-        subscribers: [{ subscriptionType: 'EMAIL', address: props.budgetEmail }],
-      })),
+      // 費用メールは下の概算アラームへ集約し、予算からの重複通知を止める。
+      notificationsWithSubscribers: [],
     });
 
     // スマホ向けの1枚：今日の質問数・利用者数・概算コスト。関数URL＋合言葉（?k=）で開く。
@@ -251,6 +249,15 @@ export class WatchStack extends cdk.Stack {
       resources: [this.formatArn({ service: 'dynamodb', resource: 'table', resourceName: 'minorun-agent-usage' })],
       conditions: { 'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['audience#owner'] } },
     }));
+    // 確認した停止記録だけに既読時刻を保存する。
+    usagePage.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:UpdateItem'],
+      resources: [this.formatArn({ service: 'dynamodb', resource: 'table', resourceName: 'minorun-agent-usage' })],
+      conditions: {
+        'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['ban#a#*', 'ban#u#*'] },
+        'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['pk', 'at', 'reviewed_at'] },
+      },
+    }));
     // 利用停止の一覧（pk=ban#…）を読む。Scan は先頭キーで絞れないので、この表の Scan だけを足す
     usagePage.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:Scan'],
@@ -279,14 +286,25 @@ export class WatchStack extends cdk.Stack {
     alertTopic.addSubscription(new subs.EmailSubscription(props.budgetEmail));
     const costAlarm = new cw.Alarm(this, 'EstimatedCostAlarm', {
       alarmName: 'minorun-agent-estimated-cost',  // 名前を変えると作り直しになるので英字のまま
-      alarmDescription: `今日の概算コストが $${props.alertUsd} を超えた（1日の予算 $${props.dailyBudgetUsd} の手前）`,
+      alarmDescription: `日本時間の当日利用額が1万円超（参考換算1ドル150円・概算）`,
       metric: new cw.Metric({ namespace: NS, metricName: 'EstimatedCostUsd', statistic: 'Maximum', period: cdk.Duration.minutes(15) }),
       threshold: props.alertUsd,
-      comparisonOperator: cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      comparisonOperator: cw.ComparisonOperator.GREATER_THAN_THRESHOLD,
       evaluationPeriods: 1,
-      treatMissingData: cw.TreatMissingData.NOT_BREACHING,
+      treatMissingData: cw.TreatMissingData.IGNORE,
     });
     costAlarm.addAlarmAction(new cwActions.SnsAction(alertTopic));
+    const rollingCostAlarm = new cw.Alarm(this, 'RollingCostAlarm', {
+      alarmName: 'minorun-agent-rolling-30d-cost',
+      alarmDescription: '直近30日間の利用額が3万円超（予測ではなく積算・参考換算1ドル150円・概算）',
+      metric: new cw.Metric({ namespace: NS, metricName: 'Rolling30DayCostUsd', statistic: 'Maximum', period: cdk.Duration.minutes(15) }),
+      threshold: 30000 / 150,
+      comparisonOperator: cw.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: cw.TreatMissingData.IGNORE,
+    });
+    rollingCostAlarm.addAlarmAction(new cwActions.SnsAction(alertTopic));
+
 
     // 保存の瞬間の仕分け（2026-10-25、リアルタイム見張りの案をみのるん承認）：新しい1行ごとに Haiku 5.5 に1回聞き、
     // flag と理由を同じ行へ書き戻す。injection・personal_info は SNS へ（15分に1通へまとめる）

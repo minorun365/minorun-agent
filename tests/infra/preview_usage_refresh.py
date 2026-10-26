@@ -16,7 +16,7 @@ let tick, interval, calls=0, mode='ok';
 window.setInterval=(fn,ms)=>{tick=fn;interval=ms};
 Object.defineProperty(document,'hidden',{get:()=>mode==='hidden'});
 window.fetch=async()=>{calls++; if(mode==='fail')throw new Error('offline');
- return {ok:true,redirected:mode==='redirect',text:async()=>{if(mode==='invalid')return '<html>login</html>';const doc=document.documentElement.cloneNode(true);doc.querySelector('.ans').textContent='更新済みの回答';return doc.outerHTML;}};};
+ return {ok:true,redirected:mode==='redirect',text:async()=>{if(mode==='invalid')return '<html>login</html>';const doc=document.documentElement.cloneNode(true);doc.querySelector('.ans').textContent='更新済みの回答';doc.querySelector('header .at').textContent='更新済みの時刻';doc.querySelector('#summary-panel .v').textContent='99';doc.querySelector('#hours-panel td').textContent='更新済みの合計';return doc.outerHTML;}};};
 </script>'''
 test='''<script>
 (async()=>{
@@ -29,6 +29,9 @@ test='''<script>
  await tick();
  check(document.querySelector('.list details[open]').dataset.row===key,'回答の展開を保持');
  check(document.querySelector('.ans').textContent.includes('更新済み'),'新しい回答を表示');
+ check(document.querySelector('header .at').textContent==='更新済みの時刻','上部の時刻を更新');
+ check(document.querySelector('#summary-panel .v').textContent==='99','要約の件数を更新');
+ check(document.querySelector('#hours-panel td').textContent==='更新済みの合計','1時間ごとの集計を更新');
  check(selector.innerHTML===options,'操作中の選択欄を保持');
  check(help.open,'集計の説明を開いたまま保持');
  help.open=false;selector.blur();const selected=selector.value;await tick();

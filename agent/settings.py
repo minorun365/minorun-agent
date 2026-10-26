@@ -22,3 +22,7 @@ CONFERENCE_DAYS = [datetime.date(2026, 11, 30) + datetime.timedelta(days=i) for 
 
 # 1回の質問で道具を呼べる回数の上限（無限に調べ続けないように）
 MAX_TOOL_CALLS = 8
+
+# 検索結果をモデルへ渡す件数。知識ベースは上位6件で引用元の95%を保つ（2026-10-26 実測）
+KB_RESULTS = int(os.environ.get("KB_RESULTS", "6"))
+WEB_RESULTS = int(os.environ.get("WEB_RESULTS", "4"))

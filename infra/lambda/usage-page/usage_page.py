@@ -7,11 +7,11 @@
   GET <関数URL>?v=hours&d=YYYY-MM-DD      … 1時間ごとの表（会話の数・質問の数・概算コスト）
   GET <関数URL>?v=list&d=YYYY-MM-DD&f=bad&p=2 … 質問の一覧（新しい順・50件ずつ。f で評価あり・良くない・自由入力に絞る）
   GET <関数URL>?k=<合言葉>&format=json&d=YYYY-MM-DD … その日の要約・1時間ごと・質問の一覧・要注意の一覧（JSON）
-  （要約には、公開からの累計・直近7日・直近7日の1日平均×30日の月額ペースも出す）
+  （要約には、公開からの累計・直近7日の1日平均×30日の月額ペースも出す）
   EventBridge から15分おき … 今日の概算コストを MinorunAgent/EstimatedCostUsd に出す（アラームが見る）
 
 正本は1問1行の表 minorun-agent-conversations。数字は概算で、Bedrock のトークン数はアカウント全体
-（同じアカウントの他のアプリも同じモデルを使うと混ざる）。請求の確定値は AWS Budgets（1日 $30）。
+（同じアカウントの他のアプリも同じモデルを使うと混ざる）。通知は当日1万円超・直近30日3万円超（1ドル150円の参考換算）。
 """
 
 import base64
@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import html
 import json
+import math
 import os
 import re
 import secrets
@@ -39,7 +40,7 @@ RUNTIME_ARN = os.environ["RUNTIME_ARN"]
 RUNTIME_ARNS = list(dict.fromkeys(a.strip() for a in os.environ.get("RUNTIME_ARNS", RUNTIME_ARN).split(",") if a.strip()))
 TOOLS_GATEWAY_ARN = os.environ["TOOLS_GATEWAY_ARN"]
 YEN = float(os.environ.get("YEN_PER_USD", "150"))
-ALERT_USD = float(os.environ.get("ALERT_USD", "20"))
+ALERT_USD = float(os.environ.get("ALERT_USD", str(10000 / 150)))
 PAGE_SIZE = 50
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").lower()
 USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
@@ -152,11 +153,41 @@ def _rows(start, end, fields):
 
 
 def _plain(item):
-    out = {}
-    for k, v in item.items():
+    def value(v):
         t, val = next(iter(v.items()))
-        out[k] = [x.get("S") for x in val] if t == "L" else (float(val) if t == "N" else (None if t == "NULL" else val))
-    return out
+        if t == "M":
+            return {k: value(x) for k, x in val.items()}
+        if t == "L":
+            return [value(x) for x in val]
+        if t == "N":
+            return float(val)
+        return None if t == "NULL" else val
+    return {k: value(v) for k, v in item.items()}
+
+
+def _model_usd(row):
+    """完了したモデル使用量を優先し、記録のない事前回答だけ0円で補う。"""
+    usage = row.get("usage")
+    if usage is None and row.get("prebaked") in ("first", "follow"):
+        return 0.0
+    if not isinstance(usage, dict) or usage.get("complete") is not True:
+        return None
+    usd = usage.get("usd")
+    if type(usd) not in (int, float) or not math.isfinite(usd) or usd < 0:
+        return None
+    return usd
+
+
+def _model_cost_label(row):
+    usd = _model_usd(row)
+    if usd is None:
+        return "モデル費用 未計測"
+    yen = usd * YEN
+    if yen == 0:
+        return "モデル費用0円"
+    if yen < 0.01:
+        return "モデル費用0.01円未満"
+    return f"モデル費用 約{yen:,.2f}円"
 
 
 def _tool_costs(rows):
@@ -244,7 +275,7 @@ def hours(day):
 
 def questions(day):
     now, start, end = _day(day)
-    rows = _rows(start, end, ["created_at", "question", "answer", "topic", "tools", "first_ms", "flag", "flag_reason", "anon", "user", "pk", "feedback", "via", "prebaked"])
+    rows = _rows(start, end, ["created_at", "question", "answer", "topic", "tools", "first_ms", "flag", "flag_reason", "anon", "user", "pk", "feedback", "via", "prebaked", "usage"])
     rows.sort(key=lambda r: r["created_at"], reverse=True)
     return now, start, rows
 
@@ -291,7 +322,7 @@ def _identifier(actor):
 
 def bans():
     """利用停止の一覧（回数の表の pk=ban#a#… / ban#u#…）。新しい順"""
-    items, kwargs = [], {"TableName": AUDIENCE_TABLE, "FilterExpression": "begins_with(pk, :p)",
+    items, kwargs = [], {"TableName": AUDIENCE_TABLE, "ConsistentRead": True, "FilterExpression": "begins_with(pk, :p)",
                          "ExpressionAttributeValues": {":p": {"S": "ban#"}}}
     while True:
         page = ddb.scan(**kwargs)
@@ -307,18 +338,220 @@ def bans():
                     "reason": i.get("reason", {}).get("S", ""), "question": i.get("question", {}).get("S", ""),
                     "day": i.get("day", {}).get("S", "") or at[:10], "linked_from": i.get("linked_from", {}).get("S", ""),
                     "views": int(i.get("views", {}).get("N", "0")), "attempts": int(i.get("attempts", {}).get("N", "0")),
-                    "seen_at": i.get("seen_at", {}).get("S", "")})
+                    "seen_at": i.get("seen_at", {}).get("S", ""),
+                    **{k: i.get(k, {}).get("S", "") for k in ("conv_pk", "conv_sk", "reviewed_at")}})
     return sorted(out, key=lambda b: b["at"], reverse=True)
 
 
 def _ban_summary(items, now):
-    """要約カード用：停止中の人数、直近72時間の新着、いちばん新しい停止の日"""
-    recent = [b for b in items if b["at"] and now - datetime.datetime.fromisoformat(b["at"]) < datetime.timedelta(hours=72)]
+    """要約カード用：停止中のID数と、詳細をまだ確認していない停止。"""
+    recent = [b for b in items if not b.get("reviewed_at")]
     seen = [b["seen_at"] for b in items if b.get("seen_at")]
     return {"total": len(items), "new": len(recent), "ids": {b["identifier"] for b in items},
             "day": items[0]["day"] if items else None,
             "views": sum(b.get("views", 0) for b in items), "attempts": sum(b.get("attempts", 0) for b in items),
             "seen_at": max(seen) if seen else None}
+
+
+def _ban_key(identifier):
+    if not isinstance(identifier, str) or not re.fullmatch(r"[AG]-[0-9a-f]{16}", identifier):
+        raise ValueError("invalid identifier")
+    return f"ban#{'a' if identifier[0] == 'A' else 'u'}#{identifier[2:]}"
+
+
+def _ban_history(identifier):
+    """停止したIDに一致する書き込みを、日付を限定せず全ページ読む。"""
+    _ban_key(identifier)
+    value = identifier[2:]
+    fields = ["pk", "sk", "created_at", "question", "answer", "anon", "user", "flag", "flag_reason", "via"]
+    kwargs = {"TableName": TABLE,
+              "ProjectionExpression": ",".join(f"#f{i}" for i in range(len(fields))),
+              "ExpressionAttributeNames": {f"#f{i}": f for i, f in enumerate(fields)}}
+    kwargs["ExpressionAttributeNames"].update({"#anon": "anon"})
+    if identifier.startswith("G-"):
+        kwargs["ExpressionAttributeNames"]["#user"] = "user"
+        kwargs["FilterExpression"] = "#user = :id OR #anon = :legacy"
+        kwargs["ExpressionAttributeValues"] = {":id": {"S": value}, ":legacy": {"S": "user-" + value}}
+    else:
+        kwargs["FilterExpression"] = "#anon = :id"
+        kwargs["ExpressionAttributeValues"] = {":id": {"S": value}}
+    rows = []
+    while True:
+        result = ddb.scan(**kwargs)
+        rows.extend(_plain(r) for r in result["Items"])
+        if not result.get("LastEvaluatedKey"):
+            return sorted(rows, key=lambda r: (r.get("created_at", ""), r.get("sk", "")), reverse=True)
+        kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
+
+
+def _review_ban(event):
+    expected = urllib.parse.urlsplit(PUBLIC_BASE)
+    headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    if headers.get("origin") != f"{expected.scheme}://{expected.netloc}":
+        return _html("forbidden", 403)
+    try:
+        raw = event.get("body") or ""
+        if event.get("isBase64Encoded"):
+            raw = base64.b64decode(raw).decode()
+        data = json.loads(raw)
+        csrf = _verify(data.get("csrf", ""))
+        if not csrf or csrf.get("purpose") != "ban-review" or not csrf.get("at"):
+            return _html("invalid request", 400)
+        pk = _ban_key(csrf.get("identifier"))
+    except (ValueError, TypeError, AttributeError):
+        return _html("invalid request", 400)
+    try:
+        ddb.update_item(TableName=AUDIENCE_TABLE, Key={"pk": {"S": pk}},
+                        UpdateExpression="SET reviewed_at = if_not_exists(reviewed_at, :now)",
+                        ConditionExpression="attribute_exists(pk) AND #at = :at",
+                        ExpressionAttributeNames={"#at": "at"},
+                        ExpressionAttributeValues={":now": {"S": datetime.datetime.now(JST).isoformat(timespec="seconds")},
+                                                   ":at": {"S": csrf["at"]}})
+    except ddb.exceptions.ConditionalCheckFailedException:
+        # 詳細を開いた後に解除・再停止された別の記録を既読にしない。
+        return _html("停止記録が更新されました。ページを読み込み直してください。", 409)
+    return _html("ok")
+
+
+def _ban_time(value):
+    if not value:
+        return "記録なし"
+    try:
+        t = datetime.datetime.fromisoformat(value).astimezone(JST)
+        return f'{t:%Y/%-m/%-d}（{"月火水木金土日"[t.weekday()]}）{t:%H:%M:%S}'
+    except ValueError:
+        return "記録なし"
+
+
+def _ban_cause(b, items):
+    """linked は元の停止へたどる。文面や時刻の近さから原因を推定しない。"""
+    by_key = {_ban_key(x["identifier"]): x for x in items}
+    visited = set()
+    while b.get("source") == "linked" and b.get("linked_from") in by_key:
+        key = b["linked_from"]
+        if key in visited:
+            break
+        visited.add(key)
+        b = by_key[key]
+    return b
+
+
+def _caused_ban(row, cause):
+    return bool(cause.get("conv_pk") and cause.get("conv_sk") and
+                row.get("pk") == cause["conv_pk"] and row.get("sk") == cause["conv_sk"])
+
+
+def _ban_post(row, cause, opened=False):
+    decisive = _caused_ban(row, cause)
+    label = '<span class="alert">停止の決め手になった書き込み</span> · ' if decisive else ""
+    meta = label + html.escape(_ban_time(row.get("created_at")))
+    if row.get("flag_reason"):
+        meta += " · " + html.escape(_mask(row["flag_reason"]))
+    key = html.escape(("cause|" if opened else "history|") + str(row.get("pk", "")) + "|" + str(row.get("sk", "")), quote=True)
+    return (f'<details data-row="{key}"{" open" if opened else ""}>'
+            f'<summary><div class="qbody"><div class="meta">{meta}</div>'
+            f'<div class="q">{html.escape(_mask(row.get("question")))}</div></div></summary>'
+            f'<div class="ans">{_md(_mask(row.get("answer")))}</div></details>')
+
+
+def render_bans(identifier=None, page=1):
+    items = bans()
+    selected = next((b for b in items if b["identifier"] == identifier), None)
+    now = datetime.datetime.now(JST)
+    content, token = [], ""
+    if identifier and not selected:
+        content.append('<p>このIDの利用停止記録はありません。</p>')
+    elif not selected:
+        content.append('<p class="note">IDを選ぶと、停止の理由・書き込み・停止後のアクセスを確認できます。</p>')
+        for b in items:
+            new = '<span class="alert">新着</span>' if not b.get("reviewed_at") else '<span class="meta">確認済み</span>'
+            content.append(f'<a class="ban-person" href="{html.escape(_url(v="bans", u=b["identifier"]))}">'
+                           f'<div class="ban-person-title"><strong>{html.escape(b["identifier"])}</strong>{new}</div>'
+                           f'<div class="meta">停止 {_ban_time(b["at"])}</div>'
+                           f'<p>{html.escape(_mask(b.get("reason")) or ("停止済みのIDとの関連による停止" if b.get("source") == "linked" else "手動停止"))}</p>'
+                           f'<div class="meta">停止後のアクセス {b.get("views", 0)}回 · 送信の試行 {b.get("attempts", 0)}回</div></a>')
+        if not items:
+            content.append('<p>利用停止中のIDはありません。</p>')
+    else:
+        b = selected
+        cause = _ban_cause(b, items)
+        rows = _ban_history(identifier)
+        decisive = next((r for r in rows if _caused_ban(r, cause)), None)
+        # 関連IDで行った元の書き込みも、正確なキーが一致したときだけ表示する。
+        if not decisive and cause is not b and cause.get("conv_pk") and cause.get("conv_sk"):
+            decisive = next((r for r in _ban_history(cause["identifier"]) if _caused_ban(r, cause)), None)
+        content.append(f'<h2 class="ban-id">{html.escape(identifier)}</h2>'
+                       f'<div class="meta">停止 {_ban_time(b["at"])} · {_mask({"auto":"自動停止", "manual":"手動停止", "linked":"関連IDによる停止"}.get(b.get("source"), "停止"))}</div>'
+                       '<div id="review-status" class="meta" role="status">' + ('確認済み' if b.get('reviewed_at') else '確認状態を保存中…') + '</div>')
+        content.append(f'<div class="ban-visits"><div><span>停止後のアクセス</span><strong>{b.get("views", 0)}<small>回</small></strong></div>'
+                       f'<div><span>質問・評価の送信試行</span><strong>{b.get("attempts", 0)}<small>回</small></strong></div></div>'
+                       f'<p class="meta">最終アクセス {_ban_time(b.get("seen_at"))}</p>')
+        content.append('<section class="ban-cause"><h2>停止の判定</h2>'
+                       f'<p>{html.escape(_mask(cause.get("reason")) or "理由の記録なし")}</p>')
+        if cause is not b:
+            content.append(f'<p class="meta">元の停止：<a href="{html.escape(_url(v="bans", u=cause["identifier"]))}">{html.escape(cause["identifier"])}</a></p>')
+        if decisive:
+            content.append(_ban_post(decisive, cause, True))
+        else:
+            content.append('<p class="note">判定元の書き込みを特定できる記録がありません。</p>')
+            if cause.get("question"):
+                content.append(f'<p>停止記録に残っている入力：{html.escape(_mask(cause["question"]))}</p>')
+        content.append('</section>')
+        pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = max(1, min(page, pages))
+        content.append(f'<section><h2>このIDの書き込み <small>全期間・{len(rows)}件・新しい順</small></h2><div class="list">')
+        content.extend(_ban_post(r, cause) for r in rows[(page-1)*PAGE_SIZE:page*PAGE_SIZE])
+        if not rows:
+            content.append('<p>保存された書き込みはありません。</p>')
+        content.append('</div></section>')
+        if pages > 1:
+            content.append('<nav class="pager">')
+            for pnum, label in ((page-1, '‹ 新しい50件'), (page+1, '古い50件 ›')):
+                if 1 <= pnum <= pages:
+                    content.append(f'<a href="{html.escape(_url(v="bans", u=identifier, p=pnum))}">{label}</a>')
+            content.append(f'<span>{page} / {pages}</span></nav>')
+        if not b.get("reviewed_at"):
+            token = _sign({"purpose": "ban-review", "identifier": identifier, "at": b["at"], "exp": time.time() + 3600})
+    return f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>利用停止｜監視ダッシュボード</title><style>{CSS}</style></head>
+<body><main class="wrap ban-wrap"><header class="top"><div><h1>利用停止</h1><div class="at">日本時間 {_ban_time(now.isoformat())} 時点</div></div></header>
+<nav class="ban-nav"><a href="./">‹ 要約へ</a>{'<a href="?v=bans">利用停止の一覧へ</a>' if identifier else ''}</nav>
+<div id="ban-content" data-review="{html.escape(token, quote=True)}">{''.join(content)}</div></main>{BAN_SCRIPT}</body></html>'''
+
+
+BAN_SCRIPT = """<script>
+(() => {
+ let busy = false;
+ async function review() {
+  const root = document.querySelector('#ban-content'), token = root.dataset.review;
+  if (!token || document.hidden) return;
+  try {
+   const r = await fetch('ban-reviewed', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({csrf:token}), signal:AbortSignal.timeout(12000)});
+   if (!r.ok || r.redirected) throw new Error();
+   root.dataset.review = ''; document.querySelector('#review-status').textContent = '確認済み';
+  } catch (_) { document.querySelector('#review-status').textContent = '確認状態を保存できませんでした。再試行します。'; }
+ }
+ async function refresh() {
+  if (busy || document.hidden) return;
+  busy = true;
+  try {
+   const r = await fetch(location.href, {cache:'no-store', signal:AbortSignal.timeout(12000)});
+   if (!r.ok || r.redirected) return;
+   const doc = new DOMParser().parseFromString(await r.text(), 'text/html'), next = doc.querySelector('#ban-content');
+   if (!next) return;
+   const current = document.querySelector('#ban-content'), y = scrollY;
+   const open = new Set([...current.querySelectorAll('details[open]')].map(e => e.dataset.row));
+   current.replaceChildren(...next.childNodes); current.dataset.review = next.dataset.review;
+   current.querySelectorAll('details').forEach(e => { e.open = open.has(e.dataset.row); });
+   document.querySelector('header .at').textContent = doc.querySelector('header .at').textContent;
+   window.scrollTo(0, y); await review();
+  } catch (_) {} finally { busy = false; }
+ }
+ review();
+ window.addEventListener('pageshow', e => { if (e.persisted) refresh(); });
+ document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+ setInterval(refresh, 15000);
+})();
+</script>"""
 
 
 def _owner_actors():
@@ -666,6 +899,16 @@ section.panel{display:none}section.panel.on{display:block}
 
 
 CSS += """
+/* タイトル・日付・ログアウトを別々の領域へ置く。日付は画面の中央にそろえる。 */
+header.dashboard-top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px 20px;align-items:start}
+.dashboard-title{min-width:0}
+header.top h1 span{display:inline-block}
+header.dashboard-top .logout{grid-column:2;grid-row:1;justify-self:end;white-space:nowrap}
+header.dashboard-top .day{grid-column:1/-1;grid-row:2;width:auto;justify-self:center;justify-content:center;gap:10px}
+@media(max-width:599px){
+ header.dashboard-top .logout{font-size:12px;padding:8px 0}
+ header.dashboard-top h1{font-size:20px;line-height:1.5}
+}
 #hours-panel{min-width:0}
 .date-tabs{display:flex;gap:20px;overflow-x:auto;scrollbar-width:thin;margin:0 16px 12px;padding:0;overscroll-behavior-x:contain}
 .date-tabs a{flex:none;white-space:nowrap;padding:10px 0;color:var(--sub);font-size:13px;text-decoration:none;border-bottom:2px solid transparent}
@@ -736,6 +979,8 @@ REFRESH_SCRIPT = """<script id="dashboard-refresh">
     } catch (_) { /* 一時的な通信失敗は、表示を保って次の周期で再試行する。 */ }
     finally { busy = false; }
   }
+  window.addEventListener("pageshow", e => { if (e.persisted) refresh(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   setInterval(refresh, 15000);
 })();
 </script>"""
@@ -803,10 +1048,10 @@ def _summary_html(d, ban=None):
     warn = " warn" if d["total"] >= ALERT_USD else ""
     p = d.get("pace") or {}
 
-    def metric(label, key):
+    def metric(label, key, extra=""):
         v = p.get(key)
-        return f'<div class="metric"><div class="k">{label}</div><div class="v">{usd(v) if v is not None else "—"}</div></div>'
-    pace = (metric("公開からの累計", "total_usd") + metric("直近7日", "week_usd") + metric("このペースでの月額", "month_usd"))
+        return f'<div class="metric{extra}"><div class="k">{label}</div><div class="v">{usd(v) if v is not None else "—"}</div></div>'
+    pace = (metric("公開からの累計", "total_usd") + metric("このペースでの月額", "month_usd", " monthly"))
     good, bad = d["feedback"]["good"], d["feedback"]["bad"]
     ds = "" if d.get("follow_today") else d["day"].strftime("%Y-%m-%d")
     fb_link = (f'<a href="{html.escape(_url(v="list", d=ds, f="bad", u=d.get("u")))}">良くないを見る ›</a>' if bad
@@ -816,10 +1061,10 @@ def _summary_html(d, ban=None):
                f'<div class="s">{fb_link}</div></div>')
     ban = ban or {"total": 0, "new": 0, "day": None}
     ban_sub = (f'<span class="new">新着 {ban["new"]}</span>' if ban["new"] else "")
-    ban_card = (f'<a class="card stat bancard{" hot" if ban["new"] else ""}" href="{html.escape(_url(v="list", d=ban["day"], f="banned", u="all"))}">'
-                f'<div class="k">利用停止</div><div class="v">{ban["total"]}<small>人</small></div><div class="s">{ban_sub}</div></a>'
+    ban_card = (f'<a class="card stat bancard{" hot" if ban["new"] else ""}" href="{html.escape(_url(v="bans"))}">'
+                f'<div class="k">利用停止</div><div class="v">{ban["total"]}<small>ID</small></div><div class="s">{ban_sub}</div></a>'
                 if ban["total"] else
-                '<div class="card stat bancard"><div class="k">利用停止</div><div class="v">0<small>人</small></div></div>')
+                '<div class="card stat bancard"><div class="k">利用停止</div><div class="v">0<small>ID</small></div></div>')
     cost_rows = "".join(f"<tr><td>{LABELS[k]}</td><td>{usd(v, 2)}</td></tr>" for k, v in sorted(d["cost"].items(), key=lambda x: -x[1]))
     return f"""<div class="stats">
 <div class="card stat usage"><div class="metrics"><div class="metric"><div class="k">質問</div><div class="v">{d['questions']}</div></div><div class="metric"><div class="k">利用者</div><div class="v">{d['users']}</div></div></div></div>
@@ -867,8 +1112,7 @@ def _list_html(start, all_rows, page, f, u=None, qid=None, banned=frozenset(), f
         meta = person + '<span class="dot">·</span>' + meta
         if duplicate:
             meta += '<span class="dot">·</span>' + duplicate
-        if "estimated_usd" in r:
-            meta += f'<span class="dot">·</span>按分 約{_yen(r["estimated_usd"])}'
+        meta += '<span class="dot">·</span>' + _model_cost_label(r)
         if identifier in banned:
             meta = '<span class="alert">利用停止中</span><span class="dot">·</span>' + meta
         if r.get("flag") and r["flag"] != "normal":
@@ -932,15 +1176,15 @@ def render(view, day, page, f=None, u=None, qid=None):
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <meta name="theme-color" content="#ffffff"><title>監視ダッシュボード</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22%23c55a11%22%2F%3E%3Cpath%20d%3D%22M8%2024V17M16%2024V8M24%2024V12%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E"><style>{CSS}</style></head><body data-day="{start:%Y-%m-%d}" data-follow-today="{str(follow_today).lower()}"><div class="wrap">
-<header class="top"><div><h1>みのるんエージェント監視ダッシュボード</h1><div class="at">日本時間 {now:%-m/%-d}（{"月火水木金土日"[now.weekday()]}）{now:%H:%M:%S} 時点</div></div>
-<div class="day"><a class="btn quiet" href="logout">ログアウト</a><a class="btn" href="{html.escape(_url(v=keep, d=prev_d, u=u, f=f, q=qid))}">‹ 前日</a><b>{start:%-m/%-d}（{w}）</b>{nxt}</div></header>
+<header class="top dashboard-top"><div class="dashboard-title"><h1><span>みのるんエージェント</span> <span>監視ダッシュボード</span></h1><div class="at">日本時間 {now:%-m/%-d}（{"月火水木金土日"[now.weekday()]}）{now:%H:%M:%S} 時点</div></div>
+<a class="btn quiet logout" href="logout">ログアウト</a><div class="day"><a class="btn" href="{html.escape(_url(v=keep, d=prev_d, u=u, f=f, q=qid))}">‹ 前日</a><b>{start:%-m/%-d}（{w}）</b>{nxt}</div></header>
 <nav class="tabs">{tabs}</nav>
 {_people_html(d, view, f)}
 {_owner_script()}
 <section id="summary-panel" class="panel{on('sum')}">{_summary_html(d, ban)}</section>
 <div class="cols"><section id="hours-panel" class="panel{on('hours')}">{_hours_html(hrs, total, date_tabs)}</section>
 <section id="list-panel" class="panel{on('list')}">{_list_html(start, rows, page, f, u, qid, ban["ids"], follow_today)}</section></div>
-<p class="note">利用者別・質問別の費用は、各時間帯の費用を質問数で按分した目安です（Braveと知識ベースの検索は記録された回数から計算）。個別の実費ではありません。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。確定値は AWS Budgets（1日 $30）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
+<p class="note">質問一覧のモデル費用は、回答・候補生成・判定・要約などの記録済み使用量から計算した概算です。事前回答はモデルを呼ばないため0円。記録がない・不完全な質問は未計測と表示します。サーバー・検索などの費用は含みません。利用者別の費用は時間帯の費用を質問数で按分した目安です（Braveと知識ベースの検索は記録回数から計算）。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。確定値は AWS Budgets（1日 $30）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
 </div>{REFRESH_SCRIPT}</body></html>"""
 
 
@@ -955,11 +1199,13 @@ def as_json(day, u="all"):
                 "topic": r.get("topic"), "tools": r.get("tools") or [], "first_ms": r.get("first_ms"),
                 "answer_chars": len(r.get("answer") or ""), "flag": r.get("flag"), "flag_reason": r.get("flag_reason"),
                 "audience": r["audience"], "identifier": r["identifier"], "estimated_usd": r["estimated_usd"], "question_id": r["question_id"],
-                "anon": r.get("anon"), "feedback": r.get("feedback"), "via": r.get("via"), "prebaked": r.get("prebaked")}
+                "anon": r.get("anon"), "feedback": r.get("feedback"), "via": r.get("via"), "prebaked": r.get("prebaked"),
+                "model_usd": _model_usd(r)}
     items = [item(r) for r in rows]
     return {
         "generated_at": now.isoformat(), "day": start.strftime("%Y-%m-%d"), "yen_per_usd": YEN,
         "user_filter": u, "cost_scope": "all", "people": d["people"], "cost_basis": "hourly_question_share",
+        "question_model_cost_basis": "recorded_model_usage",
         "registered_google": d["registered_google"], "active_google": d["active_google"], "unallocated_usd": d["unallocated_usd"],
         "summary": {"questions": d["questions"], "users": d["users"], "first_ms_p50": d["first_p50"],
                     "rejected": d["rejected"], "tools": d["tools"], "cost_usd": d["cost"], "total_usd": d["total"],
@@ -1070,13 +1316,22 @@ def _message(text, link):
     return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>監視ダッシュボード</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22%23c55a11%22%2F%3E%3Cpath%20d%3D%22M8%2024V17M16%2024V8M24%2024V12%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E"><style>{CSS}</style></head><body><div class="wrap">
-<header class="top"><h1>みのるんエージェント監視ダッシュボード</h1></header><div class="card stat"><p style="margin:0 0 12px">{html.escape(text)}</p>
+<header class="top"><h1><span>みのるんエージェント</span> <span>監視ダッシュボード</span></h1></header><div class="card stat"><p style="margin:0 0 12px">{html.escape(text)}</p>
 <a class="btn" href="{link}">{label}</a></div></div></body></html>"""
 
 
 def _html(body, status=200):
     return {"statusCode": status, "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store",
                                               "X-Robots-Tag": "noindex"}, "body": body}
+
+
+def _rolling_cost(now):
+    """直近30日間の利用量の積算。1時間単位で集計し、予測月額とは分ける。"""
+    start = max(COST_SINCE, (now - datetime.timedelta(days=30)).replace(minute=0, second=0, microsecond=0))
+    metrics = _metrics(start, now, 3600)
+    rows = _rows(start, now, ["created_at", "tools"])
+    _, brave, kb = _tool_costs(rows)
+    return sum(_cost(metrics, None, brave, kb).values())
 
 
 def handler(event, _context):
@@ -1088,7 +1343,12 @@ def handler(event, _context):
             "Metrics": [{"Name": "EstimatedCostUsd", "Unit": "None"}, {"Name": "QuestionsToday", "Unit": "Count"},
                         {"Name": "UsersToday", "Unit": "Count"}]}]},
             "EstimatedCostUsd": round(d["total"], 4), "QuestionsToday": d["questions"], "UsersToday": d["users"]}))
-        return {"total": d["total"]}
+        rolling = _rolling_cost(d["now"])
+        print(json.dumps({"_aws": {"Timestamp": int(d["now"].timestamp() * 1000), "CloudWatchMetrics": [{
+            "Namespace": "MinorunAgent", "Dimensions": [[]],
+            "Metrics": [{"Name": "Rolling30DayCostUsd", "Unit": "None"}]}]},
+            "Rolling30DayCostUsd": round(rolling, 4)}))
+        return {"total": d["total"], "rolling_30d_usd": rolling}
     # CloudFront からは /admin/... のまま届く。関数URLを直接開いたときは公開URLへ送る
     path = event.get("rawPath") or "/"
     prefix = COOKIE_PATH if COOKIE_PATH != "/" else ""
@@ -1116,6 +1376,10 @@ def handler(event, _context):
     session = _verify(_cookies(event).get("up_session", ""))
     if not session or session.get("email") != ADMIN_EMAIL:
         return _redirect(_base(event) + "login")
+    if path == "/ban-reviewed":
+        if event.get("requestContext", {}).get("http", {}).get("method") != "POST":
+            return _html("method not allowed", 405)
+        return _review_ban(event)
     if path == "/owner":
         if event.get("requestContext", {}).get("http", {}).get("method") != "POST":
             return _html("method not allowed", 405)
@@ -1124,4 +1388,18 @@ def handler(event, _context):
         page = int(q.get("p", "1"))
     except ValueError:
         page = 1
+    if view == "bans":
+        return _html(render_bans(q.get("u"), page))
     return _html(render(view, day, page, q.get("f"), q.get("u"), q.get("q")))
+
+CSS += """
+.cost .monthly{grid-column:1/-1;text-align:center;background:#f3f4f6;border-radius:8px;padding:12px 8px;margin-top:4px}
+.ban-wrap{max-width:1000px}.ban-nav{display:flex;gap:24px;margin-bottom:24px;font-size:14px}
+.ban-person{display:block;padding:22px 0;border-bottom:1px solid var(--line);color:var(--ink)}.ban-person:hover{background:var(--soft)}
+.ban-person-title{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}.ban-person p{font-size:14px;margin:8px 0}
+.ban-wrap .alert{color:var(--warn);font-weight:600}.ban-id{padding:0;font-size:20px;overflow-wrap:anywhere}
+.ban-visits{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:24px;padding:18px 0;border-block:1px solid var(--line)}
+.ban-visits span{display:block;font-size:13px;color:var(--sub)}.ban-visits strong{display:block;font-size:34px;font-weight:600}.ban-visits small{margin-left:6px}
+.ban-cause{background:var(--soft);border-radius:10px;padding:18px;margin:24px 0}.ban-cause h2{padding:0}.ban-cause p{overflow-wrap:anywhere}.ban-wrap .meta{font-size:12px}
+.ban-wrap .list{max-height:none;overflow:visible;padding:0}.ban-wrap section>h2{padding-left:0}.ban-cause .ans{background:#fff}
+"""
