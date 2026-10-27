@@ -40,6 +40,33 @@ class IncidentTests(unittest.TestCase):
                 self.assertEqual(out['http']['transformedGatewayResponse']['statusCode'], 400)
         self.table.update_item.assert_not_called()
 
+    def test_timeout_kind_and_hidden_flag_are_stored(self):
+        out = m._client_error('http', self.request, dict(self.data, kind='timeout', phase='warmup', status=0, hidden=True), ANON, None, self.now)
+        self.assertEqual(out['http']['transformedGatewayResponse']['statusCode'], 200)
+        values = self.table.update_item.call_args.kwargs['ExpressionAttributeValues']
+        self.assertEqual(values[':kind'], 'timeout'); self.assertIs(values[':hidden'], True)
+        # hidden は DynamoDB の予約語。名前の置き換えを通さないと本番で ValidationException になる
+        self.assertEqual(self.table.update_item.call_args.kwargs['ExpressionAttributeNames']['#hidden'], 'hidden')
+        self.assertNotIn(' hidden =', self.table.update_item.call_args.kwargs['UpdateExpression'])
+        m._client_error('http', self.request, self.data, ANON, None, self.now)
+        self.assertIs(self.table.update_item.call_args.kwargs['ExpressionAttributeValues'][':hidden'], False)
+        for bad in ('yes', 1, None):
+            with self.subTest(hidden=bad):
+                out = m._client_error('http', self.request, dict(self.data, hidden=bad), ANON, None, self.now)
+                self.assertEqual(out['http']['transformedGatewayResponse']['statusCode'], 400)
+
+    def test_details_show_timeout_hidden_and_silent_warmup(self):
+        base=dict(day='2026-10-28', id='1', at='2026-10-28T21:38:22+09:00', updated_at='2026-10-28T21:38:22+09:00', actor='A-abc', session_id='s'*20, tid='', phase='warmup', kind='timeout', state='failed', status=0, attempts=2)
+        detail=page.error_details([dict(base, hidden=True), dict(base, id='2', kind='network')])
+        self.assertIn('応答待ちの時間切れ', detail); self.assertIn('画面を離れていた：はい', detail)
+        self.assertEqual(detail.count('画面を離れていた'), 1)
+        self.assertEqual(detail.count('画面には出ず'), 2)
+        self.assertNotIn('画面には出ず', page.error_details([dict(base, state='recovered')]))
+        rows_item={'hidden': {'BOOL': False}, **{k: ({'N': str(v)} if isinstance(v, int) else {'S': v}) for k, v in base.items()}}
+        self.table.query.side_effect=[{'Items':[rows_item]}]
+        with patch.object(page.boto3, 'client', return_value=self.table):
+            self.assertIs(page.read_errors('2026-10-28')[0]['hidden'], False)
+
     def test_query_all_pages_and_escape_details(self):
         row=dict(day='2026-10-27', id='1', at='2026-10-27T00:20:00+09:00', updated_at='2026-10-27T00:20:01+09:00', actor='A-abc',session_id='<script>',tid='abcdefgh', phase='question',kind='session_busy',state='failed',status=409,attempts=4)
         encode = lambda r: {k: ({'N': str(v)} if isinstance(v, int) else {'S': v}) for k,v in r.items()}

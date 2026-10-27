@@ -6,7 +6,7 @@ import urllib.parse
 
 import boto3
 
-LABELS = {'session_busy': '会話の起動競合', 'http': 'HTTPエラー', 'network': '通信できない',
+LABELS = {'session_busy': '会話の起動競合', 'http': 'HTTPエラー', 'network': '通信できない', 'timeout': '応答待ちの時間切れ',
           'stream': '回答が途中で切れた', 'agent': '回答処理のエラー'}
 STATES = {'retrying': '再試行中', 'recovered': '自動復旧', 'failed': '未復旧'}
 
@@ -21,7 +21,7 @@ def read_errors(day):
     try:
         while True:
             response = table.query(**args)
-            rows.extend({k: (int(v['N']) if 'N' in v else v.get('S', '')) for k, v in item.items()} for item in response['Items'])
+            rows.extend({k: (int(v['N']) if 'N' in v else v['BOOL'] if 'BOOL' in v else v.get('S', '')) for k, v in item.items()} for item in response['Items'])
             if not response.get('LastEvaluatedKey'):
                 break
             args['ExclusiveStartKey'] = response['LastEvaluatedKey']
@@ -53,7 +53,10 @@ def error_details(rows):
             test_label = ' · 動作テスト' if r['session_id'].startswith('e2e-') else ''
             updated = datetime.datetime.fromisoformat(r['updated_at'])
             updated_text = f'{updated.month}/{updated.day}（{"月火水木金土日"[updated.weekday()]}）{updated:%H:%M:%S}'
+            # 記録を足した 10/28（水）より前の行には hidden が無い
+            hidden = '' if 'hidden' not in r else f'<p>画面を離れていた：{"はい" if r["hidden"] else "いいえ"}</p>'
+            silent = '<p>先読みが失敗しても画面には出ず、質問は通常どおり送られます。</p>' if r['phase'] == 'warmup' and r['state'] != 'recovered' else ''
             user_url = '?'+urllib.parse.urlencode({'v': 'list', 'd': r['day'], 'u': r['actor']})
-            entries.append(f'<details data-row="error-{esc(r["id"])}"><summary><div class="qbody"><div class="q">{esc(LABELS.get(r["kind"], "通信エラー"))} · <span class="{"warn" if r["state"] != "recovered" else ""}">{status}</span></div><div class="meta">{date}{test_label} · {"先読み" if r["phase"] == "warmup" else "質問・回答"}</div></div></summary><div class="ans"><p>HTTP：{esc(r["status"])} ／ 試行：{esc(r["attempts"])}回</p><p>利用者：<a href="{html.escape(user_url)}">{esc(r["actor"])}</a></p><p>会話：{esc(r["session_id"])}</p><p>質問ID：{esc(r.get("tid") or "なし")}</p><p>最終記録：{updated_text}</p></div></details>')
+            entries.append(f'<details data-row="error-{esc(r["id"])}"><summary><div class="qbody"><div class="q">{esc(LABELS.get(r["kind"], "通信エラー"))} · <span class="{"warn" if r["state"] != "recovered" else ""}">{status}</span></div><div class="meta">{date}{test_label} · {"先読み" if r["phase"] == "warmup" else "質問・回答"}</div></div></summary><div class="ans"><p>HTTP：{esc(r["status"])} ／ 試行：{esc(r["attempts"])}回</p><p>利用者：<a href="{html.escape(user_url)}">{esc(r["actor"])}</a></p><p>会話：{esc(r["session_id"])}</p><p>質問ID：{esc(r.get("tid") or "なし")}</p><p>最終記録：{updated_text}</p>{hidden}{silent}</div></details>')
         content = ''.join(entries)
     return '<div class="card"><h2>通信・回答エラー</h2><p class="legend">ブラウザが観測した記録です。自動復旧も残します。通信が完全に切れて記録を送れない場合は含まれません。</p><div class="list">'+content+'</div></div>'

@@ -439,11 +439,15 @@ async function postChat(body: Record<string, unknown>, signal?: AbortSignal) {
   }
   return response;
 }
+// 画面を離れた時刻。アプリの切り替えや画面ロックの間は通信が止まるので、記録に「離れていたか」を添えて回線の不調と分ける
+let hiddenAt = document.hidden ? Date.now() : 0;
+document.addEventListener('visibilitychange', () => { if (document.hidden) hiddenAt = Date.now(); });
 // 記録は順番に送り、復旧通知が最初の通知より先に保存されるのを防ぐ。
 let reporting = Promise.resolve();
 function reportIncident(incident: Incident) {
+  const hidden = document.hidden || hiddenAt >= incident.at;
   reporting = reporting.then(async () => {
-    await postChat({ client_error: incident }, AbortSignal.timeout(5000));
+    await postChat({ client_error: { ...incident, hidden } }, AbortSignal.timeout(5000));
   }).catch(() => {});
 }
 const transport = new ChatTransport(postChat, reportIncident);
@@ -473,6 +477,8 @@ async function* chat(body: Record<string, unknown>): AsyncGenerator<AgentEvent> 
     }
     if (!completed) throw new Error('stream ended before done');
   } catch (e) {
+    // 終わりの合図まで届いていれば回答は揃っている。その後の切断は失敗に数えない
+    if (completed) return;
     transport.failure(body, 'stream');
     throw e;
   } finally { reader.releaseLock(); }
@@ -596,6 +602,11 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link') {
       limitShare = `#みのるんエージェント に${topicsSeen.slice(-2).join('や') || 're:Invent'}のことなどたくさん質問できて大満足！みんなも使ってみてね。\n${location.origin}/`;
     } else if (followingUp && raw) {
       seeking = '追加で調べようとしましたが、うまくいきませんでした。'; render(false);
+    } else if (refused.reason === 'network' && raw.trim()) {
+      // 回答の途中で通信が切れた。届いた分は消さず、途中までかもしれないことを添える
+      const note = document.createElement('p'); note.className = 'seeking';
+      note.textContent = '通信が途切れたため、回答が途中で止まっているかもしれません。';
+      extras.push(note); render(false);
     } else {
       await open(); raw = refused.message; answer.classList.add('oops'); render(false);
     }
