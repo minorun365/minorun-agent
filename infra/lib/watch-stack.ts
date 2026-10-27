@@ -389,20 +389,6 @@ export class WatchStack extends cdk.Stack {
       }),
       threshold: 1, comparisonOperator: gte, evaluationPeriods: 1, treatMissingData: cw.TreatMissingData.NOT_BREACHING,
     });
-    // 日本時間の1〜6時台（UTC の16〜21時台）は、質問が無くても鳴らさないよう 1 に置き換える
-    alarm('NoQuestionsAlarm', '1時間質問が通っていない', '確認役を通った質問が1時間0件（日本時間の1〜6時台は除く）。画面か入口が止まっていないか確かめる', {
-      metric: new cw.MathExpression({
-        expression: 'IF(HOUR(f) >= 16 AND HOUR(f) <= 21, 1, f)', label: '通った質問（夜間は1）', period: cdk.Duration.hours(1),
-        usingMetrics: {
-          f: new cw.MathExpression({
-            expression: 'FILL(p, 0)', period: cdk.Duration.hours(1),
-            usingMetrics: { p: new cw.Metric({ namespace: NS, metricName: 'Passed', statistic: 'Sum', period: cdk.Duration.hours(1) }) },
-          }),
-        },
-      }),
-      threshold: 1, comparisonOperator: cw.ComparisonOperator.LESS_THAN_THRESHOLD, evaluationPeriods: 1,
-      treatMissingData: cw.TreatMissingData.BREACHING,
-    });
 
     // ダッシュボード（1時間ごと）
     const hour = cdk.Duration.hours(1);
