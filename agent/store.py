@@ -25,12 +25,18 @@ EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # 日本の番号（0 か +81 で始まる）と、北米の 3-3-4 の形。日付（2026-12-02）や時刻は当たらない
 PHONE_JP = re.compile(r"(?<![\d-])(?:\+81[-\s]?\d{1,4}|0\d{1,4})[-\s]?\d{1,4}[-\s]?\d{3,4}(?![\d-])")
 PHONE_US = re.compile(r"(?<![\d-])(?:\+1[-\s]?)?\(?\d{3}\)?[-\s.]\d{3}[-\s.]\d{4}(?![\d-])")
+# URL の中の数字の並び（PR TIMES の記事番号など）を電話番号と取り違えないよう、URL は伏せずに残す
+URL = re.compile(r"(https?://[^\s)\]>」』]+)")
+
+
+def _redact_plain(text):
+    text = EMAIL.sub("[メールアドレス]", text)
+    text = PHONE_JP.sub("[電話番号]", text)
+    return PHONE_US.sub("[電話番号]", text)
 
 
 def redact(text):
-    text = EMAIL.sub("[メールアドレス]", text or "")
-    text = PHONE_JP.sub("[電話番号]", text)
-    return PHONE_US.sub("[電話番号]", text)
+    return "".join(part if i % 2 else _redact_plain(part) for i, part in enumerate(URL.split(text or "")))
 
 
 def save_snapshot(actor, session, messages, state):
