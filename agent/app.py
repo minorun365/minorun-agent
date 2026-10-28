@@ -46,6 +46,7 @@ from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN
 app = BedrockAgentCoreApp()
 
 LABELS = {
+    "fetch_url": "ページの本文を読んでいます",
     "now": "日時を確かめています",
     "search_sessions": "公式カタログを調べています",
     "search_2026": "2026年の情報を調べています",

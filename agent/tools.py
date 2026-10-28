@@ -22,6 +22,7 @@ from strands import tool
 from strands.tools.mcp.mcp_client import MCPClient
 
 import catalog
+from url_reader import read_url
 from knowledge_context import compact_sources, mark_fragments
 from settings import (ASSET_BASE, CONFERENCE_DAYS, JST, KB_RESULTS, KNOWLEDGE_BUCKET, LAS_VEGAS, REGION,
                       TOOLS_GATEWAY_URL, WEB_RESULTS)
@@ -53,6 +54,7 @@ class Turn:
         self.tools_used = []
         self.x_calls = 0
         self.x_usage = []
+        self.url_calls = 0
         # 保管庫の鍵を読むための通行証。Runtime が質問ごとにヘッダーで渡す
         self.workload_token = None
 
@@ -373,4 +375,18 @@ image_catalog_description = "\n画像一覧：\n" + "\n".join(
     for m in MAPS)
 show_map = tool(description=show_map.__doc__.split("Args:")[0].strip() + image_catalog_description)(show_map)
 
-ALL = [now, search_sessions, search_2026, search_past, search_web, search_recent, search_japanese, search_x_users, search_x_posts, search_whats_new, search_aws_blog, get_announcements, show_map]
+@tool
+async def fetch_url(url: str) -> dict:
+    """指定された公開URLの本文を読み、内容の確認や短い要約に使う。検索の抜粋ではなくページを直接取得する。HTML・テキスト対応。ログインや画像だけの資料には対応しない。
+
+    Args:
+        url: 利用者が渡した、または検索結果にあるHTTP(S)のURL
+    """
+    turn = Turn.current
+    if turn is None or turn.url_calls >= 2:
+        return {"status": "turn_limit", "note": "この質問でのURL取得上限です"}
+    turn.url_calls += 1
+    return await read_url(url)
+
+
+ALL = [now, search_sessions, search_2026, search_past, search_web, search_recent, search_japanese, search_x_users, search_x_posts, search_whats_new, search_aws_blog, get_announcements, show_map, fetch_url]

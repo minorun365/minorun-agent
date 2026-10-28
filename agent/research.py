@@ -6,6 +6,7 @@ import logging
 import topics
 
 SEARCH_TOOLS = frozenset({
+    "fetch_url",
     "search_sessions", "search_2026", "search_past", "search_web", "search_recent",
     "search_whats_new", "search_aws_blog", "get_announcements",
     "search_japanese", "search_x_users", "search_x_posts",
