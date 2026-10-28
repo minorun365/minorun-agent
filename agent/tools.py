@@ -90,8 +90,9 @@ def now() -> dict:
     else:
         phase = f"会期 {CONFERENCE_DAYS.index(day) + 1} 日目"
     week = "月火水木金土日"
+    zone_label = "太平洋夏時間" if lv.dst() else "太平洋標準時"
     return {"japan": f"{jst:%Y-%m-%d}（{week[jst.weekday()]}） {jst:%H:%M}",
-            "las_vegas": f"{lv:%Y-%m-%d}（{week[lv.weekday()]}） {lv:%H:%M}（太平洋標準時）",
+            "las_vegas": f"{lv:%Y-%m-%d}（{week[lv.weekday()]}） {lv:%H:%M}（{zone_label}）",
             "conference": phase,
             "conference_days": "11/30（月）〜12/4（金）、ラスベガス時間"}
 

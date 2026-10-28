@@ -2,6 +2,7 @@
 
 import datetime
 import os
+from zoneinfo import ZoneInfo
 
 REGION = os.environ.get("AWS_REGION", "us-west-2")
 MODEL_MAIN = os.environ.get("MODEL_MAIN", "global.anthropic.claude-sonnet-5-5")
@@ -16,8 +17,8 @@ LOG_TABLE = os.environ.get("LOG_TABLE", "")
 ASSET_BASE = os.environ.get("ASSET_BASE", "/assets")
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
-# 会期中のラスベガスは太平洋標準時（夏時間は 11/1 に終わっている）
-LAS_VEGAS = datetime.timezone(datetime.timedelta(hours=-8))
+# 会期前後も使うため、夏時間の切り替えを日付から判定する。
+LAS_VEGAS = ZoneInfo("America/Los_Angeles")
 CONFERENCE_DAYS = [datetime.date(2026, 11, 30) + datetime.timedelta(days=i) for i in range(5)]
 
 # 1回の質問でツールを呼べる回数の上限（無限に調べ続けないように）
