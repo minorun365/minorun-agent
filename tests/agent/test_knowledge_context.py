@@ -2,7 +2,7 @@ import copy
 import json
 import unittest
 
-from knowledge_context import compact_sources
+from knowledge_context import compact_sources, mark_fragments
 
 
 class KnowledgeContext(unittest.TestCase):
@@ -39,6 +39,26 @@ class KnowledgeContext(unittest.TestCase):
                 {"year": 2026, "text": self.SOURCE}]
         result = compact_sources(rows)
         self.assertIn("\n独立した事実。"+unique, result["results"][0]["text"])
+
+
+class MarkFragments(unittest.TestCase):
+    # 本番で検索1位に来た形：主語の入った前半が別の断片に切られている
+    FRAGMENT = ("陶芸・手品が好き。（年で変わりうる） 出典: しらかばさん（@shirakaba）（本人のXプロフィール、公開日不明） "
+                "https://x.com/shirakaba\n- [2026年] つばめさんは架空の参加者。 出典: つばめさん https://x.com/tsubame")
+
+    def test_fragment_names_the_source_of_its_line(self):
+        [row] = mark_fragments([{"year": 2026, "text": self.FRAGMENT}])
+        self.assertTrue(row["text"].startswith("[前の行の途中から。この文は「しらかばさん（@shirakaba）"))
+        self.assertTrue(row["text"].endswith(self.FRAGMENT))
+        self.assertEqual(row["year"], 2026)
+
+    def test_whole_lines_and_citation_only_heads_are_unchanged(self):
+        rows = [{"text": "- [2026年] しらかばさんは陶芸が好き。 出典: しらかばさん https://x.com/s"},
+                {"text": "# 見出し\n\nこの文書は 2026年の情報です。"},
+                {"text": "出典: しらかばさん https://x.com/s\n- [2026年] つばめさんは架空。"},
+                {"text": "出典の種類や著者名は、各行が述べる対象を表すものではありません。"},
+                {"text": "出典の無い断片"}]
+        self.assertEqual(mark_fragments(rows), rows)
 
 
 if __name__ == "__main__":

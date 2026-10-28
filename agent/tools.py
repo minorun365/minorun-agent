@@ -22,7 +22,7 @@ from strands import tool
 from strands.tools.mcp.mcp_client import MCPClient
 
 import catalog
-from knowledge_context import compact_sources
+from knowledge_context import compact_sources, mark_fragments
 from settings import (ASSET_BASE, CONFERENCE_DAYS, JST, KB_RESULTS, KNOWLEDGE_BUCKET, LAS_VEGAS, REGION,
                       TOOLS_GATEWAY_URL, WEB_RESULTS)
 
@@ -126,7 +126,7 @@ def search_2026(query: str) -> dict:
     Args:
         query: 探したい内容を日本語の自然な文で（例: バッジの受け取り場所）
     """
-    return {"year": "2026年の情報", **compact_sources(_kb("kb-2026", query))}
+    return {"year": "2026年の情報", **compact_sources(mark_fragments(_kb("kb-2026", query)))}
 
 
 @tool
@@ -136,7 +136,7 @@ def search_past(query: str) -> dict:
     Args:
         query: 探したい内容を日本語の自然な文で
     """
-    return {"year": "2025年以前の情報（過去の参考）", **compact_sources(_kb("kb-past", query))}
+    return {"year": "2025年以前の情報（過去の参考）", **compact_sources(mark_fragments(_kb("kb-past", query)))}
 
 
 @tool
