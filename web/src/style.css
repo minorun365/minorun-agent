@@ -78,16 +78,8 @@ body{position:absolute;inset:0;overflow:hidden;font-family:-apple-system,BlinkMa
 .bubble p{margin:0 0 .55em}
 .bubble b{font-weight:700;background:linear-gradient(transparent 64%,var(--mark) 64%)}
 .bubble .share{display:block;flex:none;white-space:nowrap;word-break:normal;text-align:right;font-size:12.5px;color:var(--accent);text-decoration:none;font-weight:600;margin-top:6px}
-.bubble .foot{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:8px}
+.bubble .foot{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:8px}
 .bubble .foot .share{margin:0}
-.rate{display:flex;align-items:center;gap:2px;min-width:0}
-.rate button{flex:none;border:0;background:none;padding:7px;margin:-7px 0;color:#b4b9c2;cursor:pointer;border-radius:999px;line-height:0;-webkit-tap-highlight-color:transparent;transition:color .2s,opacity .2s}
-.rate button.down svg{transform:scale(-1,-1)}
-.rate button[aria-pressed=true]{color:var(--ink)}
-.rate button[aria-pressed=true] svg{fill:currentColor}
-.rate[data-v=good] button[data-v=bad],.rate[data-v=bad] button[data-v=good]{opacity:.3}
-.rate .thx{display:none;font-size:11.5px;color:var(--mut);margin-left:6px;opacity:0;transition:opacity .3s}
-.rate.thanks .thx{display:inline;opacity:1}
 .bubble .seeking{margin:.4em 0 0;font-size:13px;color:var(--mut)}
 .caret{display:inline-block;width:.45em;height:1em;vertical-align:-2px;margin-left:2px;background:currentColor;opacity:.4;animation:blink 1s steps(2) infinite}
 @keyframes blink{50%{opacity:0}}

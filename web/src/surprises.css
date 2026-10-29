@@ -11,8 +11,6 @@
 .surprise .picture{border:0;padding:0;background:none;width:100%;display:block}
 .surprise img{display:block;width:100%;height:auto;margin-bottom:7px}
 .surprise.photo h3{margin-right:0;font-size:12px}
-.surprise-thanks{position:absolute;z-index:4;padding:6px 10px;border-radius:18px;background:var(--card);color:var(--ink);box-shadow:0 3px 16px #2222;font-size:13px;white-space:nowrap}
-.surprise-thanks[hidden]{display:none}
 @keyframes gift-in{from{opacity:0;translate:0 8px}to{opacity:1;translate:0 0}}
 @media(prefers-reduced-motion:reduce){.surprise{animation:none}.stage.ready .chara{transition:none}}
 
@@ -34,8 +32,7 @@
 /* 狭い左右配置では画像だけを残す。文字の付箋は抽選・表示とも控える。 */
 .stage.side .surprise.photo h3,
 .stage.side .surprise.photo strong,
-.stage.side .surprise.photo p,
-.stage.side .surprise-thanks{display:none}
+.stage.side .surprise.photo p{display:none}
 .stage.side .surprise img{margin-bottom:0}
 
 /* リンクの当たり判定を余白まで広げ、閉じるボタンはその上へ置く。 */

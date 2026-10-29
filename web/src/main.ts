@@ -283,9 +283,8 @@ zoom.addEventListener('wheel', (e) => {
 // ---- ときどき出る付箋 ----
 const gift = document.createElement('aside'); gift.className = 'surprise'; gift.hidden = true;
 gift.setAttribute('aria-label', 'みのるんのおまけ');
-const giftThanks = document.createElement('span'); giftThanks.className = 'surprise-thanks'; giftThanks.hidden = true;
-giftThanks.textContent = 'うれしいです！'; stage.append(gift, giftThanks);
-let activeGift: Surprise | undefined, giftState: GiftState = freshState(), giftTimer = 0;
+stage.append(gift);
+let activeGift: Surprise | undefined, giftState: GiftState = freshState();
 let currentTopic = '', expoDepth = 0, currentGiftCandidates: Surprise[] = [], giftEligible = false;
 const giftKey = 'minorun-gifts-' + sessionId;
 try {
@@ -298,8 +297,8 @@ function lastSupportShown(): number | null {
   try { return Number(localStorage.getItem(supportKey) ?? '0'); } catch { return null; }
 }
 function closeGift() {
-  activeGift = undefined; gift.hidden = true; giftThanks.hidden = true;
-  clearTimeout(giftTimer); if (!busy) idle(); relayout();
+  activeGift = undefined; gift.hidden = true;
+  if (!busy) idle(); relayout();
 }
 function placeGift(p: { ct: number; ch: number; dockTop: number; side: boolean; ans: boolean; width: number }) {
   if (!activeGift) return;
@@ -307,7 +306,7 @@ function placeGift(p: { ct: number; ch: number; dockTop: number; side: boolean; 
   const left = Math.min(p.width / 2 + Math.min(p.width * .07, 45), p.width - 162);
   gift.hidden = false;
   if (!p.ans || has('busy') || (p.side && !activeGift.image)) {
-    gift.hidden = true; giftThanks.hidden = true; return;
+    gift.hidden = true; return;
   }
   const minTop = header.offsetTop + header.offsetHeight + 18;
   // 頭の上へ寄せる。前の配置の高さ制限を外してから、画像の実際の高さを測る。
@@ -320,17 +319,15 @@ function placeGift(p: { ct: number; ch: number; dockTop: number; side: boolean; 
     const giftLimit = p.width - gift.offsetWidth - 40;
     bubble.style.setProperty('--bw', Math.max(190, Math.min(characterLimit, giftLimit)) + 'px');
   }
-  giftThanks.style.left = Math.max(12, center - 75) + 'px';
-  giftThanks.style.top = p.ct + p.ch * .25 + 'px';
 }
-function showGift(candidates: Surprise[], feedback = false, linked?: Surprise) {
+function showGift(candidates: Surprise[], linked?: Surprise) {
   if (!giftEligible || activeGift || busy || has('composing')) return;
   const preview = import.meta.env.DEV ? params.get('gift') : null;
   const now = Date.now();
   const side = stage.classList.contains('side');
   const eligible = candidates.filter(candidate => !side || Boolean(candidate.image));
-  const support = !feedback && !side ? chooseSupport(giftState, lastSupportShown(), now) : undefined;
-  const chosen = linked ?? (preview && gifts[preview] ? gifts[preview] : support ?? chooseGift(giftState, eligible, now, Math.random, feedback ? .5 : .4));
+  const support = !side ? chooseSupport(giftState, lastSupportShown(), now) : undefined;
+  const chosen = linked ?? (preview && gifts[preview] ? gifts[preview] : support ?? chooseGift(giftState, eligible, now, Math.random, .4));
   if (!chosen || (side && !chosen.image)) return;
   if (isSupport(chosen.id) && !preview) {
     try { localStorage.setItem(supportKey, String(now)); } catch { return; }
@@ -350,12 +347,8 @@ function showGift(candidates: Surprise[], feedback = false, linked?: Surprise) {
   if (gift.hidden) { activeGift = undefined; return; }
   if (!chosen.preview) { giftState.seen.push(chosen.id); giftState.lastTurn = giftState.turns; giftState.lastAt = Date.now(); saveGifts(); }
   cancelIdle();
-  if (feedback || chosen.id === 'thanks') director.phase('thanks');
+  if (chosen.id === 'thanks') director.phase('thanks');
   else director.phase('answering', true);
-  if (feedback && chosen.id !== 'thanks' && !side) {
-    giftThanks.hidden = false;
-    giftTimer = window.setTimeout(() => { giftThanks.hidden = true; }, 3500);
-  }
 }
 
 // ---- 下の操作部：質問の候補と「質問する」を1つの並びに。注意書きは入力を開いたときだけ入力欄の上に出す ----
@@ -503,7 +496,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link') {
   await fly(text, fromEl);
   thought.classList.add('on'); director.phase('thinking', true);
 
-  const tid = crypto.randomUUID().replace(/-/g, '').slice(0, 20);  // この質問の番号（後から押される評価を、記録のこの行へ結び付ける）
+  const tid = crypto.randomUUID().replace(/-/g, '').slice(0, 20);  // この質問の番号（会話の記録と通信エラーを結び付ける）
   let raw = '', seeking = '', opened = false, failed = false, refused: Refused | null = null, next: string[] = [], limitShare = '', topic = '';
   // 地図は本文より先に届くので吹き出しの先頭に、照合の結果は末尾に置く
   const figures: HTMLElement[] = [], extras: HTMLElement[] = [];
@@ -623,9 +616,9 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link') {
     const asked = text.length > 40 ? text.slice(0, 39) + '…' : text;
     share.href = 'https://x.com/intent/post?text=' + encodeURIComponent(`#みのるんエージェント に「${asked}」を質問したよ！みんなも使ってみてね。\n${location.origin}/`);
     share.textContent = 'Xでシェア';
-    // 最後の行：左に評価（良い・良くない）、右にシェア
+    // 最後の行：右にシェア
     const row = document.createElement('div'); row.className = 'foot';
-    row.append(rating(tid), share); answer.appendChild(row); layout();
+    row.append(share); answer.appendChild(row); layout();
   }
   if (failed) director.phase('error');
   else settle();
@@ -645,41 +638,11 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link') {
       // 画素が用意できてから貼る。別の質問や入力に移ったら古い画像を差し込まない。
       const image = new Image(); image.referrerPolicy = 'no-referrer'; image.src = linked.image!;
       void Promise.race([image.decode(), wait(2500).then(() => { throw new Error('image timeout'); })])
-        .then(() => { if (requestVersion === turnVersion) showGift([], false, linked); })
+        .then(() => { if (requestVersion === turnVersion) showGift([], linked); })
         .catch(() => {});
     } else showGift(currentGiftCandidates);
   }
   relayout();
-}
-
-// ---- 回答の評価：線だけの親指を2つ。押した側を塗り、もう一度押すと取り消す。理由は聞かない ----
-const THUMB = '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3Zm0 0 4-7a2.5 2.5 0 0 1 2.4 3.1L12.8 9H19a2 2 0 0 1 2 2.3l-1.2 7.4A2.6 2.6 0 0 1 17.2 21H7"/></svg>';
-function rating(tid: string): HTMLElement {
-  const box = document.createElement('span'); box.className = 'rate';
-  box.innerHTML = `<button type="button" data-v="good" aria-label="役に立った" aria-pressed="false">${THUMB}</button><button type="button" data-v="bad" class="down" aria-label="役に立たなかった" aria-pressed="false">${THUMB}</button><span class="thx">ありがとうございます</span>`;
-  let cur = '', timer = 0, giftTried = false;
-  box.querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
-    const v = cur === b.dataset.v ? 'none' : b.dataset.v!;
-    cur = v === 'none' ? '' : v;
-    box.dataset.v = cur;
-    box.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.v === cur)));
-    box.classList.toggle('thanks', !!cur); clearTimeout(timer);
-    if (cur) timer = window.setTimeout(() => box.classList.remove('thanks'), 2000);
-    if (v === 'good' && !giftTried) {
-      giftTried = true;
-      if (!busy && !has('composing') && !has('limited')) {
-        cancelIdle(); director.phase('thanks', true);
-        settleTimer = window.setTimeout(() => { if (!busy && !activeGift && !has('composing')) idle(); }, 2400);
-      }
-      showGift(currentGiftCandidates.filter(g => g.id === 'slide').length ? [gifts.slide] : [gifts.thanks], true);
-    }
-    fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-anon-id': anonId, 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId, ...(await authHeader()) },
-      body: JSON.stringify({ feedback: v, tid }),
-    }).catch(() => { /* 届かなくても回答は読める */ });
-  }));
-  return box;
 }
 
 // 会話ごとに新しい入れ物（microVM）が立ち上がるのに数秒かかるので、ページを開いた時点で先に起こしておく
