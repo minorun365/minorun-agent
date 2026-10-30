@@ -12,6 +12,9 @@ test('入力欄を開いたイベントが終わる前に、表示してフォ�
   let focused = false;
   const deferred: (() => void)[] = [];
   const context = {
+    layoutViewport: { begin() { assert.equal(focused, false); } },
+    innerWidth: 402, innerHeight: 760, window: { visualViewport: { height: 760 } },
+    visibleHeight: (h: number) => h,
     closeGift() {}, cancelIdle() {}, director: { phase() {} },
     stage: { classList: { add(name: string) { visible = name === 'composing'; } } },
     sendBtn: { classList: { toggle() {} } },

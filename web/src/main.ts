@@ -7,7 +7,7 @@ import { ChatTransport, TransportError as Refused, type Incident } from './trans
 import { characterGift, previewGift, type LinkPreview } from './link-preview';
 import { bookGift } from './book-preview';
 import { POSES, PoseDirector, PosePicker, type Pose } from './poses';
-import { visibleHeight } from './viewport';
+import { visibleHeight, LayoutViewport } from './viewport';
 import { useSideLayout } from './layout-mode';
 import { candidatesFor, chooseGift, chooseSupport, isSupport, freshState, gifts, type GiftState, type Surprise } from './surprises';
 import { esc, md } from './markdown';
@@ -61,6 +61,7 @@ const sessionId = params.get('test') === '1'
   : stored(sessionStorage, 'minorun-session-id');
 
 // ---- iOS：キーボードが出たら見えている高さに合わせる ----
+const layoutViewport = new LayoutViewport();
 let restingViewportHeight = window.visualViewport?.height ?? innerHeight;
 let restingViewportWidth = innerWidth;
 function fitViewport() {
@@ -104,7 +105,8 @@ function layout() {
   const avail = dockTop - headB;
   // 通常ブラウザの縦向きは上下、Xのアプリ内と横向きの低い画面は左右に配置する。
   // PCの中央寄せで小さくした会話領域ではなく、実際の表示領域で低い画面かを判定する。
-  const side = useSideLayout(innerWidth, visibleHeight(innerHeight, window.visualViewport?.height), comp, navigator.userAgent);
+  const layoutHeight = layoutViewport.measure(innerWidth, visibleHeight(innerHeight, window.visualViewport?.height), comp);
+  const side = useSideLayout(innerWidth, layoutHeight, comp, navigator.userAgent);
   stage.classList.toggle('side', side);
   let ch: number, ct: number, cx = Wd / 2;
   if (side && !ans) {
@@ -369,6 +371,7 @@ function renderSuggest(list: string[], retry = false, via: Via = 'starter') {
 }
 
 function openCompose() {
+  layoutViewport.begin(innerWidth, visibleHeight(innerHeight, window.visualViewport?.height));
   closeGift();
   cancelIdle(); director.phase('composing');
   stage.classList.add('composing');
