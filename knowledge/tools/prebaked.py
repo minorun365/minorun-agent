@@ -29,6 +29,8 @@ LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 BANNED = ("筆者", "著者", "search_", "詳しくは次", "確認役", "照合済み", "調べましょうか")
 INTERNAL = ("ナレッジベース", "ツール")
 NEXT_COUNT = 4
+# 用意した質問の結論が「情報なし」だと、答えられない質問を勧めたことになる
+NO_ANSWER = re.compile(r"\*\*(まだ)?(情報がありません|確認できていません|分かりません|わかりません|確認できませんでした)\*\*")
 
 
 def facts_hash(topic):
@@ -112,6 +114,8 @@ def check(topic, stamp=False, urls=None):
         if not 1 <= len(item.get("heading", "")) <= 15:
             errs.append(f"{q}: heading は1〜15字")
         errs += check_answer(q, item, topic, urls)
+        if NO_ANSWER.search(item.get("answer", "")):
+            errs.append(f"{q}: 結論が「情報なし」の質問は用意した質問に載せない")
         nexts = item.get("next", [])
         if len(nexts) != NEXT_COUNT:
             errs.append(f"{q}: 深掘りが{len(nexts)}個（{NEXT_COUNT}つ）")
