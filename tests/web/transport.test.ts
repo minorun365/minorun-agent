@@ -49,8 +49,11 @@ test('先読み失敗でも次の質問は試せる。停止通知を一般エ�
   await assert.rejects(t.question({}), e => e instanceof TransportError && e.reason === 'banned' && e.message === '利用停止です');
 });
 // 先読みの応答が届かず止まったとき（10/27（火）に3件）。サーバー側は返し終えていた
+// AbortSignal.timeout のタイマーはイベントループを生かさないので、止まった通信の代わりに待ちを1つ持つ
+// （持たないと Node 22 では待つ相手がいないとみなされ、テストごと打ち切られる）
 const stalled = (signal?: AbortSignal) => new Promise<Response>((_, reject) => {
-  signal?.addEventListener('abort', () => reject(signal.reason));
+  const hold = setInterval(() => {}, 1000);
+  signal?.addEventListener('abort', () => { clearInterval(hold); reject(signal.reason); });
 });
 test('先読みが時間切れなら1回だけ送り直し、時間切れとして記録して復旧を残す', async () => {
   const events: Incident[] = []; let calls = 0;

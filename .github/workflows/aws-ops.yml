@@ -1,0 +1,151 @@
+# クラウドのセッション（claude.ai/code）から AWS を触るための入口。
+# セッションの VM には AWS の鍵を置かず、このワークフローが OIDC で一時的な権限を得て実行する。
+# ロールは読み取り（ReadOnlyAccess）とモデル・ナレッジ検索の呼び出しだけ。デプロイはできない。
+# 起動は infra/scripts/aws-ops.sh から（AGENTS.md「クラウドのセッションで作業するとき」）。
+# クラウドのトークンにはワークフローを起動する権限が無いので、aws-ops/ のブランチへ依頼ファイルを push して起動する。
+# 手元の Mac からは workflow_dispatch でも起動できる。
+name: aws-ops
+
+on:
+  push:
+    branches: ["aws-ops/**"]
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "eval = tests/evals/<名前>.py / script = infra/scripts/<名前>.py / aws = 読み取りの AWS CLI"
+        type: choice
+        options: [eval, script, aws]
+        required: true
+      name:
+        description: "eval・script のファイル名（拡張子なし）。aws では空"
+        type: string
+        default: ""
+      args:
+        description: "続けて渡す引数（aws ではサブコマンドから）"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aws-ops-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: us-west-2
+      AWS_PROFILE: sandbox
+    steps:
+      - uses: actions/checkout@v7
+
+      # push のときは依頼ファイル、手動のときは入力欄から読む。値はシェルへ直接埋め込まず環境変数で渡す
+      - name: 依頼を読む
+        env:
+          IN_TASK: ${{ inputs.task }}
+          IN_NAME: ${{ inputs.name }}
+          IN_ARGS: ${{ inputs.args }}
+        run: |
+          set -eu
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            python3 - <<'PY'
+          import json, os
+          req = json.load(open(".aws-ops/request.json", encoding="utf-8"))
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              for key in ("task", "name", "args"):
+                  value = str(req.get(key, ""))
+                  if "\n" in value or "\r" in value:
+                      raise SystemExit(f"{key} に改行は使えません")
+                  f.write(f"{key.upper()}={value}\n")
+          PY
+          else
+            for v in "$IN_TASK" "$IN_NAME" "$IN_ARGS"; do
+              case "$v" in *$'\n'*|*$'\r'*) echo "改行は使えません" >&2; exit 1 ;; esac
+            done
+            { echo "TASK=$IN_TASK"; echo "NAME=$IN_NAME"; echo "ARGS=$IN_ARGS"; } >> "$GITHUB_ENV"
+          fi
+
+      - name: 依頼の検査
+        run: |
+          set -eu
+          [[ "$NAME" =~ ^[A-Za-z0-9_-]*$ ]]
+          case "$TASK" in
+            eval)   test -f "tests/evals/$NAME.py" ;;
+            script) test -f "infra/scripts/$NAME.py" ;;
+            aws)    test -z "$NAME" ;;
+            *)      echo "task は eval / script / aws のどれか: $TASK" >&2; exit 1 ;;
+          esac
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_OPS_ROLE_ARN }}
+          aws-region: us-west-2
+          role-session-name: aws-ops-${{ github.run_id }}
+
+      # 手元の手順は AWS_PROFILE=sandbox 前提なので、同じ名前のプロファイルへ一時的な鍵を写す
+      - name: sandbox プロファイルを用意
+        run: |
+          set -eu
+          mkdir -p ~/.aws
+          {
+            echo "[sandbox]"
+            echo "aws_access_key_id = $AWS_ACCESS_KEY_ID"
+            echo "aws_secret_access_key = $AWS_SECRET_ACCESS_KEY"
+            echo "aws_session_token = $AWS_SESSION_TOKEN"
+          } > ~/.aws/credentials
+          printf '[profile sandbox]\nregion = us-west-2\n' > ~/.aws/config
+          chmod 600 ~/.aws/credentials
+
+      # setup-uv は大版のタグ（v10）を出していないので、版まで固定する
+      - uses: astral-sh/setup-uv@v10.3.3
+
+      - name: 実行
+        run: |
+          # 失敗しても要約へ書いてから終わるため、-e を外す
+          set +e -o pipefail
+          unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          read -ra extra <<< "$ARGS"
+          case "$TASK" in
+            eval)   cmd=(uv run -q --with-requirements agent/requirements.txt python "tests/evals/$NAME.py" "${extra[@]}") ;;
+            script) cmd=(uv run -q --with boto3 python "infra/scripts/$NAME.py" "${extra[@]}") ;;
+            aws)    cmd=(aws "${extra[@]}") ;;
+          esac
+          echo "aws-ops: $TASK を開始"   # infra/scripts/aws-ops.sh がログをここから切り出す
+          echo "::group::コマンド"; printf '%q ' "${cmd[@]}"; echo; echo "::endgroup::"
+          "${cmd[@]}" 2>&1 | tee "$RUNNER_TEMP/out.txt"
+          code=${PIPESTATUS[0]}
+          {
+            echo "### aws-ops: $TASK $NAME"
+            echo "終了コード: $code"
+            echo '```'
+            tail -c 60000 "$RUNNER_TEMP/out.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cp "$RUNNER_TEMP/out.txt" out.txt
+          exit $code
+
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: aws-ops-${{ github.run_id }}
+          path: out.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # 依頼用のブランチは使い捨て。AWS の権限を持つジョブとは分けて、ここだけに書き込み権限を渡す
+  cleanup:
+    needs: run
+    if: always() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TOPICS = json.loads((ROOT / "topics.json").read_text())
 OUT = ROOT / "dist" / "kb"
-KIND = {"official": "AWS・re:Invent 公式サイトの案内", "community": "参加者のブログ・登壇資料",
+KIND = {"official": "提供元・主催者・調査機関の公式情報", "community": "参加者のブログ・登壇資料",
         "profile": "人物・組織の公開プロフィール",
         "app": "このアプリ（みのるんエージェント）の README と設計の記録",
         "own": "みのるん（私）が公開した Qiita の記事・登壇資料・GitHub のリポジトリ",
@@ -61,6 +61,9 @@ def main():
         lines = head + [""]
         for f, d in rows:
             mark = "（年で変わりうる）" if f.get("time_sensitive") else ""
+            # その年だけの渡航ルールの変更は、「今年ならではの注意」を聞く質問で引けるよう本文に札を付ける
+            if f.get("notice"):
+                mark += "【今年ならではの渡航の注意】"
             # 1つの元ファイルに出どころの違う事実を並べるときは、事実ごとの url を優先する
             src = f"{d['title']}（{d.get('author') or d.get('site')}、{d.get('published') or '公開日不明'}） {f.get('url') or d['url']}"
             lines.append(f"- [{y}年] {f['text']}{mark} 出典: {src}")

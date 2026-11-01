@@ -33,6 +33,8 @@ def main():
             lines += [f"## {y}年の情報" if y else "## 年が特定できない情報", ""]
             for f, d in years[y]:
                 mark = "（年で変わりうる）" if f.get("time_sensitive") else ""
+                if f.get("notice"):
+                    mark += "【今年ならではの渡航の注意】"
                 if d.get("source_type") == "official":
                     mark += "【公式】"
                 elif d.get("source_type") == "profile":
