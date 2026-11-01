@@ -138,5 +138,34 @@ if(links[0].o.attrs['aria-current']!=='true'||links[1].o.attrs['aria-current']||
         self.assertEqual(sum(result[('sonnet','in')].values()),30)
         self.assertEqual(call.call_args.kwargs['NextToken'],'next')
 
+    def test_only_the_list_tab_reads_question_details(self):
+        calls = []
+        def fetch(_day, detail=True):
+            calls.append(detail)
+            return self.now, self.start, [dict(r) for r in self.rows]
+        with patch.object(m, 'questions', side_effect=fetch), patch.object(m, 'bans', return_value=[]):
+            for view in (None, 'hours', 'people', 'errors'):
+                self.assertNotIn('<details data-row', m.render(view, 'all', 1))
+            self.assertEqual(calls, [False] * 4)
+            self.assertIn('<details data-row', m.render('list', 'all', 1))
+            self.assertEqual(calls[-1], True)
+
+    def test_summary_fields_exclude_large_values_and_nested_usage_is_projected(self):
+        self.assertFalse({'question', 'answer', 'usage', 'usage.usd'} & set(m.REPORT_FIELDS))
+        with patch.object(m.ddb, 'scan', return_value={'Items': []}) as scan:
+            REAL_ROWS(self.start, self.now, ['created_at', 'usage.usd'])
+        kwargs = scan.call_args.kwargs
+        self.assertEqual(kwargs['ProjectionExpression'], '#f0_0, #f1_0.#f1_1')
+        self.assertEqual(kwargs['ExpressionAttributeNames']['#f1_1'], 'usd')
+
+    def test_same_question_counts_hash_each_row_once(self):
+        rows = [dict(r, question='同じ', created_at=self.now.isoformat()) for r in self.rows]
+        real = m._question_id
+        with patch.object(m, '_question_id', side_effect=real) as digest:
+            page = m._list_html(self.start, rows, 1, None)
+        self.assertEqual(digest.call_count, len(rows))
+        self.assertIn(f'同じ質問 {len(rows)}件', page)
+
 REAL_REGISTERED=m._registered_users
+REAL_ROWS=m._rows
 REAL_METRICS=m._metrics

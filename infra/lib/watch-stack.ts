@@ -223,7 +223,7 @@ export class WatchStack extends cdk.Stack {
       handler: 'usage_page.handler',
       code: lambda.Code.fromAsset(path.join(currentDir, '../lambda/usage-page'), { exclude: ['**/__pycache__', '**/*.pyc'] }),
       timeout: cdk.Duration.seconds(20),
-      memorySize: 256,
+      memorySize: 1024,
       logGroup: pageLogs,
       environment: {
         PAGE_TOKEN: props.pageToken,

@@ -146,9 +146,15 @@ def _rejected(start, end):
 
 def _rows(start, end, fields):
     """その日の行。created_at は日本時間の ISO 文字列なので、文字列の大小で範囲を切れる"""
+    # "usage.usd" のように書くと、大きな Map から要る値だけを読む。
+    names, paths = {}, []
+    for i, field in enumerate(fields):
+        parts = field.split(".")
+        names.update({f"#f{i}_{j}": part for j, part in enumerate(parts)})
+        paths.append(".".join(f"#f{i}_{j}" for j in range(len(parts))))
     rows, kwargs = [], {
-        "TableName": TABLE, "ProjectionExpression": ", ".join(f"#f{i}" for i in range(len(fields))),
-        "ExpressionAttributeNames": {f"#f{i}": f for i, f in enumerate(fields)},
+        "TableName": TABLE, "ProjectionExpression": ", ".join(paths),
+        "ExpressionAttributeNames": names,
         "FilterExpression": "#c >= :s AND #c < :e",
         "ExpressionAttributeValues": {":s": {"S": start.isoformat(timespec="seconds")},
                                       ":e": {"S": end.isoformat(timespec="seconds")}}}
@@ -289,9 +295,14 @@ def hours(day):
     return now, start, list(reversed(out)), total
 
 
-def questions(day):
+# 要約と日ごとに要る項目。回答本文や使用量の記録は全項目の9割以上を占めるので、一覧を開くまで読まない。
+REPORT_FIELDS = ["created_at", "tools", "first_ms", "anon", "user", "pk", "feedback", "via", "x_search"]
+DETAIL_FIELDS = REPORT_FIELDS + ["question", "answer", "topic", "flag", "flag_reason", "prebaked", "usage.complete", "usage.usd"]
+
+
+def questions(day, detail=True):
     now, start, end = _day(day)
-    rows = _rows(start, end, ["created_at", "question", "answer", "topic", "tools", "first_ms", "flag", "flag_reason", "anon", "user", "pk", "feedback", "via", "prebaked", "usage", "x_search"])
+    rows = _rows(start, end, DETAIL_FIELDS if detail else REPORT_FIELDS)
     rows.sort(key=lambda r: r["created_at"], reverse=True)
     return now, start, rows
 
@@ -602,10 +613,10 @@ def _question_id(r):
     return hashlib.sha256((r.get("question") or "").strip().encode()).hexdigest()[:16]
 
 
-def report(day=None, u="general"):
+def report(day=None, u="general", detail=True):
     """画面と JSON が共有する1回の取得結果。費用は時台ごとの質問数で按分する。"""
     u = u or "general"
-    now, start, rows = questions(day)
+    now, start, rows = questions(day, detail)
     mode, _, period_end = periods.bounds(day, now, COST_SINCE)
     end = min(start + datetime.timedelta(days=1), now) if mode == "day" else period_end
     m = _metrics(start, end, 3600)
@@ -617,7 +628,8 @@ def report(day=None, u="general"):
         h = datetime.datetime.fromisoformat(r["created_at"]).astimezone(JST).replace(minute=0, second=0, microsecond=0)
         groups.setdefault(h, []).append(r)
         r["identifier"] = _identifier(_actor(r))
-        r["question_id"] = _question_id(r)
+        if detail:
+            r["question_id"] = _question_id(r)
     people = {_identifier(a): {"identifier": _identifier(a), "questions": 0, "estimated_usd": 0.0, "registered": True, **info}
               for a, info in (registered or {}).items()}
     costs = {k: 0.0 for k in LABELS}
@@ -1132,7 +1144,16 @@ def _hours_html(rows, total, date_tabs="", multi=False):
 
 def _list_html(start, all_rows, page, f, u=None, qid=None, banned=frozenset(), follow_today=False, selection=None, multi=False):
     f = f if f in FILTERS else None
-    rows = [r for r in all_rows if _keep(r, f, banned) and (not qid or _question_id(r) == qid)]
+    # 同じ質問の件数と人数は、全行を1回だけ見てまとめる。
+    same_questions = {}
+    for x in all_rows:
+        x_id = x.get("question_id") or _question_id(x)
+        x["question_id"] = x_id
+        same = same_questions.setdefault(x_id, {"count": 0, "actors": set()})
+        same["count"] += 1
+        if _actor(x) != "unknown":
+            same["actors"].add(_actor(x))
+    rows = [r for r in all_rows if _keep(r, f, banned) and (not qid or r["question_id"] == qid)]
     d = selection if selection is not None else ("" if follow_today else start.strftime("%Y-%m-%d"))
     counts = {k: sum(1 for r in all_rows if _keep(r, k, banned)) for k in FILTERS}
     filt = "".join(
@@ -1150,10 +1171,9 @@ def _list_html(start, all_rows, page, f, u=None, qid=None, banned=frozenset(), f
                  f"{len(r.get('answer') or '')}字"]
         meta = '<span class="dot">·</span>'.join(html.escape(x) for x in parts if x)
         identifier = _identifier(_actor(r))
-        same = [x for x in all_rows if _question_id(x) == _question_id(r)]
-        same_people = len({_actor(x) for x in same if _actor(x) != "unknown"})
+        same = same_questions[r["question_id"]]
         person = f'<a class="person-link" href="{html.escape(_url(v="list", d=d, u=identifier, f=f))}">{html.escape(identifier)}</a>' if identifier != "不明" else "識別子不明"
-        duplicate = f'<a href="{html.escape(_url(v="list", d=d, u=u, q=_question_id(r)))}">同じ質問 {len(same)}件・{same_people}人</a>' if len(same) > 1 else ""
+        duplicate = f'<a href="{html.escape(_url(v="list", d=d, u=u, q=r["question_id"]))}">同じ質問 {same["count"]}件・{len(same["actors"])}人</a>' if same["count"] > 1 else ""
         meta = person + '<span class="dot">·</span>' + meta
         if duplicate:
             meta += '<span class="dot">·</span>' + duplicate
@@ -1264,12 +1284,12 @@ def _period_controls(d, view, u, f, group):
 
 
 def render(view, day, page, f=None, u=None, qid=None, group="registered"):
-    d, hrs, total, rows = report(day, u)
+    view = view if view in ("hours", "list", "errors", "people") else "sum"
+    d, hrs, total, rows = report(day, u, detail=view == "list")
     u = d["u"]
     now, start = d["now"], d["day"]
     ban = _ban_summary(bans(), now)
     errors = _period_errors(start, d["end"], now)
-    view = view if view in ("hours", "list", "errors", "people") else "sum"
     on = lambda v: " on" if v == view else ""  # noqa: E731
     multi = d["period"] != "day"
     follow_today = not multi and start.date() == now.date()
@@ -1281,7 +1301,8 @@ def render(view, day, page, f=None, u=None, qid=None, group="registered"):
     keep = None if view == "sum" else view
     controls = _period_controls(d, view, u, f, group)
     summary_html = _summary_html(d, ban)
-    list_html = _list_html(start, rows, page, f, u, qid, ban["ids"], follow_today, ds, multi)
+    # タブの移動はページの読み込み直しなので、ほかのタブでは一覧の中身を作らない。
+    list_html = _list_html(start, rows, page, f, u, qid, ban["ids"], follow_today, ds, multi) if view == "list" else '<div class="list" hidden></div>'
     if multi:
         summary_html = summary_html.replace("この日の", "この期間の").replace("この日に", "この期間に")
         list_html = list_html.replace("この日の", "この期間の").replace("この日は", "この期間は")
