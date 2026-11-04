@@ -135,6 +135,9 @@ export class AgentStack extends cdk.Stack {
         OTEL_PYTHON_DISTRO: 'aws_distro',
         OTEL_PYTHON_CONFIGURATOR: 'aws_configurator',
         OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
+        // Strands の計測はループやツール呼び出しのIDを次元にするので、独自メトリクスが回ごとに増える（2.4万個まで増えた）。
+        // ダッシュボードは AWS/Bedrock-AgentCore と MinorunAgent の名前空間を使うので、OTel のメトリクスは送らない。トレースとログは残す
+        OTEL_METRICS_EXPORTER: 'none',
         // 質問と回答の本文をトレースに残す（既定では抜かれ、Evaluations も読めない）
         AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT: 'true',
         MODEL_MAIN: 'global.anthropic.claude-sonnet-5-5',

@@ -63,13 +63,14 @@ SESSION_DAYS = 7
 COST_SINCE = datetime.datetime.fromisoformat(os.environ.get("COST_SINCE", "2026-10-25T00:00:00+09:00"))
 _SESSION_KEY = hashlib.sha256(f"usage-page-session:{TOKEN}".encode()).digest()
 
-# 単価（ドル）。AWS の料金 API（us-west-2・global の推論プロファイル）で 2026-10-25 に確かめた値。Brave は 2026-10-24 の検証の値
+# 単価（ドル）。Cost Explorer の請求額÷使用量で 2026-11-04 に確かめた値（Runtime は V2、Web Search は実額）。
+# 過去の V1 の時間にも V2 の単価を当てるので、10/25 の Runtime は少し高めに出る。Brave は 2026-10-24 の検証の値
 PRICE = {
-    "sonnet": {"in": 2.00, "out": 10.00, "cache_read": 0.20, "cache_write": 2.50},   # 100万トークンあたり
+    "sonnet": {"in": 2.00, "out": 10.00, "cache_read": 0.10, "cache_write": 2.50},   # 100万トークンあたり
     "haiku": {"in": 0.10, "out": 0.50, "cache_read": 0.01, "cache_write": 0.125},
-    "vcpu_hour": 0.0895,
-    "gb_hour": 0.00945,
-    "web_search": 0.012,      # 1件（$12 / 1,000件）
+    "vcpu_hour": 0.1276,
+    "gb_hour": 0.0169,
+    "web_search": 0.007,      # 1件（$7 / 1,000件）
     "brave": 0.005,           # 1件（$5 / 1,000件）
     "kb_retrieve": 0.001,     # 1件
 }

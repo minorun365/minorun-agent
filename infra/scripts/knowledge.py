@@ -51,6 +51,10 @@ def ingest(out):
     print(json.dumps({"status": job["status"], "seconds": round(time.time() - started),
                       "statistics": job.get("statistics"), "failureReasons": job.get("failureReasons")},
                      ensure_ascii=False, default=str, indent=1))
+    # 事実が増えた話題の事前回答は本番から外れて生成に回る。取り込みのたびに気づけるようにする
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "knowledge" / "tools"))
+    import prebaked
+    print("事前回答の作り直しが要る話題:", ", ".join(prebaked.stale()) or "なし")
 
 
 def retrieve(kb, text, flt):

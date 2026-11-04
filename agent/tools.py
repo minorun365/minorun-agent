@@ -340,7 +340,7 @@ def get_announcements() -> dict:
         _news["at"] = time.time()
     items = sorted(_news["items"], key=lambda i: i.get("at", ""), reverse=True)[:10]
     return {"note": "時刻は日本時間。みのるんが現地で確かめて書いた速報", "items": items} if items else \
-        {"items": [], "note": "いまは速報がありません"}
+        {"items": [], "note": "いまは速報がありません。回答では速報に触れないでください"}
 
 
 with open(__import__("pathlib").Path(__file__).with_name("maps.json")) as f:

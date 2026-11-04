@@ -21,6 +21,8 @@ async def verify(call, expected):
     for key in ('MEMORY_ID','LOG_TABLE','KNOWLEDGE_BUCKET','TOOLS_GATEWAY_URL','MODEL_MAIN','MODEL_AUX'):
         assert old['environmentVariables'].get(key) and old['environmentVariables'][key] == new['environmentVariables'].get(key), key
     active = new if expected == 'V2' else old
+    # 独自メトリクスが回ごとに増えないよう、OTel のメトリクスは送らない（トレースは送る）
+    assert new['environmentVariables'].get('OTEL_METRICS_EXPORTER') == 'none', '独自メトリクスの停止が外れている'
     gateways = await api('bedrock-agentcore-control','ListGateways')
     entry = next(g for g in gateways['items'] if g['name'] == 'minorun-agent-entry')
     gateway_id = entry['gatewayId']

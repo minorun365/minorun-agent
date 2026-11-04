@@ -24,6 +24,10 @@ class NoAnswerTest(unittest.TestCase):
                     found.append(item["q"])
         self.assertEqual(found, [])
 
+    def test_no_topic_fell_out_of_production(self):
+        # 事実が変わった話題は事前回答ごと本番から外れる。取り込みのあとで確かめ直して指紋を戻す
+        self.assertEqual(prebaked.stale(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
