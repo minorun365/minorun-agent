@@ -9,6 +9,7 @@ S3 への書き出しは CDK（MinorunKnowledge の BucketDeployment）が行う
 import json
 import sys
 import time
+from pathlib import Path
 
 import boto3
 
