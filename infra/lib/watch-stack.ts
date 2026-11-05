@@ -358,6 +358,50 @@ export class WatchStack extends cdk.Stack {
       targets: [new targets.LambdaFunction(turnFlag, { retryAttempts: 0 })],
     });
 
+    // イメージ置き場の掃除（週1回）。置き場は別アプリと共用なので、使用中を毎回読み直してから消す
+    const pruneRepo = `cdkd-container-assets-${this.account}-${this.region}`;
+    const pruneImages = new lambda.Function(this, 'PruneImages', {
+      functionName: 'minorun-agent-prune-images',
+      runtime: lambda.Runtime.PYTHON_3_14,
+      architecture: lambda.Architecture.ARM_64,
+      handler: 'prune_images.handler',
+      code: lambda.Code.fromAsset(path.join(currentDir, '../lambda/prune-images'), { exclude: ['**/__pycache__', '**/*.pyc'] }),
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 256,
+      retryAttempts: 0,
+      logGroup: new logs.LogGroup(this, 'PruneImagesLogs', {
+        logGroupName: '/aws/lambda/minorun-agent-prune-images',
+        retention: logs.RetentionDays.SIX_MONTHS,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+    pruneImages.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ecr:DescribeImages', 'ecr:BatchGetImage', 'ecr:BatchDeleteImage'],
+      resources: [`arn:aws:ecr:${this.region}:${this.account}:repository/${pruneRepo}`],
+    }));
+    pruneImages.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'bedrock-agentcore:ListAgentRuntimes', 'bedrock-agentcore:GetAgentRuntime', 'bedrock-agentcore:ListAgentRuntimeEndpoints',
+        'lambda:ListFunctions', 'lambda:GetFunction',
+        'ecs:ListTaskDefinitions', 'ecs:DescribeTaskDefinition',
+      ],
+      resources: ['*'],
+    }));
+    new events.Rule(this, 'PruneImagesSchedule', {
+      schedule: events.Schedule.cron({ minute: '0', hour: '18', weekDay: 'SAT' }), // 日本時間の日曜3時
+      targets: [new targets.LambdaFunction(pruneImages, { retryAttempts: 0 })],
+    });
+    // 失敗したときだけ1通。週1回の処理なので、戻ったことの通知は送らない
+    new cw.Alarm(this, 'PruneImagesFailAlarm', {
+      alarmName: 'みのるんエージェント｜イメージの掃除が失敗した',
+      alarmDescription: '週1回のイメージ掃除（minorun-agent-prune-images）が失敗した。何も消していないか、途中まで消した状態。Lambda のログを見る',
+      metric: pruneImages.metricErrors({ period: cdk.Duration.minutes(5), statistic: 'Sum' }),
+      threshold: 1,
+      comparisonOperator: cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: cw.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(new cwActions.SnsAction(alertTopic));
+
     // 致命的なエラーのメール（2026-10-25、先行公開の開始に合わせて）。メールの件名はアラーム名がそのまま入るので日本語にする
     const alarm = (id: string, name: string, description: string, props2: Omit<cw.AlarmProps, 'alarmName' | 'alarmDescription'>) => {
       const a2 = new cw.Alarm(this, id, { alarmName: `みのるんエージェント｜${name}`, alarmDescription: description, ...props2 });

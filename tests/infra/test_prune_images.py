@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.modules.setdefault("boto3", types.ModuleType("boto3"))
-spec = importlib.util.spec_from_file_location("prune_images", ROOT / "infra/scripts/prune_images.py")
+spec = importlib.util.spec_from_file_location("prune_images", ROOT / "infra/lambda/prune-images/prune_images.py")
 prune = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prune)
 
@@ -32,6 +32,34 @@ class SelectTest(unittest.TestCase):
         repo = "000000000000.dkr.ecr.us-west-2.amazonaws.com/test-assets"
         _, missing = prune.select(self.images, {f"{repo}:gone"})
         self.assertEqual(missing, [f"{repo}:gone"])
+
+
+class DroppableTest(unittest.TestCase):
+    now = datetime.datetime(2026, 10, 20)
+    images = [image("sha256:used", 1), image("sha256:old", 2), image("sha256:recent", 15)]
+
+    def test_drops_only_old_and_unused(self):
+        drop = prune.droppable(self.images, {"sha256:used"}, self.now)
+        self.assertEqual([i["imageDigest"] for i in drop], ["sha256:old"])
+
+    def test_keeps_images_within_age_limit_even_if_unused(self):
+        drop = prune.droppable(self.images, {self.images[0]["imageDigest"]}, self.now, min_age_days=30)
+        self.assertEqual(drop, [])
+
+
+class HandlerTest(unittest.TestCase):
+    def test_dry_run_does_not_apply(self):
+        seen = {}
+        original_run, original_boto = prune.run, prune.boto3
+        prune.boto3 = types.SimpleNamespace(Session=lambda: None)
+        prune.run = lambda session, apply: (seen.update(apply=apply) or {"drop": 0}, [])
+        try:
+            prune.handler({"dry_run": True}, None)
+            self.assertFalse(seen["apply"])
+            prune.handler({}, None)
+            self.assertTrue(seen["apply"])
+        finally:
+            prune.run, prune.boto3 = original_run, original_boto
 
 
 if __name__ == "__main__":
