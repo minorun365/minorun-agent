@@ -33,6 +33,7 @@ export function candidatesFor(question: string, topic: string, expoDepth: number
   const result: Surprise[] = [];
   if (/キーノート|基調講演|通訳|レシーバー|keynote/i.test(context)) result.push(gifts.experience);
   if (/expo|展示|ブース/i.test(context) && expoDepth >= 2) result.push(gifts.english);
-  if (/(2025|去年|昨年|開発秘話)/.test(context) && /エージェント|agent/i.test(context)) result.push(gifts.slide);
-  return result.length ? result : [gifts.slide];
+  if ((/(2025|去年|昨年|開発秘話)/.test(context) && /エージェント|agent/i.test(context)) || /このアプリ|このエージェント|みのるんエージェント|どうやって作/.test(context)) result.push(gifts.slide);
+  // 質問に合う付箋が無い回では出さない。既定の1枚へ落とすと無関係な資料が貼られる。
+  return result;
 }

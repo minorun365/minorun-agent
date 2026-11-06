@@ -48,16 +48,17 @@ test('2問・1分の間隔、同じ付箋の除外、1会話3回までを守る'
   assert.equal(chooseGift(s, [gifts.slide], 2e6, () => 0), undefined);
 });
 test('Expoの深掘りと、去年のエージェントの話を区別する', () => {
-  assert.deepEqual(candidatesFor('デモを頼むには', 'Expo', 1), [gifts.slide]);
+  assert.deepEqual(candidatesFor('デモを頼むには', 'Expo', 1), []);
   assert.deepEqual(candidatesFor('デモを頼むには', 'Expo', 2), [gifts.english]);
   assert.deepEqual(candidatesFor('去年のキーノート', '', 0), [gifts.experience]);
   assert.deepEqual(candidatesFor('去年のエージェントについて', '', 0), [gifts.slide]);
-  assert.deepEqual(candidatesFor('ホテルの場所', '', 0), [gifts.slide]);
+  assert.deepEqual(candidatesFor('ホテルの場所', '', 0), []);
+  assert.deepEqual(candidatesFor('このアプリはどうやって作ったの？', 'アプリの作り', 0), [gifts.slide]);
 });
 
-test('一般的な話題でも候補があり、初回は4回答までに出会える', () => {
+test('関係する話題なら、初回は4回答までに出会える', () => {
   const s = freshState();
-  const candidates = candidatesFor('ホテルの場所', 'hotels', 0);
+  const candidates = candidatesFor('去年のエージェント', '', 0);
   s.turns = 3;
   assert.equal(chooseGift(s, candidates, 1e6, () => .9), undefined);
   s.turns = 4;
