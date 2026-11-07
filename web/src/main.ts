@@ -9,7 +9,7 @@ import { bookGift } from './book-preview';
 import { POSES, PoseDirector, PosePicker, type Pose } from './poses';
 import { visibleHeight, LayoutViewport } from './viewport';
 import { useSideLayout } from './layout-mode';
-import { candidatesFor, chooseGift, chooseSupport, isSupport, freshState, gifts, type GiftState, type Surprise } from './surprises';
+import { candidatesFor, findGift, chooseGift, chooseSupport, isSupport, freshState, gifts, type GiftState, type Surprise } from './surprises';
 import { esc, md } from './markdown';
 import { pickStarters } from './starters';
 import { bindSubmitButton } from './submit-button';
@@ -329,13 +329,13 @@ function showGift(candidates: Surprise[], linked?: Surprise) {
   const side = stage.classList.contains('side');
   const eligible = candidates.filter(candidate => !side || Boolean(candidate.image));
   const support = !side ? chooseSupport(giftState, lastSupportShown(), now) : undefined;
-  const chosen = linked ?? (preview && gifts[preview] ? gifts[preview] : support ?? chooseGift(giftState, eligible, now, Math.random, .4));
+  const chosen = linked ?? (preview && findGift(preview) ? findGift(preview) : support ?? chooseGift(giftState, eligible, now));
   if (!chosen || (side && !chosen.image)) return;
   if (isSupport(chosen.id) && !preview) {
     try { localStorage.setItem(supportKey, String(now)); } catch { return; }
   }
   gift.style.maxHeight = '';
-  gift.className = 'surprise' + (chosen.image ? ' photo' : '') + (chosen.preview ? ' link-preview' : '');
+  gift.className = 'surprise' + (chosen.image ? ' photo' : '') + (chosen.preview || chosen.cover ? ' link-preview' : '');
   const content = (chosen.image ? `<span class="picture"><img src="${esc(chosen.image)}" alt="" referrerpolicy="no-referrer"></span>` : '') +
     `<h3>${esc(chosen.title)}</h3>` + (chosen.english ? `<strong lang="en">${esc(chosen.english)}</strong>` : '') +
     (chosen.image ? '' : `<p>${esc(chosen.text)}</p>`);
