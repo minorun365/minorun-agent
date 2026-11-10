@@ -22,6 +22,9 @@ SNAP = {"retrieved": "2026-10-26T00:00:00+09:00", "sessions": {s["code"]: s for 
     _session("PM2", [("2026-12-02", "16:00", "MGM Grand")]),
     # 水曜は午前、木曜は午後。日付と時刻は同じ回でそろわないと当たらない
     _session("MIX", [("2026-12-02", "09:00", "Wynn"), ("2026-12-03", "14:00", "Wynn")]),
+    # 再演は末尾に -R・-R1 が付く
+    _session("ACT9-R", [("2026-11-30", "08:00", "Caesars Forum")], title="Galaxy"),
+    _session("ACT9-R1", [("2026-12-01", "10:30", "Caesars Forum")], title="Galaxy"),
 ]}}
 
 
@@ -33,6 +36,10 @@ class TimeFilter(unittest.TestCase):
 
     def codes(self, **kw):
         return [s["code"] for s in catalog.search(**kw)[2]]
+
+    def test_code_without_repeat_suffix_returns_all_repeats(self):
+        self.assertEqual(self.codes(query="ACT9"), ["ACT9-R", "ACT9-R1"])
+        self.assertEqual(self.codes(query="ACT9-R1"), ["ACT9-R1"])
 
     def test_after_lunch_without_keyword_returns_afternoon_only(self):
         self.assertEqual(self.codes(day="2026-12-02", start_after="13:00"), ["PM1", "PM2"])

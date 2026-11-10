@@ -85,6 +85,7 @@ def view(s, full=False):
 
 
 WORD = re.compile(r"[a-z0-9][a-z0-9:+.#-]*")
+REPEAT = re.compile(r"-R\d*$")
 
 
 def _hhmm(value):
@@ -110,7 +111,8 @@ def search(query="", day="", venue="", session_type="", limit=8, start_after="",
             continue
         if session_type and session_type.lower() not in (s.get("type") or "").lower():
             continue
-        if s["code"] in codes:
+        if s["code"] in codes or REPEAT.sub("", s["code"]) in codes:
+            # 再演は ACT008-R1 のように末尾が付くので、末尾なしのコードでも全回を引く
             score = 100
         elif words:
             title = (s.get("title") or "").lower()
