@@ -80,7 +80,7 @@ class UploadTests(unittest.TestCase):
         self.table.update_item.side_effect = lambda **k: {'Attributes': {'count': self.counts.get(k['Key']['pk'].split('#')[0], 1)}}
         self.s3 = MagicMock()
         self.s3.generate_presigned_post.return_value = {'url': 'https://bucket.s3.us-west-2.amazonaws.com/', 'fields': {'key': 'k'}}
-        for p in (patch.object(m, 'TABLE', self.table), patch.object(m, 'UPLOAD_BUCKET', 'bucket'), patch.object(m, '_s3', lambda: self.s3)):
+        for p in (patch.object(m, 'TABLE', self.table), patch.object(m, 'UPLOAD_BUCKET', 'bucket'), patch.object(m, 'UPLOAD_ROLE_ARN', 'arn:aws:iam::1:role/upload'), patch.object(m, '_s3', lambda: self.s3)):
             p.start(); self.addCleanup(p.stop)
 
     def respond(self, body):
@@ -117,4 +117,49 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(passed['image'], f'up/{m._anon(ANON)}/{image}.jpg')
         for bad in ('../secret', f'up/{"c" * 16}/{image}.jpg', 'B' * 32):
             self.assertNotIn('image', self.respond({'prompt': 'これは何？', 'image': bad})[1])
+
+
+class UploadSignerTests(unittest.TestCase):
+    """宛先の署名は専用ロールの一時的な鍵で行う（実行ロールの鍵を利用者のブラウザへ渡さない）。"""
+
+    def clients(self, expires):
+        made = []
+        sts = MagicMock()
+        sts.assume_role.side_effect = lambda **k: {'Credentials': {
+            'AccessKeyId': f'KEY{sts.assume_role.call_count}', 'SecretAccessKey': 's', 'SessionToken': 't',
+            'Expiration': types.SimpleNamespace(timestamp=lambda: expires[0])}}
+
+        def client(name, **kw):
+            made.append((name, kw))
+            return sts if name == 'sts' else MagicMock()
+        return sts, made, client
+
+    def test_signs_with_assumed_role_and_reuses_until_near_expiry(self):
+        import time
+        expires = [time.time() + 900]
+        sts, made, client = self.clients(expires)
+        config = types.SimpleNamespace(Config=lambda **k: k)
+        with patch.object(m, '_s3_client', None), patch.object(m, '_s3_expires', 0.0), \
+                patch.object(m, 'UPLOAD_ROLE_ARN', 'arn:aws:iam::1:role/upload'), patch.object(m.boto3, 'client', client, create=True), \
+                patch.dict(sys.modules, {'botocore': types.SimpleNamespace(config=config), 'botocore.config': config}):
+            first = m._s3()
+            self.assertIs(m._s3(), first)
+            self.assertEqual(sts.assume_role.call_count, 1)
+            kw = sts.assume_role.call_args.kwargs
+            self.assertEqual((kw['RoleArn'], kw['DurationSeconds']), ('arn:aws:iam::1:role/upload', 900))
+            s3_kw = [k for n, k in made if n == 's3'][0]
+            self.assertEqual((s3_kw['aws_access_key_id'], s3_kw['aws_session_token']), ('KEY1', 't'))
+            # 宛先の期限（5分）より鍵の残りが短くなったら取り直す
+            m._s3_expires = time.time() + 200
+            expires[0] = time.time() + 900
+            self.assertIsNot(m._s3(), first)
+            self.assertEqual(sts.assume_role.call_count, 2)
+
+    def test_without_role_no_ticket_is_issued(self):
+        table = MagicMock(); table.name = 'usage'; table.get_item.return_value = {}
+        table.meta.client.batch_get_item.return_value = {'Responses': {'usage': []}}
+        table.update_item.return_value = {'Attributes': {'count': 1}}
+        with patch.object(m, 'TABLE', table), patch.object(m, 'UPLOAD_BUCKET', 'bucket'), patch.object(m, 'UPLOAD_ROLE_ARN', ''):
+            res = m.handler(event({'upload': True}), None)['http']['transformedGatewayResponse']
+        self.assertEqual(json.loads(base64.b64decode(res['body']))['error'], 'image_full')
 

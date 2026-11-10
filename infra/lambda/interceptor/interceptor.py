@@ -40,17 +40,27 @@ USER_IMAGE_DAILY = int(os.environ.get("USER_IMAGE_DAILY", "20"))
 IMAGE_DAILY_ALL = int(os.environ.get("IMAGE_DAILY_ALL", "300"))
 IMAGE_MAX_BYTES = 1_500_000
 IMAGE_ID = re.compile(r"^[0-9a-f]{32}$")
-_s3_client = None
+UPLOAD_ROLE_ARN = os.environ.get("UPLOAD_ROLE_ARN", "")
+UPLOAD_TICKET_SECONDS = 300
+_s3_client, _s3_expires = None, 0.0
 
 
 def _s3():
-    # 地域つきの宛先にする（地域なしの宛先は、作りたてのバケットで転送が挟まりブラウザから送れない）
-    global _s3_client
-    if _s3_client is None:
+    """宛先に署名する S3 クライアント。確認役の実行ロールの鍵ではなく、専用ロールの一時的な鍵を使う。
+    実行ロールの鍵で署名した宛先を利用者のブラウザが使うと、GuardDuty が「Lambda 専用の認証情報が外で使われた」と検知する。
+    一時的な鍵は15分（最短）で、宛先の期限より長く残っている間だけ使い回す。"""
+    global _s3_client, _s3_expires
+    if _s3_client is None or _s3_expires - time.time() < UPLOAD_TICKET_SECONDS + 60:
         from botocore.config import Config
         region = os.environ.get("AWS_REGION", "us-west-2")
+        got = boto3.client("sts", region_name=region, endpoint_url=f"https://sts.{region}.amazonaws.com").assume_role(
+            RoleArn=UPLOAD_ROLE_ARN, RoleSessionName="upload-ticket", DurationSeconds=900)["Credentials"]
+        # 地域つきの宛先にする（地域なしの宛先は、作りたてのバケットで転送が挟まりブラウザから送れない）
         _s3_client = boto3.client("s3", region_name=region, endpoint_url=f"https://s3.{region}.amazonaws.com",
+                                  aws_access_key_id=got["AccessKeyId"], aws_secret_access_key=got["SecretAccessKey"],
+                                  aws_session_token=got["SessionToken"],
                                   config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
+        _s3_expires = got["Expiration"].timestamp()
     return _s3_client
 ANON_ID = re.compile(r"^[A-Za-z0-9-]{16,64}$")
 
@@ -305,7 +315,7 @@ def _upload(key, anon_id, user, now):
     """添付画像の宛先を出す。モデルは呼ばない。枚数は匿名ID（ログインした人は利用者）ごとと全体の2つで数える。"""
     who = f"u:{user}" if user else anon_id
     limit = USER_IMAGE_DAILY if user else IMAGE_DAILY
-    if not UPLOAD_BUCKET or limit <= 0:
+    if not UPLOAD_BUCKET or not UPLOAD_ROLE_ARN or limit <= 0:
         return _reject(key, "image_full", 429, anon_id)
     if _count(f"upmin#{now:%Y-%m-%dT%H:%M}#{who}", now + datetime.timedelta(minutes=2)) > 6:
         return _reject(key, "per_minute", 429, anon_id)
@@ -321,7 +331,7 @@ def _upload(key, anon_id, user, now):
         UPLOAD_BUCKET, _image_key(anon_id, image),
         Fields={"Content-Type": "image/jpeg"},
         Conditions=[{"Content-Type": "image/jpeg"}, ["content-length-range", 1, IMAGE_MAX_BYTES]],
-        ExpiresIn=300)
+        ExpiresIn=UPLOAD_TICKET_SECONDS)
     print(json.dumps({"decision": "upload", "anon": _anon(anon_id), **({"user": user} if user else {})}))
     return _respond(key, 200, {"ok": True, "image": image, "url": post["url"], "fields": post["fields"], "max_bytes": IMAGE_MAX_BYTES})
 

@@ -89,10 +89,23 @@ export class EntryStack extends cdk.Stack {
     });
     this.usageTable.grantReadWriteData(this.interceptor);
     transportErrors.grant(this.interceptor, 'dynamodb:UpdateItem');
-    this.interceptor.addToRolePolicy(new iam.PolicyStatement({
+    // 画像の宛先は、確認役の実行ロールではなく専用のロールの一時的な鍵で署名する。
+    // 実行ロールの鍵で署名すると、利用者のブラウザが S3 へ送るたびに GuardDuty が
+    // 「Lambda 専用の認証情報が AWS の外で使われた」（重大度8）と検知する（2026-11-10 に発生）
+    const uploadRole = new iam.Role(this, 'UploadRole', {
+      roleName: 'minorun-agent-upload',
+      assumedBy: new iam.ArnPrincipal(this.interceptor.role!.roleArn),
+      description: 'minorun-agent upload ticket signer (PutObject to up/* only)',
+    });
+    uploadRole.addToPolicy(new iam.PolicyStatement({
       actions: ['s3:PutObject'],
       resources: [props.uploadBucket.arnForObjects('up/*')],
     }));
+    this.interceptor.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['sts:AssumeRole'],
+      resources: [uploadRole.roleArn],
+    }));
+    this.interceptor.addEnvironment('UPLOAD_ROLE_ARN', uploadRole.roleArn);
     this.interceptor.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:Query', 'dynamodb:UpdateItem'],
       resources: [props.conversationLog.tableArn],
