@@ -15,6 +15,8 @@ MEMORY_ID = os.environ.get("MEMORY_ID", "")
 LOG_TABLE = os.environ.get("LOG_TABLE", "")
 # 回答に添える画像（会場マップ）の置き場。画面と同じ配信元からの相対パス
 ASSET_BASE = os.environ.get("ASSET_BASE", "/assets")
+# 質問に添える画像の一時置き場（空なら添付を受け付けない）
+UPLOAD_BUCKET = os.environ.get("UPLOAD_BUCKET", "")
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
 # 会期前後も使うため、夏時間の切り替えを日付から判定する。

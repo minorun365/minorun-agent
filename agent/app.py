@@ -30,6 +30,7 @@ from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.hooks import BeforeToolCallEvent, HookProvider, HookRegistry
 from strands.models.bedrock import CacheConfig
 
+import attachments
 import catalog
 import link_preview
 import prebaked
@@ -226,7 +227,8 @@ def _after_answer(conv, task_id, turn_start, judged, row):
         messages = conv.agent.messages
         # 過去の検索本文は次の要約まで保持する。毎問の書換えでキャッシュを壊さない。
         decision = judged["decision"]
-        trim = turn_start > 24 or len(json.dumps(messages, ensure_ascii=False)) > 60000
+        # 画像のバイト列は JSON にできないので、大きさは画像を印に置き換えた写しで測る
+        trim = turn_start > 24 or len(json.dumps(attachments.strip(messages), ensure_ascii=False)) > 60000
         row["context_trimmed"] = False
         if decision in ("new", "back") and turn_start > 0:
             old = messages[getattr(conv, "topic_start", 0):turn_start]
@@ -262,7 +264,8 @@ def _after_answer(conv, task_id, turn_start, judged, row):
             conv.current = judged["heading"]
         conv.shelf = conv.shelf[-12:]
         conv.turns += 1
-        store.save_snapshot(conv.actor, conv.session, conv.agent.messages, conv.state())
+        # 控えには画像を残さない（入れ物が入れ替わった後は、印の文だけが戻る）
+        store.save_snapshot(conv.actor, conv.session, attachments.strip(conv.agent.messages), conv.state())
         if row.get("user"):
             store.remember_turn(conv.actor, conv.session, row["question"], row["answer"])
     except Exception as e:
@@ -348,10 +351,20 @@ async def invoke(payload, context):
         await asyncio.gather(asyncio.to_thread(_warm_up), asyncio.to_thread(_conversation, actor, session))
         yield {"type": "done"}
         return
+    image_key = attachments.owned_key(str(payload.get("image") or ""), str(payload.get("anon") or ""))
+    if not question and image_key:
+        question = attachments.DEFAULT_QUESTION
     if not question:
         yield {"type": "error", "message": "質問を入れてから送ってください。"}
         yield {"type": "done"}
         return
+    image = None
+    if image_key:
+        image = await asyncio.to_thread(attachments.load, image_key)
+        if image is None:
+            yield {"type": "error", "message": attachments.UNREADABLE}
+            yield {"type": "done"}
+            return
 
     conv = _conversation(actor, session)
     await asyncio.to_thread(conv.lock.acquire)
@@ -371,7 +384,8 @@ async def invoke(payload, context):
                 print(json.dumps({"recall_error": type(e).__name__, "detail": str(e)[:200]}))
         previous_context = getattr(conv, "last_context", None)
         model_question = _question_prompt(conv, question, memories)
-        pb = prebaked.lookup(question, getattr(conv, "last_prebaked", None))
+        # 画像つきの質問は用意した回答を使わない（同じ文でも、聞いている中身は画像で変わる）
+        pb = None if image else prebaked.lookup(question, getattr(conv, "last_prebaked", None))
         conv.last_prebaked = None
         if pb is not None:
             base = {"anon": actor, "user": user or None, "memories": len(memories),
@@ -392,8 +406,13 @@ async def invoke(payload, context):
             name = use.get("name")
             return {"type": "tool", "name": name, "label": _tool_label(name, question, conv.current)}
 
+        asked = model_question
+        if image:
+            # 持つ画像は最新の1枚だけ。前の画像は印の文に置き換える（毎問の入力を増やし続けない）
+            conv.agent.messages = attachments.strip(conv.agent.messages)
+            asked = [{"text": model_question}, attachments.block(image)]
         try:
-            async for ev in conv.agent.stream_async(model_question):
+            async for ev in conv.agent.stream_async(asked):
                 if "data" in ev and ev["data"]:
                     if first_ms is None:
                         first_ms = store.elapsed_ms(started)
@@ -496,7 +515,7 @@ async def invoke(payload, context):
         row = {"anon": actor, "user": user or None, "memories": len(memories), "question": question, "answer": "".join(answer), "first_ms": first_ms,
                "total_ms": store.elapsed_ms(started), "tools": turn.tools_used, "x_search": turn.x_usage, "catalog": catalog_state,
                "model": MODEL_MAIN, "effort": MAIN_EFFORT, "status": "error" if failed else "ok",
-               "_usage": ledger, "initial_answer": initial_answer, "research": research_audit, "follow_up": followed, **({"tid": tid} if tid else {}), **({"via": via} if via else {})}
+               "_usage": ledger, "initial_answer": initial_answer, "research": research_audit, "follow_up": followed, **({"image_bytes": len(image)} if image else {}), **({"tid": tid} if tid else {}), **({"via": via} if via else {})}
         task_id = app.add_async_task("after_answer", {"session": session})
         threading.Thread(target=_after_answer, args=(conv, task_id, turn_start, judged, row), daemon=True).start()
         handed_off = True

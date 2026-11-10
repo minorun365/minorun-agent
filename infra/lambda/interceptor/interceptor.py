@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
@@ -32,6 +33,25 @@ TURN_ID = re.compile(r"^[A-Za-z0-9]{8,40}$")
 SESSION_ID = re.compile(r"^[A-Za-z0-9-]{16,100}$")
 _users = {}  # トークンのハッシュ → (利用者のハッシュ, 期限)。同じトークンで毎回 Cognito を呼ばないよう、入れ物の中だけで覚える
 JST = datetime.timezone(datetime.timedelta(hours=9))
+# 添付画像の一時置き場。画面が縮めた JPEG を、ここで出す期限つきの宛先へ直接送る（入口と WAF は大きい本文を通さない）
+UPLOAD_BUCKET = os.environ.get("UPLOAD_BUCKET", "")
+IMAGE_DAILY = int(os.environ.get("IMAGE_DAILY", "5"))
+USER_IMAGE_DAILY = int(os.environ.get("USER_IMAGE_DAILY", "20"))
+IMAGE_DAILY_ALL = int(os.environ.get("IMAGE_DAILY_ALL", "300"))
+IMAGE_MAX_BYTES = 1_500_000
+IMAGE_ID = re.compile(r"^[0-9a-f]{32}$")
+_s3_client = None
+
+
+def _s3():
+    # 地域つきの宛先にする（地域なしの宛先は、作りたてのバケットで転送が挟まりブラウザから送れない）
+    global _s3_client
+    if _s3_client is None:
+        from botocore.config import Config
+        region = os.environ.get("AWS_REGION", "us-west-2")
+        _s3_client = boto3.client("s3", region_name=region, endpoint_url=f"https://s3.{region}.amazonaws.com",
+                                  config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
+    return _s3_client
 ANON_ID = re.compile(r"^[A-Za-z0-9-]{16,64}$")
 
 MESSAGES = {
@@ -40,6 +60,8 @@ MESSAGES = {
     "stopped": "いま混み合っています。少し時間をおいて試してください。",
     "per_minute": "少し間をあけてから、もう一度送ってください。",
     "daily_limit": "今日の質問はここまで。日本時間の0時に戻ります。",
+    "image_limit": "画像を送れるのは1日{n}枚までです。文章だけの質問は続けられます。",
+    "image_full": "今日は画像の受付がいっぱいになりました。文章だけの質問は続けられます。",
     "banned": "良識の範囲内での利用を逸脱する行為が確認されました。今後このアプリの利用をお断りします。",
 }
 
@@ -157,12 +179,12 @@ def _user(token):
     return user
 
 
-def _reject(key, reason, status, anon_id=None):
+def _reject(key, reason, status, anon_id=None, message=None):
     # 誰が上限に当たったかを数えられるよう、匿名IDのハッシュを添える（IP などは書かない。bad_id のときは無し）
     print(json.dumps({"decision": "reject", "reason": reason, **({"anon": _anon(anon_id)} if anon_id else {})}))
     # HTTP の Gateway では本文を base64 の文字列で返す（JSON のまま返すと
     # 「Received invalid response from interceptor」で 400 になる。2026-10-25 実測）
-    body = json.dumps({"error": reason, "message": MESSAGES[reason]}, ensure_ascii=False)
+    body = json.dumps({"error": reason, "message": message or MESSAGES[reason]}, ensure_ascii=False)
     return {
         "interceptorOutputVersion": "1.0",
         key: {
@@ -243,6 +265,8 @@ def handler(event, context):
         if _count(f"fb#{now:%Y-%m-%dT%H:%M}#{anon_id}", now + datetime.timedelta(minutes=2)) > 20:
             return _reject(key, "per_minute", 429, anon_id)
         return _feedback(key, request, body, anon_id, user)
+    if "upload" in body:
+        return _upload(key, anon_id, user, now)
     if body.get("warmup") is True:
         # ページを開いたときの先読み（会話の入れ物を先に起こす）。モデルを呼ばないので1日の件数には数えず、連打だけ止める
         if _count(f"warm#{now:%Y-%m-%dT%H:%M}#{anon_id}", now + datetime.timedelta(minutes=2)) > 3:
@@ -266,7 +290,40 @@ def handler(event, context):
         passed["tid"] = tid  # 画面が質問ごとに作る番号。後から届く評価を、この質問の行へ結び付ける
     if body.get("via") in ("typed", "ai", "starter", "link"):
         passed["via"] = body["via"]  # 質問の出どころ（自由入力・AI の候補・用意した質問・?ask= のリンク）
+    image = str(body.get("image", ""))
+    if UPLOAD_BUCKET and IMAGE_ID.match(image):
+        # 置き場の場所は匿名IDから組み立てる（他の人が送った画像の番号を知っていても読めない）
+        passed["image"] = _image_key(anon_id, image)
     return _pass(key, passed, anon_id, user)
+
+
+def _image_key(anon_id, image):
+    return f"up/{_anon(anon_id)}/{image}.jpg"
+
+
+def _upload(key, anon_id, user, now):
+    """添付画像の宛先を出す。モデルは呼ばない。枚数は匿名ID（ログインした人は利用者）ごとと全体の2つで数える。"""
+    who = f"u:{user}" if user else anon_id
+    limit = USER_IMAGE_DAILY if user else IMAGE_DAILY
+    if not UPLOAD_BUCKET or limit <= 0:
+        return _reject(key, "image_full", 429, anon_id)
+    if _count(f"upmin#{now:%Y-%m-%dT%H:%M}#{who}", now + datetime.timedelta(minutes=2)) > 6:
+        return _reject(key, "per_minute", 429, anon_id)
+    tomorrow = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    expires = tomorrow + datetime.timedelta(hours=1)
+    if _count(f"img#{now:%Y-%m-%d}#{who}", expires) > limit:
+        return _reject(key, "image_limit", 429, anon_id, MESSAGES["image_limit"].format(n=limit))
+    if _count(f"img#{now:%Y-%m-%d}#all", expires) > IMAGE_DAILY_ALL:
+        return _reject(key, "image_full", 429, anon_id)
+    image = secrets.token_hex(16)
+    # 種類は JPEG だけ、大きさは上限まで。条件に合わない送信は S3 が断る
+    post = _s3().generate_presigned_post(
+        UPLOAD_BUCKET, _image_key(anon_id, image),
+        Fields={"Content-Type": "image/jpeg"},
+        Conditions=[{"Content-Type": "image/jpeg"}, ["content-length-range", 1, IMAGE_MAX_BYTES]],
+        ExpiresIn=300)
+    print(json.dumps({"decision": "upload", "anon": _anon(anon_id), **({"user": user} if user else {})}))
+    return _respond(key, 200, {"ok": True, "image": image, "url": post["url"], "fields": post["fields"], "max_bytes": IMAGE_MAX_BYTES})
 
 
 def _respond(key, status, payload):

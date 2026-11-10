@@ -119,7 +119,17 @@ td:first-child{font-weight:700;white-space:nowrap}
 /* 入力中はホームバー用余白を重ねない。アプリ内ブラウザのキーボード判定に依存させない。 */
 .stage.composing .dock{padding-bottom:0}
 .stage.composing .write{opacity:1;pointer-events:auto;bottom:0}
-.write::before{content:"";flex:none;width:46px}
+/* 入力欄の左：画像を添付するボタン（右の送信ボタンと同じ幅なので、入力欄は中央のまま） */
+.clip{flex:none;width:46px;height:46px;border-radius:50%;border:0;background:transparent;color:var(--mut);display:grid;place-items:center;cursor:pointer}
+.clip:hover,.clip.has{color:var(--ink)}
+/* 添付した画像の小さな見本。入力欄のすぐ上、注意書きの上に出す */
+.attach{position:absolute;left:0;right:0;width:max-content;margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 84px);
+  opacity:0;pointer-events:none;transition:opacity .3s ease}
+.attach[hidden]{display:none}
+.stage.composing .attach{opacity:1;pointer-events:auto}
+.stage.kbd .attach{bottom:94px}
+.attach img{display:block;max-width:132px;max-height:88px;border-radius:12px;box-shadow:0 4px 18px rgba(20,22,28,.18),0 0 0 1px var(--line)}
+.attach button{position:absolute;top:-9px;right:-9px;width:26px;height:26px;border-radius:50%;border:0;background:var(--ink);color:#fff;font-size:15px;line-height:1;cursor:pointer}
 .write textarea{flex:1;min-width:0;font:inherit;font-size:18px;line-height:1.5;text-align:center;resize:none;border:0;outline:none;background:transparent;
   color:var(--ink);caret-color:var(--accent);max-height:6em;padding:9px 2px;overflow-y:auto}
 .write textarea::placeholder{color:#b8bdc6}
@@ -187,6 +197,7 @@ td:first-child{font-weight:700;white-space:nowrap}
     margin: max(32px,calc((var(--vvh) - 820px) / 2)) auto 0}
   .stage.composing .dock{padding-bottom:var(--edge-b)}
   .stage.composing .write{bottom:var(--edge-b)}
+  .stage.composing .attach{bottom:calc(var(--edge-b) + 84px)}
 }
 /* ダークモードの案（?theme=dark で表示。iOS のダークの地色 #000 につなげる） */
 :root[data-theme=dark]{color-scheme:dark;--bg:#000;--card:#1c1c1e;--cloud:#2c2c2e;--mark:rgba(78,161,255,.35);
@@ -197,6 +208,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 :root[data-theme=dark] .chip{background:#1c1c1e;color:var(--ink)}
 :root[data-theme=dark] .chip.ask{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
 :root[data-theme=dark] .send{background:var(--ink);color:#000}
+:root[data-theme=dark] .attach button{background:var(--ink);color:#000}
 :root[data-theme=dark] .write textarea::placeholder{color:#636366}
 :root[data-theme=dark] .greet,:root[data-theme=dark] .greet::after,:root[data-theme=dark] .fly{background:var(--card);color:var(--sub)}
 :root[data-theme=dark] .fly{color:var(--ink)}

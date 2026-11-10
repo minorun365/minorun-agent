@@ -14,6 +14,7 @@ import { esc, md } from './markdown';
 import { pickStarters } from './starters';
 import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
+import { AttachError, shrink, upload } from './attach';
 
 interface MapShown { src: string; alt: string; caption: string; width: number; height: number; source_url: string }
 type AgentEvent =
@@ -100,7 +101,9 @@ function layout() {
   const headB = header.offsetTop + header.offsetHeight + 6;
   const comp = has('composing'), ans = has('answering') && !comp;
   const pad = parseFloat(getComputedStyle(dock).paddingBottom);
-  const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 : has('limited') ? 0 : suggest.offsetHeight;
+  // 添付した画像の見本が出ているときは、その高さもキャラクターの下に空ける
+  const shot = $('#attach');
+  const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 + (shot.hidden ? 0 : shot.offsetHeight + 14) : has('limited') ? 0 : suggest.offsetHeight;
   const dockTop = H - pad - inner - (comp ? 10 : 16);
   const avail = dockTop - headB;
   // 通常ブラウザの縦向きは上下、Xのアプリ内と横向きの低い画面は左右に配置する。
@@ -363,29 +366,60 @@ function renderSuggest(list: string[], retry = false, via: Via = 'starter') {
     const b = document.createElement('button'); b.className = 'chip' + (cls ? ' ' + cls : ''); b.type = 'button'; b.textContent = t;
     b.onclick = () => fn(b); suggest.appendChild(b);
   };
-  if (retry) add('もう一度送る', '', (b) => send(lastText, b, lastVia));
+  if (retry) add('もう一度送る', '', (b) => send(lastText, b, lastVia, lastImage));
   list.forEach((t) => add(t, '', (b) => send(t, b, via)));
   // 一度答えたあとは、続けて聞けることが分かるように「追加で質問」にする
   add(has('started') ? '追加で質問' : '質問する', 'ask', openCompose);
   relayout();
 }
 
+// ---- 画像の添付：1枚だけ。選んだ時点で縮めておき、送るときに置き場へ上げる ----
+const clip = $('#clip'), fileInput = $<HTMLInputElement>('#file'), attachBox = $('#attach'), attachImg = $<HTMLImageElement>('#attachImg');
+const NO_TEXT = 'この画像について教えてください';
+let attached: Blob | null = null, picking = false;
+const canSend = () => q.value.trim().length > 0 || !!attached;
+function setAttached(blob: Blob | null) {
+  if (attachImg.src) URL.revokeObjectURL(attachImg.src);
+  attached = blob;
+  attachBox.hidden = !blob; clip.classList.toggle('has', !!blob);
+  if (blob) attachImg.src = URL.createObjectURL(blob); else attachImg.removeAttribute('src');
+  sendBtn.classList.toggle('on', canSend());
+  relayout();
+}
+async function pickImage(file: Blob | null | undefined) {
+  if (!file) return;
+  try { setAttached(await shrink(file)); }
+  catch (e) { setAttached(null); notice.textContent = e instanceof AttachError ? e.message : NOTICE; setTimeout(() => { notice.textContent = NOTICE; }, 4000); }
+}
+const NOTICE = notice.textContent ?? '';
+// ファイルを選ぶ画面を開くと入力欄からフォーカスが外れる。その間は入力を閉じない
+clip.addEventListener('pointerdown', (e) => { e.preventDefault(); picking = true; });
+clip.addEventListener('click', () => { picking = true; fileInput.click(); });
+fileInput.addEventListener('change', () => { picking = false; void pickImage(fileInput.files?.[0]); fileInput.value = ''; });
+fileInput.addEventListener('cancel', () => { picking = false; });
+$('#attachDrop').addEventListener('click', () => setAttached(null));
+q.addEventListener('paste', (e) => {
+  const file = Array.from(e.clipboardData?.files ?? []).find((f) => f.type.startsWith('image/'));
+  if (file) { e.preventDefault(); void pickImage(file); }
+});
+const submitTyped = () => { if (canSend()) send(q.value.trim() || NO_TEXT, q, 'typed'); };
+
 function openCompose() {
   layoutViewport.begin(innerWidth, visibleHeight(innerHeight, window.visualViewport?.height));
   closeGift();
   cancelIdle(); director.phase('composing');
   stage.classList.add('composing');
-  sendBtn.classList.toggle('on', q.value.trim().length > 0);
+  sendBtn.classList.toggle('on', canSend());
   // iOSでキーボードを開くため、タップの処理中にフォーカスする。描画待ちへ移さない。
   q.focus({ preventScroll: true });
   relayout();
 }
 function closeCompose() { stage.classList.remove('composing'); q.blur(); if (!busy) idle(); relayout(); }
 function growInput() { q.style.height = 'auto'; q.style.height = q.scrollHeight + 'px'; relayout(); }
-q.addEventListener('input', () => { sendBtn.classList.toggle('on', q.value.trim().length > 0); growInput(); });
-q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (q.value.trim()) send(q.value.trim(), q, 'typed'); } });
-q.addEventListener('blur', () => setTimeout(() => { if (has('composing') && !q.value.trim() && document.activeElement !== q) closeCompose(); }, 120));
-bindSubmitButton(sendBtn, () => { if (q.value.trim()) send(q.value.trim(), q, 'typed'); });
+q.addEventListener('input', () => { sendBtn.classList.toggle('on', canSend()); growInput(); });
+q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submitTyped(); } });
+q.addEventListener('blur', () => setTimeout(() => { if (has('composing') && !canSend() && !picking && document.activeElement !== q) closeCompose(); }, 120));
+bindSubmitButton(sendBtn, submitTyped);
 stage.addEventListener('pointerdown', (e) => { if (has('composing') && !dock.contains(e.target as Node)) closeCompose(); });
 
 // 送った質問が丸い玉に縮み、画面の右側を弧を描いて回り込んで、キャラの頭の上へ飛んでいく
@@ -486,9 +520,13 @@ const topicsSeen: string[] = [];
 const DAILY_LIMIT_GUEST = DAILY_LIMIT + '\n\n右上のアイコンから Google でログインすると、もっとお話しできるようになります。';
 let busy = false, turnVersion = 0;
 type Via = 'typed' | 'ai' | 'starter' | 'link';
-let lastVia: Via = 'typed';
-async function send(text: string, fromEl?: HTMLElement, via: Via = 'link') {
+let lastVia: Via = 'typed', lastImage: Blob | null = null;
+async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retryImage: Blob | null = null) {
   if (busy) return;
+  // 添付は自由入力のときだけ送る。「もう一度送る」は前の画像を上げ直す
+  const picture = via === 'typed' && fromEl === q ? attached : retryImage;
+  if (picture && picture === attached) setAttached(null);
+  lastImage = picture;
   const requestVersion = ++turnVersion;
   closeGift(); giftEligible = false; currentGiftCandidates = [];
   cancelIdle(); busy = true; lastText = text; lastVia = via;
@@ -530,7 +568,14 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link') {
   };
 
   try {
-    for await (const ev of chat({ prompt: text, tid, via })) {
+    let image: string | undefined;
+    if (picture) {
+      doing.textContent = '画像を送っています'; doing.classList.add('on');
+      try { image = await upload((body) => postChat(body, AbortSignal.timeout(15000)), picture); }
+      catch (e) { throw new Refused(0, e instanceof AttachError ? e.reason : 'network', e instanceof Error ? e.message : ''); }
+      doing.textContent = '画像を見ています';
+    }
+    for await (const ev of chat({ prompt: text, tid, via, ...(image ? { image } : {}) })) {
       if (ev.type === 'topic') {
         topic = ev.heading;
         if (ev.heading && !topicsSeen.includes(ev.heading)) topicsSeen.push(ev.heading);

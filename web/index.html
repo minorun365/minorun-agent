@@ -60,7 +60,10 @@
     <div class="mist"></div>
     <div class="suggest" id="suggest"></div>
     <p class="notice">個人情報や機密情報は送らないでください</p>
+    <div class="attach" id="attach" hidden><img id="attachImg" alt="添付する画像"><button id="attachDrop" type="button" aria-label="画像を外す">×</button></div>
     <div class="write">
+      <button class="clip" id="clip" type="button" aria-label="画像を添付"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="9" cy="10" r="1.6" fill="currentColor"/><path d="M5 17l4.5-4.5 3 3L15.5 12l3.5 4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <input id="file" type="file" accept="image/*" hidden>
       <textarea id="q" rows="1" placeholder="質問を入力" enterkeyhint="send" aria-label="質問" maxlength="1000"></textarea>
       <button class="send" id="send" type="button" aria-label="送信"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>

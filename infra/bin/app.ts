@@ -22,7 +22,7 @@ const agent = new AgentStack(app, 'MinorunAgent', {
   knowledgeBucketName: `minorun-agent-knowledge-${env.account}`,
 });
 agent.addDependency(knowledge);
-const entry = new EntryStack(app, 'MinorunEntry', { env, runtime: agent.runtime, legacyRuntime: agent.legacyRuntime, runtimeV2: agent.runtimeV2, conversationLog: agent.conversationLog });
+const entry = new EntryStack(app, 'MinorunEntry', { env, runtime: agent.runtime, legacyRuntime: agent.legacyRuntime, runtimeV2: agent.runtimeV2, conversationLog: agent.conversationLog, uploadBucket: agent.uploadBucket });
 
 // CloudFront の WAF はバージニア北部にしか置けない
 new EdgeStack(app, 'MinorunEdge', { env: { account: env.account, region: 'us-east-1' } });

@@ -7,6 +7,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import type * as s3 from 'aws-cdk-lib/aws-s3';
 import type { Construct } from 'constructs';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,8 @@ export interface EntryStackProps extends cdk.StackProps {
   readonly runtimeV2: agentcore.CfnRuntime;
   // 1問1行の会話の表。回答の評価（良い・良くない）を確認役がここへ書き足す
   readonly conversationLog: dynamodb.ITable;
+  // 添付画像の一時置き場。確認役が、画面から直接送るための期限つきの宛先を出す
+  readonly uploadBucket: s3.IBucket;
 }
 
 // 入口：回数を数える表、確認役（インターセプター）、Gateway とそのロール。
@@ -76,11 +79,20 @@ export class EntryStack extends cdk.Stack {
         USER_DAILY_LIMIT: '100',
         USER_PER_MINUTE: '10',
         CONVERSATIONS_TABLE: props.conversationLog.tableName,
+        // 添付画像：匿名は1日5枚、ログインした人は20枚、全体で300枚まで（0 にすると受け付けない）
+        UPLOAD_BUCKET: props.uploadBucket.bucketName,
+        IMAGE_DAILY: '5',
+        USER_IMAGE_DAILY: '20',
+        IMAGE_DAILY_ALL: '300',
         ...(auth ? { USER_POOL_ID: auth.userPoolId, USER_CLIENT_ID: auth.clientId } : {}),
       },
     });
     this.usageTable.grantReadWriteData(this.interceptor);
     transportErrors.grant(this.interceptor, 'dynamodb:UpdateItem');
+    this.interceptor.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['s3:PutObject'],
+      resources: [props.uploadBucket.arnForObjects('up/*')],
+    }));
     this.interceptor.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:Query', 'dynamodb:UpdateItem'],
       resources: [props.conversationLog.tableArn],

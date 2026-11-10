@@ -18,6 +18,7 @@ test('入力欄を開いたイベントが終わる前に、表示してフォ�
     closeGift() {}, cancelIdle() {}, director: { phase() {} },
     stage: { classList: { add(name: string) { visible = name === 'composing'; } } },
     sendBtn: { classList: { toggle() {} } },
+    canSend: () => false,
     q: { value: '', focus() { assert.ok(visible); focused = true; } },
     relayout() {},
     setTimeout(fn: () => void) { deferred.push(fn); },

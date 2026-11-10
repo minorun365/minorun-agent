@@ -7,6 +7,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import type { Construct } from 'constructs';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,8 @@ export class AgentStack extends cdk.Stack {
   readonly legacyRuntime: agentcore.CfnRuntime;
   readonly runtimeV2: agentcore.CfnRuntime;
   readonly conversationLog: dynamodb.Table;
+  // 質問に添える画像の一時置き場（画面が直接送り、エージェントが読んだら消す）
+  readonly uploadBucket: s3.Bucket;
 
   constructor(scope: Construct, id: string, props: AgentStackProps) {
     super(scope, id, props);
@@ -122,6 +125,27 @@ export class AgentStack extends cdk.Stack {
       resources: [`arn:${this.partition}:secretsmanager:${this.region}:${this.account}:secret:bedrock-agentcore-identity!default/apikey/brave-*`],
     }));
 
+    // 添付画像の一時置き場。画面は確認役が出した期限つきの宛先へ直接送る（WAF と入口は本文8KBまでしか通さない）。
+    // エージェントは読んだ直後に消し、読まれなかった分も1日で消える
+    this.uploadBucket = new s3.Bucket(this, 'Uploads', {
+      bucketName: `minorun-agent-uploads-${this.account}`,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      lifecycleRules: [{ expiration: cdk.Duration.days(1), abortIncompleteMultipartUploadAfter: cdk.Duration.days(1) }],
+      cors: [{
+        allowedMethods: [s3.HttpMethods.POST],
+        // 画面を配るドメインをカンマ区切りで渡す（例：WEB_ORIGINS=https://agent.example.com）
+        allowedOrigins: [...(process.env.WEB_ORIGINS ?? 'https://agent.example.com').split(','), 'http://localhost:5173'],
+        allowedHeaders: ['*'],
+        maxAge: 3600,
+      }],
+    });
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ['s3:GetObject', 's3:DeleteObject'],
+      resources: [this.uploadBucket.arnForObjects('up/*')],
+    }));
+
     // 受け口は IAM（authorizerConfiguration なし）。呼べるのは入口の Gateway のロールだけにする。
     const runtimeProps: agentcore.CfnRuntimeProps = {
       agentRuntimeName: 'minorun_agent',
@@ -148,6 +172,7 @@ export class AgentStack extends cdk.Stack {
         MEMORY_ID: memory.attrMemoryId,
         LOG_TABLE: log.tableName,
         ASSET_BASE: '/assets',
+        UPLOAD_BUCKET: this.uploadBucket.bucketName,
       },
     };
     // V1 は切り戻し用に現行イメージを固定し、V2 と保存先・実行権限を共有する。
