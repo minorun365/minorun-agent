@@ -32,6 +32,7 @@ from strands.models.bedrock import CacheConfig
 
 import attachments
 import catalog
+import fallback
 import link_preview
 import prebaked
 import prompt
@@ -42,7 +43,7 @@ import tools
 import topics
 import usage
 from tool_status import knowledge_label
-from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN
+from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN, MODEL_MAIN_API
 
 app = BedrockAgentCoreApp()
 
@@ -100,11 +101,27 @@ def _question_prompt(conv, question, memories):
     return question + "\n\n[アプリが添えた会話の補助情報。今回の質問は上の本文]\n" + context
 
 
-def _model(model_id, max_tokens, effort):
+def _cache():
     # ツールの定義と会話はキャッシュする。システムプロンプトは変わらない部分の後ろに自前で cachePoint を置く
-    return usage.MeteredModel(model_id=model_id, max_tokens=max_tokens,
-                        cache_config=CacheConfig(strategy="auto", system_prompt_ttl=False, tools_ttl=True),
-                        additional_request_fields={"output_config": {"effort": effort}})
+    return CacheConfig(strategy="auto", system_prompt_ttl=False, tools_ttl=True)
+
+
+def _model(model_id, max_tokens, effort):
+    return usage.MeteredModel(model_id=model_id, max_tokens=max_tokens, cache_config=_cache(),
+                              additional_request_fields={"output_config": {"effort": effort}})
+
+
+def _main_model():
+    """回答は Claude API（Max プランの API クレジット）を先に使い、使えなければ Bedrock で答える。"""
+    make = fallback.anthropic_model(usage.MeteredAnthropicModel, MODEL_MAIN_API, 4000, MAIN_EFFORT, _cache())
+    return fallback.FallbackModel(make, _model(MODEL_MAIN, 4000, MAIN_EFFORT))
+
+
+def _answer_models(ledger):
+    """この質問の回答で実際に使ったモデル（Claude API か Bedrock か）。"""
+    with ledger.condition:
+        seen = [c["model"] for c in ledger.calls if c["phase"] in ("answer", "follow_up")]
+    return ",".join(dict.fromkeys(seen)) or MODEL_MAIN
 
 
 class Conversation:
@@ -123,7 +140,7 @@ class Conversation:
         self.last_prebaked = state.get("last_prebaked")  # 直前に事前回答で答えた用意した質問（深掘りの回答を使う鍵）
         self.lock = threading.Lock()
         self.agent = Agent(
-            model=_model(MODEL_MAIN, 4000, MAIN_EFFORT),
+            model=_main_model(),
             tools=tools.ALL,
             system_prompt=_system(self.shelf, self.current),
             messages=(snapshot or {}).get("messages", []),
@@ -514,7 +531,7 @@ async def invoke(payload, context):
             conv.last_context = previous_context
         row = {"anon": actor, "user": user or None, "memories": len(memories), "question": question, "answer": "".join(answer), "first_ms": first_ms,
                "total_ms": store.elapsed_ms(started), "tools": turn.tools_used, "x_search": turn.x_usage, "catalog": catalog_state,
-               "model": MODEL_MAIN, "effort": MAIN_EFFORT, "status": "error" if failed else "ok",
+               "model": _answer_models(ledger), "effort": MAIN_EFFORT, "status": "error" if failed else "ok",
                "_usage": ledger, "initial_answer": initial_answer, "research": research_audit, "follow_up": followed, **({"image_bytes": len(image)} if image else {}), **({"tid": tid} if tid else {}), **({"via": via} if via else {})}
         task_id = app.add_async_task("after_answer", {"session": session})
         threading.Thread(target=_after_answer, args=(conv, task_id, turn_start, judged, row), daemon=True).start()

@@ -125,6 +125,10 @@ export class AgentStack extends cdk.Stack {
       resources: [`arn:${this.partition}:secretsmanager:${this.region}:${this.account}:secret:bedrock-agentcore-identity!default/apikey/brave-*`],
     }));
 
+    // 回答は Claude API を先に使う（agent/fallback.py。使えなければ Bedrock）。Claude API へは ID 連携で入り、
+    // 実行ロールの身元を示す証明書を STS からもらう。アカウントの Outbound web identity federation を有効にしてある
+    role.addToPolicy(new iam.PolicyStatement({ actions: ['sts:GetWebIdentityToken'], resources: ['*'] }));
+
     // 添付画像の一時置き場。画面は確認役が出した期限つきの宛先へ直接送る（WAF と入口は本文8KBまでしか通さない）。
     // エージェントは読んだ直後に消し、読まれなかった分も1日で消える
     this.uploadBucket = new s3.Bucket(this, 'Uploads', {
@@ -165,6 +169,13 @@ export class AgentStack extends cdk.Stack {
         // 質問と回答の本文をトレースに残す（既定では抜かれ、Evaluations も読めない）
         AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT: 'true',
         MODEL_MAIN: 'global.anthropic.claude-sonnet-5-5',
+        // on のあいだ回答は Claude API（Max プランの API クレジット）を先に使う。off で Bedrock だけに戻す
+        ANTHROPIC_PRIMARY: 'on',
+        MODEL_MAIN_API: 'claude-sonnet-5-5',
+        // Claude Console の Workload identity で作った ID 連携。未設定なら回答は Bedrock だけで動く
+        CLAUDE_WIF_RULE_ID: process.env.CLAUDE_WIF_RULE_ID ?? '',
+        CLAUDE_WIF_ORGANIZATION_ID: process.env.CLAUDE_WIF_ORGANIZATION_ID ?? '',
+        CLAUDE_WIF_SERVICE_ACCOUNT_ID: process.env.CLAUDE_WIF_SERVICE_ACCOUNT_ID ?? '',
         MODEL_AUX: 'global.anthropic.claude-haiku-5-5',
         MAIN_EFFORT: 'low',
         TOOLS_GATEWAY_URL: props.toolsGateway.mcpUrl,

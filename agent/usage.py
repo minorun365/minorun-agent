@@ -4,13 +4,16 @@ import hashlib
 import threading
 from pathlib import Path
 
+from strands.models.anthropic import AnthropicModel
 from strands.models.bedrock import BedrockModel
 
 CURRENT = contextvars.ContextVar("turn_usage", default=None)
 # Oregon / Global / Standard、2026-10-26確認。100万トークンあたりUSD。
+# Claude API（claude-sonnet-5-5）は Max プランの API クレジットで払う。単価は Bedrock と同じ（2026-11-13 確認）
 RATES = {
     "global.anthropic.claude-sonnet-5-5": (2, 10, .10, 2.50),
     "global.anthropic.claude-haiku-5-5": (.10, .50, .01, .125),
+    "claude-sonnet-5-5": (2, 10, .10, 2.50),
 }
 KEYS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheWriteInputTokens")
 REVISION = hashlib.sha256(b"".join(p.name.encode() + p.read_bytes()
@@ -58,20 +61,37 @@ class Ledger:
 PHASE = contextvars.ContextVar("usage_phase", default="answer")
 
 
-class MeteredModel(BedrockModel):
+class _Metered:
+    """モデル呼び出し1回ごとに、返ってきた使用量を質問の台帳へ足す。"""
+
+    # 最初の出来事の前に断られた呼び出しは課金されない。Claude API は断られたら Bedrock へ回すので、
+    # その1回を「費用0」で記録し、質問の費用を未確定にしない
+    free_when_refused = False
+
     async def stream(self, *args, **kwargs):
         ledger = CURRENT.get()
         if ledger:
             ledger.begin()
-        usage, failed = None, False
+        usage, failed, started = None, False, False
         try:
             async for event in super().stream(*args, **kwargs):
+                started = True
                 if "usage" in event.get("metadata", {}):
                     usage = event["metadata"]["usage"]
                 yield event
         except BaseException:
             failed = True
+            if not started and self.free_when_refused:
+                usage = {"inputTokens": 0, "outputTokens": 0}
             raise
         finally:
             if ledger:
                 ledger.end(self.config["model_id"], PHASE.get(), usage, failed)
+
+
+class MeteredModel(_Metered, BedrockModel):
+    pass
+
+
+class MeteredAnthropicModel(_Metered, AnthropicModel):
+    free_when_refused = True
