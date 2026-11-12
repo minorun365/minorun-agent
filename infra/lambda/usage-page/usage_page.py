@@ -77,7 +77,9 @@ PRICE = {
 MODELS = {"sonnet": "global.anthropic.claude-sonnet-5-5", "haiku": "global.anthropic.claude-haiku-5-5"}
 TOKEN_METRICS = {"in": "InputTokenCount", "out": "OutputTokenCount",
                  "cache_read": "CacheReadInputTokenCount", "cache_write": "CacheWriteInputTokenCount"}
-LABELS = {"sonnet": "Sonnet 5.5（回答）", "haiku": "Haiku 5.5（判定・要約・候補）", "runtime": "AgentCore Runtime",
+# Claude API（Anthropic）で呼んだモデル。AWS/Bedrock のメトリクスには載らないので、1問1行の表の usage.calls から足す
+API_MODELS = {"claude-sonnet-5-5"}
+LABELS = {"claude_api": "Sonnet 5.5（回答・Claude API）", "sonnet": "Sonnet 5.5（回答・Bedrock）", "haiku": "Haiku 5.5（判定・要約・候補）", "runtime": "AgentCore Runtime",
           "web_search": "AgentCore Web Search", "brave": "Brave", "x": "X検索", "kb": "ナレッジベースの検索"}
 REASONS = {"per_minute": "1分の上限", "daily_limit": "1日の上限", "bad_id": "IDの形", "too_long": "文字数", "stopped": "停止中", "banned": "利用停止"}
 FLAG_LABELS = {"off_topic": "目的外", "injection": "指示の書き換え", "personal_info": "個人情報", "bug_report": "不具合の報告", "abuse": "良識の逸脱"}
@@ -221,7 +223,24 @@ def _x_cost(rows):
                for row in rows for item in row.get("x_search", []))
 
 
-def _cost(m, when, brave, kb, since=None, x=0):
+def _api_cost(rows):
+    """Claude API で呼んだ分の費用。呼び出しごとに記録した usd を足す（単価は agent/usage.py と同じ）。"""
+    total = 0.0
+    for r in rows:
+        calls = (r.get("usage") or {}).get("calls") if isinstance(r.get("usage"), dict) else None
+        for c in calls or []:
+            usd = c.get("usd") if isinstance(c, dict) else None
+            if c.get("model") in API_MODELS and type(usd) in (int, float) and math.isfinite(usd) and usd > 0:
+                total += usd
+    return total
+
+
+def _aws(cost):
+    """AWS の請求に載る分（Claude API を除く）"""
+    return sum(v for k, v in cost.items() if k != "claude_api")
+
+
+def _cost(m, when, brave, kb, since=None, x=0, api=0):
     """when の時台（None なら全部。since があればその時台以降）の概算コストの内訳"""
     def s(key):
         series = m[key]
@@ -234,6 +253,7 @@ def _cost(m, when, brave, kb, since=None, x=0):
     cost["brave"] = brave
     cost["x"] = x
     cost["kb"] = kb
+    cost["claude_api"] = api
     return cost
 
 
@@ -249,14 +269,16 @@ def _pace(now):
     since = COST_SINCE
     week = max(since, (now - datetime.timedelta(days=7)).replace(minute=0, second=0, microsecond=0))
     m = _metrics(since, now, 3600)
-    rows = _rows(since, now, ["created_at", "tools", "x_search"])
+    rows = _rows(since, now, ["created_at", "tools", "x_search", "usage.calls"])
     recent = [r for r in rows if datetime.datetime.fromisoformat(r["created_at"]) >= week]
     _, brave, kb = _tool_costs(rows)
     _, wbrave, wkb = _tool_costs(recent)
-    total = sum(_cost(m, None, brave, kb, x=_x_cost(rows)).values())
-    week_usd = sum(_cost(m, None, wbrave, wkb, since=week, x=_x_cost(recent)).values())
+    all_cost = _cost(m, None, brave, kb, x=_x_cost(rows), api=_api_cost(rows))
+    total = sum(all_cost.values())
+    week_usd = sum(_cost(m, None, wbrave, wkb, since=week, x=_x_cost(recent), api=_api_cost(recent)).values())
     days = max((now - week).total_seconds() / 86400, 1)
-    out = {"since": since.isoformat(timespec="minutes"), "total_usd": total, "week_usd": week_usd,
+    out = {"since": since.isoformat(timespec="minutes"), "total_usd": total, "aws_total_usd": _aws(all_cost),
+           "claude_api_total_usd": all_cost["claude_api"], "week_usd": week_usd,
            "week_days": min(days, 7), "day_usd": week_usd / days, "month_usd": week_usd / days * 30}
     _pace_cache["v"] = (time.time(), out)
     return out
@@ -265,13 +287,13 @@ def _pace(now):
 def summary(day=None):
     now, start, end = _day(day)
     m = _metrics(start, end, 86400)
-    rows = _rows(start, end, ["created_at", "anon", "tools", "first_ms", "feedback", "via", "x_search"])
+    rows = _rows(start, end, ["created_at", "anon", "tools", "first_ms", "feedback", "via", "x_search", "usage.calls"])
     tools, brave, kb = _tool_costs(rows)
-    cost = _cost(m, None, brave, kb, x=_x_cost(rows))
+    cost = _cost(m, None, brave, kb, x=_x_cost(rows), api=_api_cost(rows))
     firsts = sorted(r["first_ms"] for r in rows if r.get("first_ms") is not None)
     return {"now": now, "day": start, "questions": len(rows), "users": len({r.get("anon") for r in rows}),
             "first_p50": statistics.median(firsts) if firsts else None, "rejected": _rejected(start, end),
-            "tools": tools, "cost": cost, "total": sum(cost.values()),
+            "tools": tools, "cost": cost, "total": sum(cost.values()), "aws_total": _aws(cost),
             "feedback": {v: sum(1 for r in rows if r.get("feedback") == v) for v in ("good", "bad")},
             "via": {v: sum(1 for r in rows if r.get("via") == v) for v in VIA_LABELS},
             "pace": _pace(now)}
@@ -280,7 +302,7 @@ def summary(day=None):
 def hours(day):
     now, start, end = _day(day)
     m = _metrics(start, end, 3600)
-    rows = _rows(start, end, ["created_at", "pk", "tools", "x_search"])
+    rows = _rows(start, end, ["created_at", "pk", "tools", "x_search", "usage.calls"])
     by_hour = {}
     for r in rows:
         h = datetime.datetime.fromisoformat(r["created_at"]).replace(minute=0, second=0, microsecond=0)
@@ -290,14 +312,14 @@ def hours(day):
         rs = by_hour.get(h, [])
         _, brave, kb = _tool_costs(rs)
         out.append({"hour": h, "sessions": len({r.get("pk") for r in rs}), "questions": len(rs),
-                    "usd": sum(_cost(m, h, brave, kb, x=_x_cost(rs)).values())})
+                    "usd": sum(_cost(m, h, brave, kb, x=_x_cost(rs), api=_api_cost(rs)).values())})
         h += datetime.timedelta(hours=1)
     total = {"sessions": len({r.get("pk") for r in rows}), "questions": len(rows), "usd": sum(x["usd"] for x in out)}
     return now, start, list(reversed(out)), total
 
 
 # 要約と日ごとに要る項目。回答本文や使用量の記録は全項目の9割以上を占めるので、一覧を開くまで読まない。
-REPORT_FIELDS = ["created_at", "tools", "first_ms", "anon", "user", "pk", "feedback", "via", "x_search"]
+REPORT_FIELDS = ["created_at", "tools", "first_ms", "anon", "user", "pk", "feedback", "via", "x_search", "usage.calls"]
 DETAIL_FIELDS = REPORT_FIELDS + ["question", "answer", "topic", "flag", "flag_reason", "prebaked", "usage.complete", "usage.usd"]
 
 
@@ -640,15 +662,15 @@ def report(day=None, u="general", detail=True):
         rs = groups.get(h, [])
         selected = [r for r in rs if _selected(r, u)]
         _, brave, kb = _tool_costs(rs)
-        hc = _cost(m, h, brave, kb, x=_x_cost(rs))
-        # 検索2種類は回数が行に残るので、その利用者に直接紐づける。
-        shared = {k: v for k, v in hc.items() if k not in ("brave", "kb", "x")}
+        hc = _cost(m, h, brave, kb, x=_x_cost(rs), api=_api_cost(rs))
+        # 検索2種類と Claude API は質問の行に残るので、その利用者に直接紐づける。
+        shared = {k: v for k, v in hc.items() if k not in ("brave", "kb", "x", "claude_api")}
         per_question = sum(shared.values()) / len(rs) if rs else 0.0
         if not rs:
             unallocated += sum(hc.values())
         for r in rs:
             _, b, k = _tool_costs([r])
-            r["estimated_usd"] = per_question + b + k + _x_cost([r])
+            r["estimated_usd"] = per_question + b + k + _x_cost([r]) + _api_cost([r])
             person = people.setdefault(r["identifier"], {"audience": r["audience"], "identifier": r["identifier"], "questions": 0, "estimated_usd": 0.0})
             person["questions"] += 1
             person["estimated_usd"] += r["estimated_usd"]
@@ -676,7 +698,7 @@ def report(day=None, u="general", detail=True):
          "users": len({_actor(r) for r in selected if _actor(r) != "unknown"}),
          "first_p50": statistics.median(firsts) if firsts else None,
          "rejected": _rejected(start, end), "tools": tools, "cost": costs,
-         "total": sum(costs.values()), "pace": _pace(now),
+         "total": sum(costs.values()), "aws_total": _aws(costs), "pace": _pace(now),
          "feedback": {v: sum(r.get("feedback") == v for r in selected) for v in ("good", "bad")},
          "via": {v: sum(r.get("via") == v for r in selected) for v in VIA_LABELS},
          "registered_google": len(registered) if registered is not None else None,
@@ -826,6 +848,7 @@ nav.tabs a.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(
 .person-link{font-family:monospace;overflow-wrap:anywhere}.qbody{min-width:0}
 small{font-size:13px;color:var(--sub);font-weight:400}
 .breakdown{padding:6px 16px;margin-top:10px}
+.breakdown h3.bgroup{display:flex;justify-content:space-between;gap:12px;margin:14px 0 2px;font-size:13px;font-weight:600}.breakdown h3.bgroup small{font-weight:400}
 h2{font-size:14px;margin:0;padding:14px 16px 8px;font-weight:700}h2 small{margin-left:6px}
 table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
 td,th{padding:9px 16px;border-top:1px solid var(--line);text-align:right;white-space:nowrap}td:first-child,th:first-child{text-align:left}
@@ -1112,7 +1135,13 @@ def _summary_html(d, ban=None):
                 f'<div class="k">現在の利用停止</div><div class="v">{ban["total"]}<small>ID</small></div><div class="s">{ban_sub}</div></a>'
                 if ban["total"] else
                 '<div class="card stat bancard"><div class="k">現在の利用停止</div><div class="v">0<small>ID</small></div></div>')
-    cost_rows = "".join(f"<tr><td>{LABELS[k]}</td><td>{usd(v, 2)}</td></tr>" for k, v in sorted(d["cost"].items(), key=lambda x: -x[1]))
+    aws_rows = "".join(f"<tr><td>{LABELS[k]}</td><td>{usd(v, 2)}</td></tr>"
+                       for k, v in sorted(d["cost"].items(), key=lambda x: -x[1]) if k != "claude_api")
+    api = d["cost"].get("claude_api", 0.0)
+    aws_total = d.get("aws_total", d["total"] - api)
+    cost_rows = (f'<h3 class="bgroup"><span>Claude API（Anthropic のクレジット）</span><span>{usd(api, 2)}</span></h3>'
+                 f'<table><tr><td>{LABELS["claude_api"]}</td><td>{usd(api, 2)}</td></tr></table>'
+                 f'<h3 class="bgroup"><span>AWS（Bedrock ほか）</span><span>{usd(aws_total, 2)}</span></h3><table>{aws_rows}</table>')
     return f"""<div class="stats">
 <div class="card stat usage"><div class="metrics"><div class="metric"><div class="k">この日の質問</div><div class="v">{d['questions']}</div></div><div class="metric"><div class="k">この日の利用者</div><div class="v">{d['users']}</div></div></div></div>
 <div class="card stat cost"><div class="metrics"><div class="metric{warn}"><div class="k">この日の概算コスト</div><div class="v">{usd(d['total'])}</div></div>{pace}</div></div>
@@ -1120,7 +1149,7 @@ def _summary_html(d, ban=None):
 {ban_card}
 <div class="card stat rejected"><div class="k">この日に断った数（全利用）</div><div class="v">{rej}</div></div>
 </div>
-<div class="card breakdown"><h2>この日の費用内訳</h2><table>{cost_rows}</table></div>"""
+<div class="card breakdown"><h2>この日の費用内訳</h2>{cost_rows}</div>"""
 
 
 def _hours_html(rows, total, date_tabs="", multi=False):
@@ -1323,7 +1352,7 @@ def render(view, day, page, f=None, u=None, qid=None, group="registered"):
 <section id="list-panel" class="panel{on('list')}">{list_html}</section></div>
 <section id="errors-panel" class="panel{on('errors')}">{error_list}</section>
 <section id="people-panel" class="panel{on('people')}">{_people_list(d, group)}</section>
-<p class="note">質問一覧のモデル費用は、回答・候補生成・判定・要約などの記録済み使用量から計算した概算です。事前回答はモデルを呼ばないため0円。記録がない・不完全な質問は未計測と表示します。サーバー・検索などの費用は含みません。利用者別の費用は時間帯の費用を質問数で按分した目安です（Braveとナレッジベースの検索は記録回数から計算）。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。確定値は AWS Budgets（1日 $30）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
+<p class="note">質問一覧のモデル費用は、回答・候補生成・判定・要約などの記録済み使用量から計算した概算です。事前回答はモデルを呼ばないため0円。記録がない・不完全な質問は未計測と表示します。サーバー・検索などの費用は含みません。利用者別の費用は時間帯の費用を質問数で按分した目安です（Braveとナレッジベースの検索は記録回数から計算）。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。Claude API の分は AWS の請求に載らないので、質問ごとに記録した使用量から足している（払いは Anthropic のクレジット）。確定値は AWS Budgets（1日 $30。AWS の分だけ）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
 </div>{REFRESH_SCRIPT}</body></html>"""
 
 
@@ -1350,6 +1379,7 @@ def as_json(day, u="all"):
         "registered_google": d["registered_google"], "active_google": d["active_google"], "unallocated_usd": d["unallocated_usd"],
         "summary": {"questions": d["questions"], "users": d["users"], "first_ms_p50": d["first_p50"],
                     "rejected": d["rejected"], "tools": d["tools"], "cost_usd": d["cost"], "total_usd": d["total"],
+                    "aws_usd": d["aws_total"], "claude_api_usd": d["cost"]["claude_api"],
                     "feedback": d["feedback"], "pace": d["pace"], "via": d["via"]},
         "hours": {"total": total, "rows": [{"at": h["hour"].isoformat(), "hour": h["hour"].strftime("%H"), "sessions": h["sessions"], "users": h["users"],
                                             "questions": h["questions"], "usd": h["usd"]} for h in hrs]},
@@ -1483,13 +1513,13 @@ def handler(event, _context):
             "Namespace": "MinorunAgent", "Dimensions": [[]],
             "Metrics": [{"Name": "EstimatedCostUsd", "Unit": "None"}, {"Name": "QuestionsToday", "Unit": "Count"},
                         {"Name": "UsersToday", "Unit": "Count"}]}]},
-            "EstimatedCostUsd": round(d["total"], 4), "QuestionsToday": d["questions"], "UsersToday": d["users"]}))
+            "EstimatedCostUsd": round(d.get("aws_total", d["total"]), 4), "QuestionsToday": d["questions"], "UsersToday": d["users"]}))
         rolling = _rolling_cost(d["now"])
         print(json.dumps({"_aws": {"Timestamp": int(d["now"].timestamp() * 1000), "CloudWatchMetrics": [{
             "Namespace": "MinorunAgent", "Dimensions": [[]],
             "Metrics": [{"Name": "Rolling30DayCostUsd", "Unit": "None"}]}]},
             "Rolling30DayCostUsd": round(rolling, 4)}))
-        return {"total": d["total"], "rolling_30d_usd": rolling}
+        return {"total": d["total"], "aws_total": d.get("aws_total", d["total"]), "rolling_30d_usd": rolling}
     # CloudFront からは /admin/... のまま届く。関数URLを直接開いたときは公開URLへ送る
     path = event.get("rawPath") or "/"
     prefix = COOKIE_PATH if COOKIE_PATH != "/" else ""
