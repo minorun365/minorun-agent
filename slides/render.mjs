@@ -47,6 +47,13 @@ try {
     const wrapped = h1 && plain ? h1.getBoundingClientRect().height * k > parseFloat(getComputedStyle(h1).fontSize) * 1.3 * 1.6 : false;
     const bad = [box.l < MIN.side && '左の余白が足りない', box.r < MIN.side && '右にはみ出している', box.b < MIN.bottom && '下にはみ出している',
       head !== null && head < MIN.head && '見出しと本文が近すぎる', over && '横にはみ出している要素がある', wrapped && '見出しが2行に折れている'].filter(Boolean);
+    // カード（流れ・ステップ）の文が、書いた改行のほかに勝手に折り返していないか（「を」だけが次の行に残るような崩れ）
+    const cardWrap = [...sec.querySelectorAll('.flow b, .flow span, .steps span')].some((e) => {
+      const range = document.createRange(); range.selectNodeContents(e);
+      const tops = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top / 4)));
+      return tops.size > e.querySelectorAll('br').length + 1;
+    });
+    if (cardWrap) bad.push('カードの文が書いた改行のほかに折り返している（字数を減らす）');
     // 表紙の題は2行まで、右の丸い飾り（左から900pxより右）に文字を重ねない
     if (sec.classList.contains('top') && h1) {
       const range = document.createRange(); range.selectNodeContents(h1);
