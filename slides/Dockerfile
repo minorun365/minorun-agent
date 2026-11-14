@@ -6,10 +6,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @marp-team/marp-cli@4.5.1 && npm cache clean --force
 
-# 書体：Zen Kaku Gothic New（見出し）、Zen Maru Gothic（本文）、Inter（数字と英字の飾り）。どれも SIL OFL
+# 書体：Zen Kaku Gothic New（見出し）、Noto Sans JP（本文。かなを詰める palt を持つ可変書体）、Inter（数字と英字の飾り）。どれも SIL OFL
 RUN mkdir -p /usr/share/fonts/truetype/web && cd /usr/share/fonts/truetype/web \
     && for w in Regular Medium Bold; do curl -fsSLo ZenKakuGothicNew-$w.ttf "https://github.com/google/fonts/raw/main/ofl/zenkakugothicnew/ZenKakuGothicNew-$w.ttf"; done \
-    && for w in Regular Bold; do curl -fsSLo ZenMaruGothic-$w.ttf "https://github.com/google/fonts/raw/main/ofl/zenmarugothic/ZenMaruGothic-$w.ttf"; done \
+    && curl -fsSLo NotoSansJP.ttf "https://github.com/google/fonts/raw/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf" \
     && curl -fsSLo Inter.ttf "https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf" \
     && fc-cache -f
 
