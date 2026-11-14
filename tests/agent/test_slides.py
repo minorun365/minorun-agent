@@ -20,10 +20,11 @@ def clients(codes=None):
     return {"dynamodb": ddb, "s3": MagicMock(), "lambda": MagicMock()}
 
 
-def start(url="https://example.com/post", user="u1", codes=None):
+def start(url="https://example.com/post", user="u1", codes=None, unlimited=False):
     c = clients(codes)
     with patch.object(slides, "_clients", c):
-        r = slides.start(url, "初心者向けに", user, function="fn", table="tb", bucket="bk", user_daily=2, total_daily=50)
+        r = slides.start(url, "初心者向けに", user, function="fn", table="tb", bucket="bk", user_daily=2, total_daily=50,
+                         unlimited=unlimited)
     return r, c
 
 
@@ -42,6 +43,15 @@ class StartTests(unittest.TestCase):
         self.assertEqual(inv["InvocationType"], "Event")
         self.assertEqual(json.loads(inv["Payload"])["url"], "https://example.com/post")
         self.assertRegex(r["job"], r"^[A-Za-z0-9]{16}$")
+
+    def test_unlimited_user_skips_counting(self):
+        r, c = start(codes=["ConditionalCheckFailed", "ConditionalCheckFailed"], unlimited=True)
+        self.assertEqual(r["status"], "accepted")
+        c["dynamodb"].transact_write_items.assert_not_called()
+        c["lambda"].invoke.assert_called_once()
+
+    def test_unlimited_still_needs_login(self):
+        self.assertEqual(start(user="", unlimited=True)[0]["status"], "login_required")
 
     def test_login_required(self):
         r, c = start(user="")

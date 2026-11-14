@@ -63,7 +63,8 @@ def _count(table, user, user_daily, total_daily):
         raise
 
 
-def start(url, request, user, *, function, table, bucket, user_daily, total_daily):
+def start(url, request, user, *, function, table, bucket, user_daily, total_daily, unlimited=False):
+    """unlimited は運営者のテスト用。1人の上限にも全体の上限にも数えない。"""
     if not function:
         return {"status": "unavailable", "note": "この環境ではスライド作成を使えません"}
     if not user:
@@ -71,7 +72,7 @@ def start(url, request, user, *, function, table, bucket, user_daily, total_dail
     url = url.strip()
     if not valid_url(url):
         return {"status": "invalid", "note": "公開されているページの http(s) のURLが必要です"}
-    blocked = _count(table, user, user_daily, total_daily)
+    blocked = None if unlimited else _count(table, user, user_daily, total_daily)
     if blocked == "limit":
         return {"status": "limit", "note": f"今日の分（1人1日{user_daily}本）を使い切りました。明日（日本時間の0時以降）にまた使えます"}
     if blocked == "busy":
@@ -83,7 +84,7 @@ def start(url, request, user, *, function, table, bucket, user_daily, total_dail
     _client("lambda").invoke(FunctionName=function, InvocationType="Event",
                              Payload=json.dumps({"job": job, "url": url, "ask": str(request)[:300], "user": user}).encode())
     _remember(table, user, job)
-    print(json.dumps({"slides_job": job, "user": user}))
+    print(json.dumps({"slides_job": job, "user": user, **({"unlimited": True} if unlimited else {})}))
     return {"status": "accepted", "job": job, "note": "1〜3分ででき上がり、画面にサムネイルが出ます"}
 
 
