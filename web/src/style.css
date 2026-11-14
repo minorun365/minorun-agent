@@ -266,7 +266,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 @keyframes slides-pulse{0%,100%{box-shadow:0 0 0 0 rgba(10,100,216,.45)}50%{box-shadow:0 0 0 6px rgba(10,100,216,0)}}
 @keyframes slides-flow{to{left:100%}}
 @media(prefers-reduced-motion:reduce){.bubble .slides-bar span,.bubble .slides-steps .step.now i{animation:none}}
-/* 作ったスライドの一覧（ログインのメニュー）と、開き直したときの作成中の知らせ */
+/* 作ったスライドの一覧（ログインのメニュー）。作成中の進み具合もここに出す */
 .mepop .myslides:not(:empty){margin:0 0 12px;padding-top:12px;border-top:1px solid var(--line)}
 .mepop .myslides .mh{margin:0 0 8px;font-size:12px;font-weight:700;color:var(--sub)}
 .mepop .myslides ul{list-style:none;margin:0;padding:0;max-height:240px;overflow-y:auto}
@@ -276,11 +276,17 @@ td:first-child{font-weight:700;white-space:nowrap}
 .mepop .myslides .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mepop .myslides .t.mut{color:var(--mut)}
 .mepop .myslides .d{flex:none;font-size:11px;color:var(--mut)}
-.slides-note{position:fixed;z-index:9;left:50%;top:calc(env(safe-area-inset-top,0px) + var(--edge-y) + 48px);transform:translateX(-50%);
-  display:flex;align-items:center;gap:8px;max-width:calc(100% - 32px);padding:9px 16px;border-radius:999px;background:var(--card);color:var(--ink);
-  font-size:13px;text-decoration:none;box-shadow:0 8px 28px rgba(22,24,29,.14),0 0 0 1px var(--line)}
-.slides-note span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.slides-note i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--accent);animation:slides-pulse 1.2s ease-in-out infinite}
-.slides-note.ready{color:var(--accent);font-weight:700}
-.slides-note.ready i{animation:none}
-.slides-note.failed i{background:var(--mut);animation:none}
+.mepop .myslides li.working{justify-content:flex-start}
+.mepop .myslides li.working .d{margin-left:auto}
+.mepop .myslides .ph{flex:none;display:grid;place-items:center;width:64px;height:36px;border-radius:4px;background:var(--soft);box-shadow:0 0 0 1px var(--line)}
+.mepop .myslides .ph i{width:9px;height:9px;border-radius:50%;background:var(--accent);animation:slides-pulse 1.2s ease-in-out infinite}
+.mepop .myslides li.working .t{display:flex;flex-direction:column;min-width:0}
+.mepop .myslides li.working small{font-size:11px;color:var(--sub);overflow:hidden;text-overflow:ellipsis}
+.mepop .myslides .new{margin-right:6px;padding:1px 5px;border-radius:4px;background:#e5484d;color:#fff;font-size:10px;font-style:normal;font-weight:700;vertical-align:1px}
+/* ログインのアイコンの印：作成中は青く脈打つ点、できたら赤い点（メニューを開くと消える） */
+.me{position:relative;overflow:visible}
+.me .badge{display:none;position:absolute;top:-1px;right:-1px;width:11px;height:11px;border-radius:50%;box-shadow:0 0 0 2px var(--bg)}
+.me[data-badge=working] .badge{display:block;background:var(--accent);animation:me-pulse 1.2s ease-in-out infinite}
+.me[data-badge=ready] .badge{display:block;background:#e5484d}
+@keyframes me-pulse{0%,100%{box-shadow:0 0 0 2px var(--bg),0 0 0 2px rgba(10,100,216,.45)}50%{box-shadow:0 0 0 2px var(--bg),0 0 0 6px rgba(10,100,216,0)}}
+@media(prefers-reduced-motion:reduce){.me .badge,.mepop .myslides .ph i{animation:none}}

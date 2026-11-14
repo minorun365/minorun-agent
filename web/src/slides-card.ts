@@ -66,7 +66,9 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
   return fig;
 }
 
-// ---- 作ったスライドの一覧（ログインのメニューの中）と、作成中の知らせ（画面の上） ----
+// ---- 作ったスライドの一覧（ログインのメニューの中）と、アイコンのバッジ ----
+// 作成中の知らせは画面に浮かべず（スマホで吹き出しと重なるため）、ログインのアイコンに小さな印を付け、
+// メニューを開いた一覧の中で進み具合を見せる。
 export interface SlidesItem { job: string; base: string; at: number }
 
 /** 先読みの返事（SSE）から作ったスライドの一覧を取り出す。自分のサイトの /s/<番号>/ だけを通す */
@@ -95,48 +97,97 @@ async function statusOf(base: string, fetcher: typeof fetch): Promise<SlidesStat
   try { const r = await fetcher(base + 'status.json', { cache: 'no-store' }); return r.ok ? await r.json() as SlidesStatus : null; } catch { return null; }
 }
 
-/** メニューの「作ったスライド」。1件ずつ status.json を見て、完成・作成中・失敗を出し分ける */
-export function slidesList(items: SlidesItem[], fetcher: typeof fetch = fetch.bind(window)): HTMLElement {
+/** 状態の見え方。undefined はまだ確かめていない、null は読めなかった（古いものは一覧から外す） */
+export type RowKind = 'checking' | 'done' | 'error' | 'working' | 'hidden';
+export function rowKind(item: SlidesItem, s: SlidesStatus | null | undefined, now = Date.now()): RowKind {
+  if (s === undefined) return 'checking';
+  if (s?.stage === 'done') return 'done';
+  if (s?.stage === 'error') return 'error';
+  return s && maybeWorking(item, now) ? 'working' : 'hidden';
+}
+
+/** アイコンの印：作成中があれば「作成中」、無くて見ていない完成品があれば「できた」 */
+export type Badge = '' | 'working' | 'ready';
+export function badgeOf(items: SlidesItem[], status: (job: string) => SlidesStatus | null | undefined, unseen: Set<string>, now = Date.now()): Badge {
+  if (items.some((i) => rowKind(i, status(i.job), now) === 'working')) return 'working';
+  return items.some((i) => unseen.has(i.job) && status(i.job)?.stage === 'done') ? 'ready' : '';
+}
+
+/** メニューの「作ったスライド」。状態は見張り役から受け取り、その場で描く（開き直すたびに読み直してちらつかせない） */
+export function slidesList(items: SlidesItem[], status: (job: string) => SlidesStatus | null | undefined, unseen: Set<string> = new Set(), now = Date.now()): HTMLElement {
   const box = document.createElement('div');
   box.className = 'myslides';
-  if (!items.length) return box;
-  box.innerHTML = `<p class="mh">作ったスライド</p><ul></ul>`;
-  const ul = box.querySelector('ul')!;
+  const rows: string[] = [];
   for (const it of items) {
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="t">確かめています…</span><span class="d">${when(it.at)}</span>`;
-    ul.appendChild(li);
-    void statusOf(it.base, fetcher).then((s) => {
-      if (s?.stage === 'done') {
-        li.innerHTML = `<a href="${esc(it.base)}" target="_blank" rel="noopener"><img src="${esc(it.base)}og.jpg" alt="" width="64" height="36"><span class="t">${esc(s.title || 'スライド')}</span></a><span class="d">${when(it.at)}</span>`;
-      } else if (s?.stage === 'error') {
-        li.innerHTML = `<span class="t mut">作れませんでした</span><span class="d">${when(it.at)}</span>`;
-      } else if (s && maybeWorking(it)) {
-        li.innerHTML = `<span class="t">作成中…</span><span class="d">${when(it.at)}</span>`;
-      } else li.remove();
-    });
+    const s = status(it.job);
+    const kind = rowKind(it, s, now);
+    const d = `<span class="d">${when(it.at)}</span>`;
+    if (kind === 'done') {
+      const isNew = unseen.has(it.job) ? '<em class="new">NEW</em>' : '';
+      rows.push(`<li><a href="${esc(it.base)}" target="_blank" rel="noopener"><img src="${esc(it.base)}og.jpg" alt="" width="64" height="36"><span class="t">${isNew}${esc(s!.title || 'スライド')}</span></a>${d}</li>`);
+    } else if (kind === 'error') {
+      rows.push(`<li><span class="t mut">作れませんでした</span>${d}</li>`);
+    } else if (kind === 'working') {
+      const n = stepOf(s!.stage);
+      const step = n >= 0 && n < 4 ? WAIT_LINES[n] : '順番を待っています';
+      rows.push(`<li class="working"><span class="ph"><i></i></span><span class="t"><b>作成中…</b><small>${step}</small></span>${d}</li>`);
+    } else if (kind === 'checking') {
+      rows.push(`<li><span class="t mut">確かめています…</span>${d}</li>`);
+    }
   }
+  if (rows.length) box.innerHTML = `<p class="mh">作ったスライド</p><ul>${rows.join('')}</ul>`;
   return box;
 }
 
-/** 開き直したときに作成中のものがあれば、画面の上に知らせを出し、できたら「できました」に替える */
-export function slidesNotice(item: SlidesItem, fetcher: typeof fetch = fetch.bind(window)): HTMLElement {
-  const el = document.createElement('a');
-  el.className = 'slides-note'; el.target = '_blank'; el.rel = 'noopener';
-  el.innerHTML = '<i></i><span>スライドを作成中です…</span>';
-  const span = el.querySelector('span')!;
-  const tick = async () => {
-    const s = await statusOf(item.base, fetcher);
-    if (s?.stage === 'done') {
-      el.classList.add('ready'); el.href = item.base;
-      span.textContent = `スライドができました！タップで開く（${s.title || 'スライド'}）`;
-      return;
+const SEEN_KEY = 'minorun-slides-seen';
+const readSeen = (): string[] => { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '[]'); } catch { return []; } };
+
+/** 作ったスライドの状態を見張る。作成中のものだけ3秒おきに status.json を見て、変わったら onChange を呼ぶ */
+export class SlidesTracker {
+  items: SlidesItem[] = [];
+  private status = new Map<string, SlidesStatus | null>();
+  private polling = new Set<string>();
+  /** できたのに、まだメニューで見ていないもの（作り始めて1時間以内だけ） */
+  unseen = new Set<string>();
+  constructor(private onChange: () => void, private fetcher: typeof fetch = fetch.bind(window)) {}
+
+  get = (job: string) => this.status.get(job);
+
+  set(items: SlidesItem[]) {
+    this.items = items;
+    for (const it of items) if (!this.status.has(it.job)) void this.poll(it);
+  }
+  add(item: SlidesItem) {
+    this.items = [item, ...this.items.filter((i) => i.job !== item.job)].slice(0, 10);
+    this.status.delete(item.job);
+    void this.poll(item);
+    this.onChange();
+  }
+  badge(): Badge { return badgeOf(this.items, this.get, this.unseen); }
+  /** メニューを開いた・画面のカードで完成を見た。印を消し、次に開き直しても出さない */
+  seen(job?: string) {
+    const jobs = job ? [job] : [...this.unseen];
+    if (!jobs.length) return;
+    jobs.forEach((j) => this.unseen.delete(j));
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify([...new Set([...jobs, ...readSeen()])].slice(0, 30))); } catch { /* 保存できなくても印が残るだけ */ }
+    this.onChange();
+  }
+
+  private async poll(it: SlidesItem) {
+    if (this.polling.has(it.job)) return;
+    this.polling.add(it.job);
+    let last = '';
+    for (;;) {
+      const s = await statusOf(it.base, this.fetcher);
+      this.status.set(it.job, s);
+      const kind = rowKind(it, s);
+      if (kind === 'done' && Date.now() / 1000 - it.at < 60 * 60 && !readSeen().includes(it.job)) this.unseen.add(it.job);
+      const key = `${kind}:${s?.stage ?? ''}`;
+      if (key !== last) { last = key; this.onChange(); }
+      if (kind !== 'working') break;
+      await new Promise((r) => setTimeout(r, 3000));
     }
-    if (s?.stage === 'error') { el.classList.add('failed'); span.textContent = 'スライドを作れませんでした'; setTimeout(() => el.remove(), 8000); return; }
-    const n = s ? stepOf(s.stage) : -1;
-    if (n >= 0 && n < 4) span.textContent = `スライドを作成中です…（${WAIT_LINES[n]}）`;
-    if (maybeWorking(item)) setTimeout(tick, 3000); else el.remove();
-  };
-  void tick();
-  return el;
+    this.polling.delete(it.job);
+    this.onChange(); // 15分を過ぎて作成中から外れたときも印を引き直す
+  }
 }

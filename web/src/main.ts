@@ -15,7 +15,7 @@ import { pickStarters } from './starters';
 import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { AttachError, shrink, upload } from './attach';
-import { parseSlidesList, maybeWorking, slidesCard, slidesList, slidesNotice, type SlidesItem } from './slides-card';
+import { parseSlidesList, slidesCard, slidesList, SlidesTracker } from './slides-card';
 
 interface MapShown { src: string; alt: string; caption: string; width: number; height: number; source_url: string }
 type AgentEvent =
@@ -618,8 +618,11 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
       } else if (ev.type === 'slides') {
         // 自分のサイトの /s/<番号>/ だけを見に行く
         if (/^\/s\/[A-Za-z0-9]{8,32}\/$/.test(ev.base)) {
-          figures.push(slidesCard(ev.base, relayout)); if (opened) render(true);
-          mySlides = [{ job: ev.job, base: ev.base, at: Math.floor(Date.now() / 1000) }, ...mySlides.filter((i) => i.job !== ev.job)].slice(0, 10); renderMe();
+          // 吹き出しのカードで完成を見たら、アイコンの「できた」の印は出さない
+          const job = ev.job;
+          figures.push(slidesCard(ev.base, () => { relayout(); if (slides.get(job)?.stage === 'done' || document.querySelector(`.slides-card.ready a[href="${ev.base}"]`)) slides.seen(job); }));
+          if (opened) render(true);
+          slides.add({ job, base: ev.base, at: Math.floor(Date.now() / 1000) });
         }
       } else if (ev.type === 'catalog_update') {
         const box = document.createElement('div'); box.className = 'update';
@@ -704,15 +707,9 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
 // 会話ごとに新しい入れ物（microVM）が立ち上がるのに数秒かかるので、ページを開いた時点で先に起こしておく
 async function warmUp() {
   const res = await transport.warmup();
-  // ログインした人には、先読みの返事に「作ったスライド」が載ってくる。作成中のものは画面の上で知らせる
-  if (res?.ok && profile()) {
-    mySlides = parseSlidesList(await res.text().catch(() => ''));
-    renderMe();
-    const working = mySlides.find((i) => maybeWorking(i));
-    if (working && !document.querySelector('.slides-note')) document.body.appendChild(slidesNotice(working));
-  }
+  // ログインした人には、先読みの返事に「作ったスライド」が載ってくる。作成中ならアイコンに印を付け、メニューの一覧で進み具合を見せる
+  if (res?.ok && profile()) slides.set(parseSlidesList(await res.text().catch(() => '')));
 }
-let mySlides: SlidesItem[] = [];
 function showBanned(message: string) {
   closeGift(); cancelIdle(); turnVersion++;
   stage.classList.add('limited', 'started', 'answering'); stage.classList.remove('composing', 'busy');
@@ -730,25 +727,44 @@ async function authHeader(): Promise<Record<string, string>> {
   const t = await accessToken();
   return t ? { 'x-access-token': t } : {};
 }
+// メニューを開いている間は、開いた時点で見ていなかった完成品に NEW を付けたままにする（閉じたら消す）
+let freshNew = new Set<string>();
+const slides = new SlidesTracker(() => {
+  renderBadge();
+  if (mePop.classList.contains('on')) { slides.unseen.forEach((j) => freshNew.add(j)); renderList(); slides.seen(); }
+});
+const BADGE_LABEL = { '': '', working: '（スライドを作成中）', ready: '（スライドができました）' };
+function renderBadge() {
+  const p = profile();
+  const b = p ? slides.badge() : '';
+  meBtn.dataset.badge = b;
+  meBtn.setAttribute('aria-label', p ? `ログイン中${BADGE_LABEL[b]}` : 'ログイン');
+}
+function renderList() {
+  const box = $('#myslides');
+  if (box) box.replaceChildren(slidesList(slides.items, slides.get, new Set([...slides.unseen, ...freshNew])));
+}
 function renderMe() {
   const p = profile();
-  meBtn.innerHTML = PERSON;
+  meBtn.innerHTML = PERSON + '<i class="badge" aria-hidden="true"></i>';
   meBtn.classList.toggle('in', !!p);
-  meBtn.setAttribute('aria-label', p ? 'ログイン中' : 'ログイン');
+  renderBadge();
   mePop.innerHTML = p
     ? `<p class="lead">ログイン中です。1日に話せる回数が増え、話した内容を覚えて答えます。</p><div id="myslides"></div><button class="out" id="logout" type="button">ログアウト</button>`
     : `<p class="lead">ログインすると、1日に話せる回数が増えたり、話した内容を覚えてもらえるようになります。</p>
        <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>Google でログイン</span></button>`;
   $('#glogin')?.addEventListener('click', () => login());
   $('#logout')?.addEventListener('click', () => logout());
-  if (p && mySlides.length) $('#myslides')?.appendChild(slidesList(mySlides));
+  if (p) renderList();
 }
 const toggleMe = (on: boolean) => { mePop.classList.toggle('on', on); meBtn.setAttribute('aria-expanded', String(on)); };
 meBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   const on = !mePop.classList.contains('on');
-  if (on && mySlides.length) renderMe(); // 開くたびに一覧の状態（作成中→完成）を引き直す
+  freshNew = on ? new Set(slides.unseen) : new Set();
+  if (on) renderList();
   toggleMe(on);
+  if (on) slides.seen(); // 開いて一覧を見たら「できた」の印を消す（NEW の表示は閉じるまで残る）
 });
 document.addEventListener('pointerdown', (e) => { if (!mePop.contains(e.target as Node) && e.target !== meBtn && !meBtn.contains(e.target as Node)) toggleMe(false); });
 
