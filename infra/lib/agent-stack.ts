@@ -196,6 +196,8 @@ export class AgentStack extends cdk.Stack {
         SLIDES_BUCKET: props.slides.bucketName,
         SLIDES_USER_DAILY: '2',
         SLIDES_TOTAL_DAILY: '50',
+        // 回数を数えない利用者（ログインした人のハッシュのカンマ区切り。運営者のテスト用）
+        SLIDES_UNLIMITED: process.env.SLIDES_UNLIMITED ?? '',
       },
     };
     // V1 は切り戻し用に現行イメージを固定し、V2 と保存先・実行権限を共有する。

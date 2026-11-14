@@ -38,3 +38,5 @@ SLIDES_TABLE = os.environ.get("SLIDES_TABLE", "")
 SLIDES_BUCKET = os.environ.get("SLIDES_BUCKET", "")
 SLIDES_USER_DAILY = int(os.environ.get("SLIDES_USER_DAILY", "2"))
 SLIDES_TOTAL_DAILY = int(os.environ.get("SLIDES_TOTAL_DAILY", "50"))
+# 回数を数えない利用者（ログインした人のハッシュ。カンマ区切り）。テストでよく作る運営者だけを入れる
+SLIDES_UNLIMITED = frozenset(u for u in os.environ.get("SLIDES_UNLIMITED", "").split(",") if u)
