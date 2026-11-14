@@ -8,6 +8,7 @@
   {"type": "replace", "text": "..."}                     追加調査後の要約で吹き出しの本文全体を置き換える
   {"type": "map", "src": "...", "alt": "...", ...}        回答に添える地図
   {"type": "slides", "job": "...", "base": "/s/<job>/"}   受け付けたスライド作成（画面が base の status.json を見に行く）
+  {"type": "slides_list", "items": [{"job", "base", "at"}]}  先読みの返事で、ログインした人が作ったスライド（新しい順）
   {"type": "preview", "url": "...", "image": "...", "title": "...", "label": "..."}  紹介した本人のページの貼り紙
   {"type": "catalog_update", "at": "HH:MM", "lines": [...]}  公式カタログと照合して変わっていた分（変更が無ければ送らない）
   {"type": "suggest", "items": ["…？", ...]}             次に聞きそうな質問（深掘り2つ＋別の話題1つ。作れなければ送らない）
@@ -38,13 +39,14 @@ import link_preview
 import prebaked
 import prompt
 import research
+import slides
 import store
 import tls_probe  # noqa: F401  基盤の TLS の握手で警告が出ないようにする
 import tools
 import topics
 import usage
 from tool_status import knowledge_label
-from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN, MODEL_MAIN_API
+from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN, MODEL_MAIN_API, SLIDES_TABLE
 
 app = BedrockAgentCoreApp()
 
@@ -368,6 +370,13 @@ async def invoke(payload, context):
     if payload.get("warmup"):
         # ページを開いたときの先読み。入れ物が起き、会話の控えも戻しておく
         await asyncio.gather(asyncio.to_thread(_warm_up), asyncio.to_thread(_conversation, actor, session))
+        if user:
+            # ログインした人には「作ったスライド」を返す（画面を閉じたあとでも、開き直せばたどり着ける）
+            try:
+                items = await asyncio.to_thread(slides.recent, SLIDES_TABLE, user)
+                yield {"type": "slides_list", "items": [{"job": j["job"], "base": f"/s/{j['job']}/", "at": j["at"]} for j in items]}
+            except Exception as e:
+                print(json.dumps({"slides_list_error": type(e).__name__}))
         yield {"type": "done"}
         return
     image_key = attachments.owned_key(str(payload.get("image") or ""), str(payload.get("anon") or ""))

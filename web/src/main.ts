@@ -15,7 +15,7 @@ import { pickStarters } from './starters';
 import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { AttachError, shrink, upload } from './attach';
-import { slidesCard } from './slides-card';
+import { parseSlidesList, maybeWorking, slidesCard, slidesList, slidesNotice, type SlidesItem } from './slides-card';
 
 interface MapShown { src: string; alt: string; caption: string; width: number; height: number; source_url: string }
 type AgentEvent =
@@ -617,7 +617,10 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
         figures.push(fig); if (opened) render(true);
       } else if (ev.type === 'slides') {
         // 自分のサイトの /s/<番号>/ だけを見に行く
-        if (/^\/s\/[A-Za-z0-9]{8,32}\/$/.test(ev.base)) { figures.push(slidesCard(ev.base, relayout)); if (opened) render(true); }
+        if (/^\/s\/[A-Za-z0-9]{8,32}\/$/.test(ev.base)) {
+          figures.push(slidesCard(ev.base, relayout)); if (opened) render(true);
+          mySlides = [{ job: ev.job, base: ev.base, at: Math.floor(Date.now() / 1000) }, ...mySlides.filter((i) => i.job !== ev.job)].slice(0, 10); renderMe();
+        }
       } else if (ev.type === 'catalog_update') {
         const box = document.createElement('div'); box.className = 'update';
         box.innerHTML = `<b>最新の公式カタログで変更あり（${esc(ev.at)}）</b><ul>${ev.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`;
@@ -700,8 +703,16 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
 
 // 会話ごとに新しい入れ物（microVM）が立ち上がるのに数秒かかるので、ページを開いた時点で先に起こしておく
 async function warmUp() {
-  await transport.warmup();
+  const res = await transport.warmup();
+  // ログインした人には、先読みの返事に「作ったスライド」が載ってくる。作成中のものは画面の上で知らせる
+  if (res?.ok && profile()) {
+    mySlides = parseSlidesList(await res.text().catch(() => ''));
+    renderMe();
+    const working = mySlides.find((i) => maybeWorking(i));
+    if (working && !document.querySelector('.slides-note')) document.body.appendChild(slidesNotice(working));
+  }
 }
+let mySlides: SlidesItem[] = [];
 function showBanned(message: string) {
   closeGift(); cancelIdle(); turnVersion++;
   stage.classList.add('limited', 'started', 'answering'); stage.classList.remove('composing', 'busy');
@@ -725,14 +736,20 @@ function renderMe() {
   meBtn.classList.toggle('in', !!p);
   meBtn.setAttribute('aria-label', p ? 'ログイン中' : 'ログイン');
   mePop.innerHTML = p
-    ? `<p class="lead">ログイン中です。1日に話せる回数が増え、話した内容を覚えて答えます。</p><button class="out" id="logout" type="button">ログアウト</button>`
+    ? `<p class="lead">ログイン中です。1日に話せる回数が増え、話した内容を覚えて答えます。</p><div id="myslides"></div><button class="out" id="logout" type="button">ログアウト</button>`
     : `<p class="lead">ログインすると、1日に話せる回数が増えたり、話した内容を覚えてもらえるようになります。</p>
        <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>Google でログイン</span></button>`;
   $('#glogin')?.addEventListener('click', () => login());
   $('#logout')?.addEventListener('click', () => logout());
+  if (p && mySlides.length) $('#myslides')?.appendChild(slidesList(mySlides));
 }
 const toggleMe = (on: boolean) => { mePop.classList.toggle('on', on); meBtn.setAttribute('aria-expanded', String(on)); };
-meBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMe(!mePop.classList.contains('on')); });
+meBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const on = !mePop.classList.contains('on');
+  if (on && mySlides.length) renderMe(); // 開くたびに一覧の状態（作成中→完成）を引き直す
+  toggleMe(on);
+});
 document.addEventListener('pointerdown', (e) => { if (!mePop.contains(e.target as Node) && e.target !== meBtn && !meBtn.contains(e.target as Node)) toggleMe(false); });
 
 director.phase('greeting');

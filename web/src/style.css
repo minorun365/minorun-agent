@@ -266,3 +266,21 @@ td:first-child{font-weight:700;white-space:nowrap}
 @keyframes slides-pulse{0%,100%{box-shadow:0 0 0 0 rgba(10,100,216,.45)}50%{box-shadow:0 0 0 6px rgba(10,100,216,0)}}
 @keyframes slides-flow{to{left:100%}}
 @media(prefers-reduced-motion:reduce){.bubble .slides-bar span,.bubble .slides-steps .step.now i{animation:none}}
+/* 作ったスライドの一覧（ログインのメニュー）と、開き直したときの作成中の知らせ */
+.mepop .myslides:not(:empty){margin:0 0 12px;padding-top:12px;border-top:1px solid var(--line)}
+.mepop .myslides .mh{margin:0 0 8px;font-size:12px;font-weight:700;color:var(--sub)}
+.mepop .myslides ul{list-style:none;margin:0;padding:0;max-height:240px;overflow-y:auto}
+.mepop .myslides li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;font-size:13px;color:var(--ink)}
+.mepop .myslides li a{display:flex;align-items:center;gap:8px;min-width:0;color:var(--ink);text-decoration:none}
+.mepop .myslides li img{flex:none;width:64px;height:36px;border-radius:4px;object-fit:cover;box-shadow:0 0 0 1px var(--line)}
+.mepop .myslides .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mepop .myslides .t.mut{color:var(--mut)}
+.mepop .myslides .d{flex:none;font-size:11px;color:var(--mut)}
+.slides-note{position:fixed;z-index:9;left:50%;top:calc(env(safe-area-inset-top,0px) + var(--edge-y) + 48px);transform:translateX(-50%);
+  display:flex;align-items:center;gap:8px;max-width:calc(100% - 32px);padding:9px 16px;border-radius:999px;background:var(--card);color:var(--ink);
+  font-size:13px;text-decoration:none;box-shadow:0 8px 28px rgba(22,24,29,.14),0 0 0 1px var(--line)}
+.slides-note span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slides-note i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--accent);animation:slides-pulse 1.2s ease-in-out infinite}
+.slides-note.ready{color:var(--accent);font-weight:700}
+.slides-note.ready i{animation:none}
+.slides-note.failed i{background:var(--mut);animation:none}

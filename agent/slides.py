@@ -82,5 +82,30 @@ def start(url, request, user, *, function, table, bucket, user_daily, total_dail
                              Body=json.dumps({"stage": "queued", "at": int(time.time())}).encode())
     _client("lambda").invoke(FunctionName=function, InvocationType="Event",
                              Payload=json.dumps({"job": job, "url": url, "ask": str(request)[:300], "user": user}).encode())
+    _remember(table, user, job)
     print(json.dumps({"slides_job": job, "user": user}))
     return {"status": "accepted", "job": job, "note": "1〜3分ででき上がり、画面にサムネイルが出ます"}
+
+
+KEEP = 10  # 一覧に出す件数（新しい順）
+
+
+def _remember(table, user, job):
+    """利用者ごとの「作ったスライド」に番号と時刻だけを足す（記事のURLは残さない）。画面を閉じても後から開けるように。"""
+    try:
+        _client("dynamodb").update_item(
+            TableName=table, Key={"pk": {"S": f"list#{user}"}},
+            UpdateExpression="SET jobs = list_append(if_not_exists(jobs, :empty), :new)",
+            ExpressionAttributeValues={":empty": {"L": []},
+                                       ":new": {"L": [{"M": {"job": {"S": job}, "at": {"N": str(int(time.time()))}}}]}})
+    except Exception as e:  # 一覧に載らないだけで、スライド作りは続ける
+        print(json.dumps({"slides_list_error": type(e).__name__}))
+
+
+def recent(table, user):
+    """その人が作ったスライドを新しい順に最大 KEEP 件返す。"""
+    if not (table and user):
+        return []
+    item = _client("dynamodb").get_item(TableName=table, Key={"pk": {"S": f"list#{user}"}}).get("Item") or {}
+    jobs = [{"job": j["M"]["job"]["S"], "at": int(j["M"]["at"]["N"])} for j in item.get("jobs", {}).get("L", [])]
+    return sorted(jobs, key=lambda j: -j["at"])[:KEEP]
