@@ -63,5 +63,23 @@ class StartTests(unittest.TestCase):
                 c["dynamodb"].transact_write_items.assert_not_called()
 
 
+class ListTests(unittest.TestCase):
+    def test_accepted_job_is_remembered_without_url(self):
+        r, c = start()
+        upd = c["dynamodb"].update_item.call_args.kwargs
+        self.assertEqual(upd["Key"]["pk"]["S"], "list#u1")
+        added = upd["ExpressionAttributeValues"][":new"]["L"][0]["M"]
+        self.assertEqual(added["job"]["S"], r["job"])
+        self.assertNotIn("url", json.dumps(upd))
+
+    def test_recent_is_newest_first_and_capped(self):
+        ddb = MagicMock()
+        ddb.get_item.return_value = {"Item": {"jobs": {"L": [{"M": {"job": {"S": f"j{i}"}, "at": {"N": str(i)}}} for i in range(15)]}}}
+        with patch.object(slides, "_clients", {"dynamodb": ddb}):
+            got = slides.recent("tb", "u1")
+        self.assertEqual([j["job"] for j in got], [f"j{i}" for i in range(14, 4, -1)])
+        self.assertEqual(slides.recent("tb", ""), [])
+
+
 if __name__ == "__main__":
     unittest.main()

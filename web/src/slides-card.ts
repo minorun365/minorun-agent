@@ -65,3 +65,78 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
   setTimeout(tick, 1500);
   return fig;
 }
+
+// ---- 作ったスライドの一覧（ログインのメニューの中）と、作成中の知らせ（画面の上） ----
+export interface SlidesItem { job: string; base: string; at: number }
+
+/** 先読みの返事（SSE）から作ったスライドの一覧を取り出す。自分のサイトの /s/<番号>/ だけを通す */
+export function parseSlidesList(sse: string): SlidesItem[] {
+  for (const line of sse.split('\n')) {
+    if (!line.startsWith('data:')) continue;
+    try {
+      const ev = JSON.parse(line.slice(5).trim());
+      if (ev.type === 'slides_list' && Array.isArray(ev.items)) {
+        return ev.items.filter((i: SlidesItem) => typeof i.job === 'string' && /^\/s\/[A-Za-z0-9]{8,32}\/$/.test(i.base) && Number.isFinite(i.at));
+      }
+    } catch { /* 読めない行は飛ばす */ }
+  }
+  return [];
+}
+
+/** 作り始めて15分以内なら、まだ作っている途中の可能性がある */
+export const maybeWorking = (item: SlidesItem, now = Date.now()) => now / 1000 - item.at < 15 * 60;
+
+const when = (at: number) => {
+  const d = new Date(at * 1000);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+async function statusOf(base: string, fetcher: typeof fetch): Promise<SlidesStatus | null> {
+  try { const r = await fetcher(base + 'status.json', { cache: 'no-store' }); return r.ok ? await r.json() as SlidesStatus : null; } catch { return null; }
+}
+
+/** メニューの「作ったスライド」。1件ずつ status.json を見て、完成・作成中・失敗を出し分ける */
+export function slidesList(items: SlidesItem[], fetcher: typeof fetch = fetch.bind(window)): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'myslides';
+  if (!items.length) return box;
+  box.innerHTML = `<p class="mh">作ったスライド</p><ul></ul>`;
+  const ul = box.querySelector('ul')!;
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="t">確かめています…</span><span class="d">${when(it.at)}</span>`;
+    ul.appendChild(li);
+    void statusOf(it.base, fetcher).then((s) => {
+      if (s?.stage === 'done') {
+        li.innerHTML = `<a href="${esc(it.base)}" target="_blank" rel="noopener"><img src="${esc(it.base)}og.jpg" alt="" width="64" height="36"><span class="t">${esc(s.title || 'スライド')}</span></a><span class="d">${when(it.at)}</span>`;
+      } else if (s?.stage === 'error') {
+        li.innerHTML = `<span class="t mut">作れませんでした</span><span class="d">${when(it.at)}</span>`;
+      } else if (s && maybeWorking(it)) {
+        li.innerHTML = `<span class="t">作成中…</span><span class="d">${when(it.at)}</span>`;
+      } else li.remove();
+    });
+  }
+  return box;
+}
+
+/** 開き直したときに作成中のものがあれば、画面の上に知らせを出し、できたら「できました」に替える */
+export function slidesNotice(item: SlidesItem, fetcher: typeof fetch = fetch.bind(window)): HTMLElement {
+  const el = document.createElement('a');
+  el.className = 'slides-note'; el.target = '_blank'; el.rel = 'noopener';
+  el.innerHTML = '<i></i><span>スライドを作成中です…</span>';
+  const span = el.querySelector('span')!;
+  const tick = async () => {
+    const s = await statusOf(item.base, fetcher);
+    if (s?.stage === 'done') {
+      el.classList.add('ready'); el.href = item.base;
+      span.textContent = `スライドができました！タップで開く（${s.title || 'スライド'}）`;
+      return;
+    }
+    if (s?.stage === 'error') { el.classList.add('failed'); span.textContent = 'スライドを作れませんでした'; setTimeout(() => el.remove(), 8000); return; }
+    const n = s ? stepOf(s.stage) : -1;
+    if (n >= 0 && n < 4) span.textContent = `スライドを作成中です…（${WAIT_LINES[n]}）`;
+    if (maybeWorking(item)) setTimeout(tick, 3000); else el.remove();
+  };
+  void tick();
+  return el;
+}
