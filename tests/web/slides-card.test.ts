@@ -28,3 +28,34 @@ test('先読みの返事から作ったスライドの一覧を取り出す（�
   assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 60_000), true);
   assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 20 * 60_000), false);
 });
+
+test('アイコンの印：作成中があれば working、無くて見ていない完成品があれば ready', async () => {
+  const { badgeOf, rowKind } = await import('../../web/src/slides-card.ts');
+  const now = 10_000 * 1000;
+  const a = { job: 'aaaaaaaa', base: '/s/aaaaaaaa/', at: 10_000 - 60 };
+  const b = { job: 'bbbbbbbb', base: '/s/bbbbbbbb/', at: 10_000 - 120 };
+  const old = { job: 'cccccccc', base: '/s/cccccccc/', at: 10_000 - 3600 };
+  const st: Record<string, { stage: string } | null | undefined> = { aaaaaaaa: { stage: 'writing' }, bbbbbbbb: { stage: 'done' }, cccccccc: { stage: 'writing' } };
+  const get = (j: string) => st[j];
+  assert.equal(rowKind(a, st.aaaaaaaa, now), 'working');
+  assert.equal(rowKind(old, st.cccccccc, now), 'hidden'); // 15分を過ぎた作成中は止まったものとして出さない
+  assert.equal(rowKind(a, undefined, now), 'checking');
+  assert.equal(badgeOf([a, b], get, new Set(['bbbbbbbb']), now), 'working');
+  assert.equal(badgeOf([b, old], get, new Set(['bbbbbbbb']), now), 'ready');
+  assert.equal(badgeOf([b, old], get, new Set(), now), '');
+});
+
+test('見張り役：留守の間にできたスライドは「できた」の印になり、見たら消える', async () => {
+  const { SlidesTracker } = await import('../../web/src/slides-card.ts');
+  const now = Math.floor(Date.now() / 1000);
+  const fake = (async (url: string) => new Response(JSON.stringify(url.includes('aaaaaaaa') ? { stage: 'done', title: 'T' } : { stage: 'error' }))) as typeof fetch;
+  let changes = 0;
+  const t = new SlidesTracker(() => { changes++; }, fake);
+  t.set([{ job: 'aaaaaaaa', base: '/s/aaaaaaaa/', at: now - 120 }, { job: 'bbbbbbbb', base: '/s/bbbbbbbb/', at: now - 60 }]);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(t.get('aaaaaaaa')?.stage, 'done');
+  assert.equal(t.badge(), 'ready');
+  t.seen();
+  assert.equal(t.badge(), '');
+  assert.ok(changes > 0);
+});
