@@ -89,6 +89,33 @@ def deck(md, domain):
     return front + md + end
 
 
+FIT = re.compile(r"\n?<style scoped>/\*fit\*/.*?</style>\n?", re.S)
+OVER = ("下にはみ出している", "右にはみ出している", "横にはみ出している要素がある")
+
+
+def shrink(md, nums, z):
+    """指定したスライドだけ、見出し以外の中身を z 倍に縮める。前に縮めた指定は置き換える（掛け算で縮みすぎない）"""
+    head, sep, body = md.partition("\n---\n")
+    parts = body.split("\n---\n")
+    for n in nums:
+        if 0 < n <= len(parts):
+            parts[n - 1] = (f"\n<style scoped>/*fit*/section>:not(h1):not(header):not(footer){{zoom:{z}}}</style>\n"
+                            + FIT.sub("\n", parts[n - 1]))
+    return head + sep + "\n---\n".join(parts)
+
+
+def shrink_to_fit(md, result, work):
+    """モデルに直させても余白からはみ出したスライドは、中身を段階的に縮めて収める。文字は削らない"""
+    for z in (0.9, 0.8, 0.72):
+        targets = [r["n"] for r in result["ng"] if any(b in OVER for b in r["bad"])]
+        if not targets:
+            break
+        md = shrink(md, targets, z)
+        result = render(md, work)
+        print(json.dumps({"shrink": z, "pages": targets, "ng_left": len(result["ng"])}))
+    return md, result
+
+
 def render(md, work):
     if work.exists():
         shutil.rmtree(work)
@@ -274,6 +301,7 @@ def handler(event, context):
                 md, result = md2, result2
             else:
                 render(md, work)
+        md, result = shrink_to_fit(md, result, work)
         title, viewer = publish(job, work, md, url, result["pages"])
         usd = sum(x["input"] * 4 + x["output"] * 20 for x in usage) / 1_000_000
         status(job, "done", title=title, pages=result["pages"], viewer=viewer, thumb=viewer + "og.jpg")
