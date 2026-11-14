@@ -26,7 +26,8 @@ try {
   // 記事の中身から作った HTML なので、手元のファイル以外へは一切つながせない
   await page.setRequestInterception(true);
   page.on('request', (r) => (r.url().startsWith('file://') || r.url().startsWith('data:') ? r.continue() : r.abort()));
-  await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 });
+  // 画面で拡大して見られるので2倍の解像度で焼く（測定は CSS の px なので倍率に左右されない）
+  await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2 });
   await page.goto('file://' + path.resolve(html), { waitUntil: 'load' });
   await page.addStyleTag({ content: 'body{margin:0;background:#fff} svg[data-marpit-svg]{display:block;width:1280px;height:720px;margin:0}' });
   await page.evaluate(() => document.fonts.ready);
