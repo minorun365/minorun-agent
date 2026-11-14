@@ -128,6 +128,15 @@ td:first-child{font-weight:700;white-space:nowrap}
 .attach[hidden]{display:none}
 .stage.composing .attach{opacity:1;pointer-events:auto}
 .stage.kbd .attach{bottom:94px}
+/* 入力にURLが入ったときだけ出す「この記事をスライドにする」の札。添付の見本と同じ高さに置く（画像を添付している間は出さない） */
+.slidechip{position:absolute;left:0;right:0;width:max-content;max-width:calc(100% - 32px);margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 88px);
+  padding:8px 16px;border-radius:999px;border:1.5px solid var(--accent);background:var(--card);color:var(--accent);font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;
+  box-shadow:0 4px 18px rgba(20,22,28,.12);opacity:0;pointer-events:none;transition:opacity .3s ease}
+.slidechip[hidden]{display:none}
+.stage.composing .slidechip{opacity:1;pointer-events:auto}
+.stage.kbd .slidechip{bottom:98px}
+.slidechip:hover{background:var(--mark)}
+.chip.slides{color:var(--accent);box-shadow:inset 0 0 0 1.5px var(--accent)}
 .attach img{display:block;max-width:132px;max-height:88px;border-radius:12px;box-shadow:0 4px 18px rgba(20,22,28,.18),0 0 0 1px var(--line)}
 .attach button{position:absolute;top:-9px;right:-9px;width:26px;height:26px;border-radius:50%;border:0;background:var(--ink);color:#fff;font-size:15px;line-height:1;cursor:pointer}
 .write textarea{flex:1;min-width:0;font:inherit;font-size:18px;line-height:1.5;text-align:center;resize:none;border:0;outline:none;background:transparent;
@@ -198,6 +207,7 @@ td:first-child{font-weight:700;white-space:nowrap}
   .stage.composing .dock{padding-bottom:var(--edge-b)}
   .stage.composing .write{bottom:var(--edge-b)}
   .stage.composing .attach{bottom:calc(var(--edge-b) + 84px)}
+  .stage.composing .slidechip{bottom:calc(var(--edge-b) + 88px)}
 }
 /* ダークモードの案（?theme=dark で表示。iOS のダークの地色 #000 につなげる） */
 :root[data-theme=dark]{color-scheme:dark;--bg:#000;--card:#1c1c1e;--cloud:#2c2c2e;--mark:rgba(78,161,255,.35);
@@ -232,6 +242,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 .gbtn:hover{background:var(--soft)}
 .gbtn svg{width:18px;height:18px;flex:none}
 .mepop .out{display:block;margin:4px auto 0;border:0;background:none;color:var(--sub);font:inherit;font-size:13px;cursor:pointer;text-decoration:underline}
+.mepop .needlogin{margin:0 0 12px;padding:8px 12px;border-radius:10px;background:var(--soft);font-size:13px;font-weight:700;line-height:1.6;color:var(--ink)}
 .mepop .lead{margin:0 0 8px;font-size:13.5px;line-height:1.7;color:var(--sub)}
 .mepop .perks{list-style:none;margin:0 0 14px;padding:0;font-size:13px;line-height:1.6;color:var(--sub)}
 .mepop .perks li{position:relative;padding:3px 0 3px 18px}
