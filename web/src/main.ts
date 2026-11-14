@@ -16,6 +16,7 @@ import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { AttachError, shrink, upload } from './attach';
 import { parseSlidesList, slidesCard, slidesList, SlidesTracker } from './slides-card';
+import { PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withSlidesStarter } from './slides-hint';
 
 interface MapShown { src: string; alt: string; caption: string; width: number; height: number; source_url: string }
 type AgentEvent =
@@ -105,7 +106,8 @@ function layout() {
   const pad = parseFloat(getComputedStyle(dock).paddingBottom);
   // 添付した画像の見本が出ているときは、その高さもキャラクターの下に空ける
   const shot = $('#attach');
-  const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 + (shot.hidden ? 0 : shot.offsetHeight + 14) : has('limited') ? 0 : suggest.offsetHeight;
+  const chip = $('#slideChip');
+  const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 + (shot.hidden ? 0 : shot.offsetHeight + 14) + (chip.hidden ? 0 : chip.offsetHeight + 14) : has('limited') ? 0 : suggest.offsetHeight;
   const dockTop = H - pad - inner - (comp ? 10 : 16);
   const avail = dockTop - headB;
   // 通常ブラウザの縦向きは上下、Xのアプリ内と横向きの低い画面は左右に配置する。
@@ -369,7 +371,7 @@ function renderSuggest(list: string[], retry = false, via: Via = 'starter') {
     b.onclick = () => fn(b); suggest.appendChild(b);
   };
   if (retry) add('もう一度送る', '', (b) => send(lastText, b, lastVia, lastImage));
-  list.forEach((t) => add(t, '', (b) => send(t, b, via)));
+  list.forEach((t) => (t === SLIDES_STARTER ? add(t, 'slides', openSlidesCompose) : add(t, '', (b) => send(t, b, via))));
   // 一度答えたあとは、続けて聞けることが分かるように「追加で質問」にする
   add(has('started') ? '追加で質問' : '質問する', 'ask', openCompose);
   relayout();
@@ -404,7 +406,11 @@ q.addEventListener('paste', (e) => {
   const file = Array.from(e.clipboardData?.files ?? []).find((f) => f.type.startsWith('image/'));
   if (file) { e.preventDefault(); void pickImage(file); }
 });
-const submitTyped = () => { if (canSend()) send(q.value.trim() || NO_TEXT, q, 'typed'); };
+const submitTyped = () => {
+  if (!canSend()) return;
+  const text = q.value.trim() || NO_TEXT;
+  send(slidesMode && wantsSlidesHint(text) ? slidesRequest(text) : text, q, 'typed');
+};
 
 function openCompose() {
   layoutViewport.begin(innerWidth, visibleHeight(innerHeight, window.visualViewport?.height));
@@ -416,7 +422,33 @@ function openCompose() {
   q.focus({ preventScroll: true });
   relayout();
 }
-function closeCompose() { stage.classList.remove('composing'); q.blur(); if (!busy) idle(); relayout(); }
+function closeCompose() { stage.classList.remove('composing'); q.blur(); setSlidesMode(false); if (!busy) idle(); relayout(); }
+
+// ---- スライド作成の入口：URLを入れたら札を出し、質問候補「URLをスライドに要約して！」からは URL 待ちで入力欄を開く ----
+const slideChip = $<HTMLButtonElement>('#slideChip');
+let slidesMode = false;
+function setSlidesMode(on: boolean) { slidesMode = on; q.placeholder = on ? SLIDES_PLACEHOLDER : PLACEHOLDER; }
+function openSlidesCompose() {
+  if (!profile()) { askLoginForSlides(); return; }
+  setSlidesMode(true); openCompose();
+}
+// ログイン前の人がスライドの入口を押したら、送らずにログインのメニューを開き、ログインした人だけの機能だと一言添える
+function askLoginForSlides() {
+  if (has('composing')) closeCompose();
+  renderMe(SLIDES_LOGIN_NOTE); freshNew = new Set(); toggleMe(true);
+}
+function renderSlideChip() {
+  const show = has('composing') && !attached && wantsSlidesHint(q.value);
+  if (slideChip.hidden !== !show) { slideChip.hidden = !show; relayout(); }
+}
+slideChip.addEventListener('pointerdown', (e) => e.preventDefault());
+slideChip.addEventListener('click', () => {
+  if (!profile()) { askLoginForSlides(); return; }
+  send(slidesRequest(q.value), q, 'typed');
+});
+q.addEventListener('input', renderSlideChip);
+// 最初の候補・回答後の候補（AI の候補が無いとき）にときどき混ぜる。ログイン前の人には、押したときにログインを案内する
+function starters(exclude: string[] = []) { return withSlidesStarter(pickStarters(3, exclude)); }
 function growInput() { q.style.height = 'auto'; q.style.height = q.scrollHeight + 'px'; relayout(); }
 q.addEventListener('input', () => { sendBtn.classList.toggle('on', canSend()); growInput(); });
 q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submitTyped(); } });
@@ -682,7 +714,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   if (failed) director.phase('error');
   else settle();
   busy = false; stage.classList.remove('busy');
-  if (!has('limited')) renderSuggest(next.length ? next : pickStarters(3, [text]), failed && refused?.reason !== 'too_long', next.length ? 'ai' : 'starter');
+  if (!has('limited')) renderSuggest(next.length ? next : starters([text]), failed && refused?.reason !== 'too_long', next.length ? 'ai' : 'starter');
   if (!failed && raw) {
     giftState.turns++; saveGifts();
     const isExpo = /expo|展示|ブース/i.test(topic + ' ' + text);
@@ -750,14 +782,15 @@ function renderList() {
   const box = $('#myslides');
   if (box) box.replaceChildren(slidesList(slides.items, slides.get, new Set([...slides.unseen, ...freshNew])));
 }
-function renderMe() {
+const SLIDES_LOGIN_NOTE = 'URLからスライドを作るのは、ログインした人だけの機能です。';
+function renderMe(note = '') {
   const p = profile();
   meBtn.innerHTML = PERSON + '<i class="badge" aria-hidden="true"></i>';
   meBtn.classList.toggle('in', !!p);
   renderBadge();
   mePop.innerHTML = p
     ? `<p class="lead">ログイン中です。</p>${PERKS}<div id="myslides"></div><button class="out" id="logout" type="button">ログアウト</button>`
-    : `<p class="lead">ログインすると、こんなことができます。</p>${PERKS}
+    : `${note ? `<p class="needlogin">${note}</p>` : ''}<p class="lead">ログインすると、こんなことができます。</p>${PERKS}
        <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>Google でログイン</span></button>`;
   $('#glogin')?.addEventListener('click', () => login());
   $('#logout')?.addEventListener('click', () => logout());
@@ -768,6 +801,7 @@ meBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   const on = !mePop.classList.contains('on');
   freshNew = on ? new Set(slides.unseen) : new Set();
+  if (on && !profile()) renderMe();
   if (on) renderList();
   toggleMe(on);
   if (on) slides.seen(); // 開いて一覧を見たら「できた」の印を消す（NEW の表示は閉じるまで残る）
@@ -776,7 +810,7 @@ document.addEventListener('pointerdown', (e) => { if (!mePop.contains(e.target a
 
 director.phase('greeting');
 restTimer = window.setTimeout(() => { if (!busy && !has('composing')) director.phase('resting'); }, 30_000);
-renderSuggest(pickStarters(3));
+renderSuggest(starters());
 fitViewport();
 layout(); requestAnimationFrame(() => requestAnimationFrame(() => stage.classList.add('ready')));
 // Google から戻ってきたときは、先にトークンを受け取ってから先読みする（ログインした人として数えるため）
