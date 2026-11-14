@@ -4,4 +4,4 @@
 
 - CSS の先頭に `/* @theme minorun-glass */` を書く（デッキのフロントマターがこの名前を指定するため）
 - 指示文（`slides/handler.py` の `RULES`）が使うクラスを持たせる：表紙 `section.top`、中扉 `section.crosshead`、締め `section.end`、手順 `.steps`、流れ図 `.flow`、依頼文 `.prompt`、要点 `p.point`
-- 書体はコンテナに入れた Zen Kaku Gothic New（見出し）・Noto Sans JP（本文）・Inter を指定する（`slides/Dockerfile`）。外部の書体を `@import` で読むと、書き出し時の通信を止めているため反映されない
+- 書体はコンテナに入れた Noto Sans JP（見出しと本文）・Inter を指定する（`slides/Dockerfile`）。外部の書体を `@import` で読むと、書き出し時の通信を止めているため反映されない
