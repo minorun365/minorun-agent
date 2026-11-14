@@ -232,7 +232,15 @@ td:first-child{font-weight:700;white-space:nowrap}
 .gbtn:hover{background:var(--soft)}
 .gbtn svg{width:18px;height:18px;flex:none}
 .mepop .out{display:block;margin:4px auto 0;border:0;background:none;color:var(--sub);font:inherit;font-size:13px;cursor:pointer;text-decoration:underline}
-.mepop .lead{margin:0 0 14px;font-size:13.5px;line-height:1.7;color:var(--sub)}
+.mepop .lead{margin:0 0 8px;font-size:13.5px;line-height:1.7;color:var(--sub)}
+.mepop .perks{list-style:none;margin:0 0 14px;padding:0;font-size:13px;line-height:1.6;color:var(--sub)}
+.mepop .perks li{position:relative;padding:3px 0 3px 18px}
+.mepop .perks li::before{content:"";position:absolute;left:4px;top:11px;width:6px;height:6px;border-radius:50%;background:var(--mut)}
+.mepop .perks li.slides{margin:0 0 6px;padding:10px 12px;border-radius:12px;background:var(--mark);color:var(--ink)}
+.mepop .perks li.slides::before{display:none}
+.mepop .perks li.slides b{display:block;font-size:13.5px}
+.mepop .perks li.slides span{display:block;margin-top:2px;font-size:12px;color:var(--sub)}
+.mepop .perks li.slides i{font-style:normal;white-space:nowrap}
 /* 低い画面（X のアプリ内ブラウザなど）：みのるんは右下、吹き出しは左側を縦に長く。しっぽは右へ向けて頭を指す */
 .stage.side .bubble{margin:0 0 0 14px;width:var(--bw,calc(100% - 28px));transition:transform .55s cubic-bezier(.2,1.2,.3,1),opacity .35s ease,filter .45s ease,bottom .6s cubic-bezier(.2,.8,.2,1),width .6s cubic-bezier(.2,.8,.2,1)}
 .stage.side .bubble::after{left:auto;right:-9px;bottom:var(--tail-b,40px);margin:0;transform:rotate(-45deg)}
