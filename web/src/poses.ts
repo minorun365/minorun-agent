@@ -16,6 +16,7 @@ export const TOOL_POSES: Record<string, readonly Pose[]> = {
   search_web: ['pc', 'phone', 'magnify', 'tablet'], search_recent: ['pc', 'phone', 'magnify', 'tablet'],
   search_whats_new: ['pc', 'phone', 'tablet'], search_aws_blog: ['book', 'page', 'tablet'],
   get_announcements: ['phone', 'tablet'], show_map: ['book', 'tablet', 'note'],
+  make_slides: ['pc', 'note', 'tablet', 'page'],
 };
 
 export class PosePicker {

@@ -1,0 +1,5 @@
+awslambdaric>=3,<4
+boto3
+pillow==11.3.0
+strands-agents[web-fetch]==1.62.0
+bedrock-agentcore==1.25.0

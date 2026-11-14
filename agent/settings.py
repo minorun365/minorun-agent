@@ -31,3 +31,10 @@ MAX_TOOL_CALLS = 8
 # 検索結果をモデルへ渡す件数。ナレッジベースは上位6件で引用元の95%を保つ（2026-10-26 実測）
 KB_RESULTS = int(os.environ.get("KB_RESULTS", "6"))
 WEB_RESULTS = int(os.environ.get("WEB_RESULTS", "4"))
+
+# URL からスライドを作る機能（2026-11-15 みのるん決定：ログインした人だけ・1人1日2本・全体で1日50本）
+SLIDES_FUNCTION = os.environ.get("SLIDES_FUNCTION", "")
+SLIDES_TABLE = os.environ.get("SLIDES_TABLE", "")
+SLIDES_BUCKET = os.environ.get("SLIDES_BUCKET", "")
+SLIDES_USER_DAILY = int(os.environ.get("SLIDES_USER_DAILY", "2"))
+SLIDES_TOTAL_DAILY = int(os.environ.get("SLIDES_TOTAL_DAILY", "50"))

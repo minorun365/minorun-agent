@@ -15,6 +15,7 @@ import { pickStarters } from './starters';
 import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { AttachError, shrink, upload } from './attach';
+import { slidesCard } from './slides-card';
 
 interface MapShown { src: string; alt: string; caption: string; width: number; height: number; source_url: string }
 type AgentEvent =
@@ -25,6 +26,7 @@ type AgentEvent =
   | { type: 'replace'; text: string }
   | ({ type: 'preview' } & LinkPreview)
   | ({ type: 'map' } & MapShown)
+  | { type: 'slides'; job: string; base: string }
   | { type: 'catalog_update'; at: string; lines: string[] }
   | { type: 'suggest'; items: string[] }
   | { type: 'error'; message: string }
@@ -613,6 +615,9 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
           if (!busy && !failed && requestVersion === turnVersion) settle();
         });
         figures.push(fig); if (opened) render(true);
+      } else if (ev.type === 'slides') {
+        // 自分のサイトの /s/<番号>/ だけを見に行く
+        if (/^\/s\/[A-Za-z0-9]{8,32}\/$/.test(ev.base)) { figures.push(slidesCard(ev.base, relayout)); if (opened) render(true); }
       } else if (ev.type === 'catalog_update') {
         const box = document.createElement('div'); box.className = 'update';
         box.innerHTML = `<b>最新の公式カタログで変更あり（${esc(ev.at)}）</b><ul>${ev.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`;

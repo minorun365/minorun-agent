@@ -94,9 +94,10 @@ Google ログインを使わなければ、ログインなしで動きます。
    uv run --with boto3 python infra/scripts/knowledge.py sessions
    ```
 
-4. エージェント、入口の Gateway、WAF を作る
+4. スライド工房を作り、続けてエージェント、入口の Gateway、WAF を作る（スライド工房はテーマの CSS を `slides/theme/` に置いてから。置き方は `slides/theme/README.md`）
 
    ```sh
+   npx cdkd deploy MinorunSlides
    npx cdkd deploy MinorunAgent MinorunEntry MinorunEdge
    ```
 
