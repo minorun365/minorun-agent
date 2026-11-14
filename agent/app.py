@@ -7,6 +7,7 @@
   {"type": "follow_up", "text": "..."}                   最初の回答を残したまま追加調査を案内
   {"type": "replace", "text": "..."}                     追加調査後の要約で吹き出しの本文全体を置き換える
   {"type": "map", "src": "...", "alt": "...", ...}        回答に添える地図
+  {"type": "slides", "job": "...", "base": "/s/<job>/"}   受け付けたスライド作成（画面が base の status.json を見に行く）
   {"type": "preview", "url": "...", "image": "...", "title": "...", "label": "..."}  紹介した本人のページの貼り紙
   {"type": "catalog_update", "at": "HH:MM", "lines": [...]}  公式カタログと照合して変わっていた分（変更が無ければ送らない）
   {"type": "suggest", "items": ["…？", ...]}             次に聞きそうな質問（深掘り2つ＋別の話題1つ。作れなければ送らない）
@@ -49,6 +50,7 @@ app = BedrockAgentCoreApp()
 
 LABELS = {
     "fetch_url": "ページの本文を読んでいます",
+    "make_slides": "スライドの準備をしています",
     "now": "日時を確かめています",
     "search_sessions": "公式カタログを調べています",
     "search_2026": "2026年の情報を調べています",
@@ -391,6 +393,7 @@ async def invoke(payload, context):
     try:
         turn = tools.Turn()
         turn.workload_token = BedrockAgentCoreContext.get_workload_access_token()
+        turn.user = user
         tools.Turn.current = turn
         turn_start = len(conv.agent.messages)
         memories = []
@@ -413,7 +416,7 @@ async def invoke(payload, context):
             return
         judge = asyncio.create_task(asyncio.to_thread(topics.judge, conv.current, conv.shelf, question))
         nexts = asyncio.create_task(asyncio.to_thread(topics.suggest_next, conv.current, conv.shelf, question))
-        topic_sent, seen_tools, first_ms, answer, failed, maps_sent = False, set(), None, [], False, 0
+        topic_sent, seen_tools, first_ms, answer, failed, maps_sent, slides_sent = False, set(), None, [], False, 0, 0
 
         def topic_event(j):
             changed = j["decision"] != "same"
@@ -442,6 +445,9 @@ async def invoke(payload, context):
                 while turn.maps[maps_sent:]:
                     yield {"type": "map", **turn.maps[maps_sent]}
                     maps_sent += 1
+                while turn.slides[slides_sent:]:
+                    yield {"type": "slides", **turn.slides[slides_sent]}
+                    slides_sent += 1
                 if not topic_sent and judge.done():
                     topic_sent = True
                     yield topic_event(judge.result())
@@ -496,9 +502,11 @@ async def invoke(payload, context):
             yield topic_event(judged)
         for m in turn.maps[maps_sent:]:
             yield {"type": "map", **m}
+        for d in turn.slides[slides_sent:]:
+            yield {"type": "slides", **d}
 
         catalog_state = None
-        preview_task = asyncio.create_task(link_preview.for_answer(''.join(answer))) if not failed and not turn.maps else None
+        preview_task = asyncio.create_task(link_preview.for_answer(''.join(answer))) if not failed and not turn.maps and not turn.slides else None
         if turn.verify is not None and not failed:
             try:
                 result = await asyncio.wait_for(asyncio.wrap_future(turn.verify), VERIFY_WAIT)

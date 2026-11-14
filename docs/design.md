@@ -28,6 +28,7 @@ Google でログインした人（任意）は、インターセプターが Cog
 | `search_whats_new`・`search_aws_blog` | AWS の What's New と AWS ブログ |
 | `get_announcements` | 会期中に現地から足す速報（S3 の JSON。`knowledge/tools/announce.py` で足す） |
 | `show_map` | 回答の吹き出しに地図や図を添える（`agent/maps.json`） |
+| `make_slides` | ログインした人が渡した記事のURLから解説スライドを作り始める（下の「URLからスライド」） |
 
 ナレッジベースと AgentCore Web Search はツールの Gateway（MCP・IAM 認証）越しに呼びます。1回の質問でツールを呼べる回数には上限を付けています。
 
@@ -35,7 +36,15 @@ Google でログインした人（任意）は、インターセプターが Cog
 
 回答は60〜120字・2〜3文を基本にし、見出しや表は作りません。出典はその情報を使った文の末尾に `[ラベル](URL)` で付け、画面が小さなラベルにします。続きは「次の質問の候補」から聞いてもらう作りで、候補は質問が届いた時点で Haiku が回答と並行して3つ作ります。
 
-Runtime から画面への SSE の形は `agent/app.py` の冒頭にあります（topic・tool・text・map・catalog_update・suggest・error・done）。
+Runtime から画面への SSE の形は `agent/app.py` の冒頭にあります（topic・tool・text・map・slides・catalog_update・suggest・error・done）。
+
+## URLからスライド
+
+ログインした人が記事のURLと「スライドにして」を送ると、ツール `make_slides` が DynamoDB で回数（1人1日・全体で1日）を数え、進み具合のファイル `s/<番号>/status.json` を S3 に置いて、スライド工房の Lambda（`slides/`）を非同期で起こします。CloudFront の読み取りは60秒で切れるので、生成を1回の応答の中で待たない作りです。
+
+工房は記事を読み、Claude Opus 5.5 に Marp の Markdown を書かせ、Chromium で書き出して余白を測ります。はみ出したスライドがあれば1回だけ直させ、ページごとの画像・表紙の画像（Xのカード用）・めくれるビューアを S3 に置きます。モデルの出力は使える HTML のタグを絞ってから焼き、書き出し中は手元のファイル以外への通信を止めています。
+
+画面は3秒おきに `status.json` を見て、4つの段階を進め、できたら表紙のサムネイルに替えます。ビューアは CloudFront の `/s/*` から配り、URL を知っている人だけが開けて検索には出しません。テーマの CSS は公開版に入れていないので、`slides/theme/README.md` のとおり各自で用意します。
 
 ## セッション情報の鮮度
 

@@ -25,7 +25,9 @@ import catalog
 from url_reader import read_url
 from knowledge_context import compact_sources, mark_fragments
 from settings import (ASSET_BASE, CONFERENCE_DAYS, JST, KB_RESULTS, KNOWLEDGE_BUCKET, LAS_VEGAS, REGION,
+                      SLIDES_BUCKET, SLIDES_FUNCTION, SLIDES_TABLE, SLIDES_TOTAL_DAILY, SLIDES_USER_DAILY,
                       TOOLS_GATEWAY_URL, WEB_RESULTS)
+import slides
 
 _mcp = None
 _mcp_lock = threading.Lock()
@@ -55,6 +57,8 @@ class Turn:
         self.x_calls = 0
         self.x_usage = []
         self.url_calls = 0
+        self.slides = []  # 受け付けたスライドの依頼（画面へ {"type": "slides"} で送る）
+        self.user = ""  # ログインした人のハッシュ（していなければ空）
         # 保管庫の鍵を読むための通行証。Runtime が質問ごとにヘッダーで渡す
         self.workload_token = None
 
@@ -390,4 +394,25 @@ async def fetch_url(url: str) -> dict:
     return await read_url(url)
 
 
-ALL = [now, search_sessions, search_2026, search_past, search_web, search_recent, search_japanese, search_x_users, search_x_posts, search_whats_new, search_aws_blog, get_announcements, show_map, fetch_url]
+@tool
+def make_slides(url: str, request: str = "") -> dict:
+    """利用者が渡した記事のURLから、みのるんのスライドテーマで解説スライドを作り始める。ログインした人だけが使え、1人1日2本まで。
+    でき上がりまで1〜3分かかり、画面にサムネイルとビューアへのリンクが自動で出る。呼ぶのは1回の質問で1回まで。
+
+    Args:
+        url: 利用者が渡した記事の公開URL（http または https）
+        request: 利用者の頼み方の一言（例: 初心者向けに、10枚くらいで）。無ければ空
+    """
+    turn = Turn.current
+    if turn is None:
+        return {"status": "error"}
+    if turn.slides:
+        return {"status": "accepted", "note": "この質問ではすでに受け付けています"}
+    result = slides.start(url, request, turn.user, function=SLIDES_FUNCTION, table=SLIDES_TABLE, bucket=SLIDES_BUCKET,
+                          user_daily=SLIDES_USER_DAILY, total_daily=SLIDES_TOTAL_DAILY)
+    if result.get("status") == "accepted":
+        turn.slides.append({"job": result["job"], "base": f"/s/{result['job']}/"})
+    return {k: v for k, v in result.items() if k != "job"}
+
+
+ALL = [now, search_sessions, search_2026, search_past, search_web, search_recent, search_japanese, search_x_users, search_x_posts, search_whats_new, search_aws_blog, get_announcements, show_map, fetch_url, make_slides]

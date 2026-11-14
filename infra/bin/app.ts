@@ -5,6 +5,7 @@ import { AgentStack } from '../lib/agent-stack.js';
 import { EdgeStack } from '../lib/edge-stack.js';
 import { EntryStack } from '../lib/entry-stack.js';
 import { KnowledgeStack } from '../lib/knowledge-stack.js';
+import { SlidesStack } from '../lib/slides-stack.js';
 import { WatchStack } from '../lib/watch-stack.js';
 import { WebStack } from '../lib/web-stack.js';
 
@@ -16,12 +17,16 @@ const app = new cdk.App();
 cdk.Tags.of(app).add('Project', 'minorun-agent');
 
 const knowledge = new KnowledgeStack(app, 'MinorunKnowledge', { env });
+// URL からスライドを作る機能の保存先・回数の表・スライド工房（2026-11-15）
+const slides = new SlidesStack(app, 'MinorunSlides', { env, siteUrl: 'https://agent.minoruonda.com' });
 const agent = new AgentStack(app, 'MinorunAgent', {
   env,
+  slides: { functionArn: slides.worker.functionArn, tableArn: slides.quota.tableArn, tableName: slides.quota.tableName, bucketName: slides.bucket.bucketName },
   toolsGateway: { gatewayArn: knowledge.toolsGateway.attrGatewayArn, mcpUrl: knowledge.toolsGateway.attrGatewayUrl },
   knowledgeBucketName: `minorun-agent-knowledge-${env.account}`,
 });
 agent.addDependency(knowledge);
+agent.addDependency(slides);
 const entry = new EntryStack(app, 'MinorunEntry', { env, runtime: agent.runtime, legacyRuntime: agent.legacyRuntime, runtimeV2: agent.runtimeV2, conversationLog: agent.conversationLog, uploadBucket: agent.uploadBucket });
 
 // CloudFront の WAF はバージニア北部にしか置けない
@@ -43,7 +48,7 @@ const watch = new WatchStack(app, 'MinorunWatch', {
   adminBaseUrl: `https://${edge?.domain ?? 'agent.minoruonda.com'}/admin/`,
   pageToken: fs.readFileSync(tokenFile, 'utf-8').trim(),
 });
-const web = new WebStack(app, 'MinorunWeb', { env, entry, edge, watch });
+const web = new WebStack(app, 'MinorunWeb', { env, entry, edge, watch, slidesBucketName: slides.bucket.bucketName });
 web.addDependency(watch);
 
 
