@@ -300,6 +300,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 .mepop .myslides li.working .t{display:flex;flex-direction:column;min-width:0}
 .mepop .myslides li.working small{font-size:11px;color:var(--sub);overflow:hidden;text-overflow:ellipsis}
 .mepop .myslides .new{margin-right:6px;padding:1px 5px;border-radius:4px;background:#e5484d;color:#fff;font-size:10px;font-style:normal;font-weight:700;vertical-align:1px}
+.mepop .myslides .kind{margin-right:6px;padding:1px 5px;border-radius:4px;background:var(--line);color:var(--sub);font-size:10px;font-style:normal;font-weight:700;vertical-align:1px}
 /* ログインのアイコンの印：作成中は青く脈打つ点、できたら赤い点（メニューを開くと消える） */
 .me{position:relative;overflow:visible}
 .me .badge{display:none;position:absolute;top:-1px;right:-1px;width:11px;height:11px;border-radius:50%;box-shadow:0 0 0 2px var(--bg)}

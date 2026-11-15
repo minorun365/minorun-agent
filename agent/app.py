@@ -8,6 +8,7 @@
   {"type": "replace", "text": "..."}                     追加調査後の要約で吹き出しの本文全体を置き換える
   {"type": "map", "src": "...", "alt": "...", ...}        回答に添える地図
   {"type": "slides", "job": "...", "base": "/s/<job>/"}   受け付けたスライド作成（画面が base の status.json を見に行く）
+  {"type": "slides_offer"}                               回答のあとに「この回答をスライドに」の札を出してよい（調べた説明の回答だけ）
   {"type": "slides_list", "items": [{"job", "base", "at"}]}  先読みの返事で、ログインした人が作ったスライド（新しい順）
   {"type": "preview", "url": "...", "image": "...", "title": "...", "label": "..."}  紹介した本人のページの貼り紙
   {"type": "catalog_update", "at": "HH:MM", "lines": [...]}  公式カタログと照合して変わっていた分（変更が無ければ送らない）
@@ -46,7 +47,7 @@ import tools
 import topics
 import usage
 from tool_status import knowledge_label
-from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN, MODEL_MAIN_API, SLIDES_TABLE
+from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN, MODEL_MAIN_API, SLIDES_FUNCTION, SLIDES_TABLE
 
 app = BedrockAgentCoreApp()
 
@@ -528,6 +529,8 @@ async def invoke(payload, context):
                     yield {"type": "catalog_update", "at": result["checked_at"], "lines": lines}
             else:
                 catalog_state = "unchecked"
+        if not failed and SLIDES_FUNCTION and not turn.slides and slides.offer("".join(answer), turn.tools_used, research.SEARCH_TOOLS):
+            yield {"type": "slides_offer"}
         if not failed:
             # 受付直後に並行して作った候補を1回だけ使う。
             try:

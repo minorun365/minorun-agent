@@ -28,3 +28,11 @@ test('入力欄の薄い案内は、スマホ幅で折り返さない長さに�
   // 390px の入力欄は全角15字ほどが1行。余裕を見て12字まで
   for (const t of [PLACEHOLDER, SLIDES_PLACEHOLDER]) assert.ok(t.length <= 12, t);
 });
+
+test('回答のあとの札は候補の先頭に1つだけ置き、候補は3つまでのまま', async () => {
+  const { withOfferChip, OFFER_CHIP, SLIDES_STARTER } = await import('../../web/src/slides-hint.ts');
+  assert.deepEqual(withOfferChip(['a', 'b', 'c']), [OFFER_CHIP, 'a', 'b']);
+  assert.deepEqual(withOfferChip(['a', SLIDES_STARTER, 'c']), [OFFER_CHIP, 'a', 'c']);
+  assert.deepEqual(withOfferChip([]), [OFFER_CHIP]);
+  assert.deepEqual(withOfferChip([OFFER_CHIP, 'a']), [OFFER_CHIP, 'a']);
+});

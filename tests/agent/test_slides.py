@@ -73,6 +73,54 @@ class StartTests(unittest.TestCase):
                 c["dynamodb"].transact_write_items.assert_not_called()
 
 
+NOTES = "- Strands Agents 1.62 で新しい仕組みが入った［1］\n" * 20
+
+
+class TopicTests(unittest.TestCase):
+    def test_topic_material_keeps_public_sources_only(self):
+        m = slides.topic_material("  Strands の\n新機能 ", NOTES,
+                                  ["https://strandsagents.com/a", "http://127.0.0.1/x", "https://strandsagents.com/a",
+                                   "https://b.example.com/1", "https://c.example.com/2", "https://d.example.com/3",
+                                   "https://e.example.com/4", "https://f.example.com/5"])
+        self.assertEqual(m["topic"], "Strands の 新機能")
+        self.assertEqual(m["sources"][0], "https://strandsagents.com/a")
+        self.assertEqual(len(m["sources"]), 5)
+        self.assertNotIn("http://127.0.0.1/x", m["sources"])
+
+    def test_topic_material_needs_topic_and_enough_notes(self):
+        self.assertIsNone(slides.topic_material("", NOTES, []))
+        self.assertIsNone(slides.topic_material("テーマ", "短い", []))
+        self.assertIsNotNone(slides.topic_material("テーマ", NOTES, None))
+
+    def test_topic_job_counts_the_same_quota_and_sends_material(self):
+        m = slides.topic_material("Strands の新機能", NOTES, ["https://strandsagents.com/a"])
+        r, c = start(url=m)
+        self.assertEqual(r["status"], "accepted")
+        c["dynamodb"].transact_write_items.assert_called_once()
+        payload = json.loads(c["lambda"].invoke.call_args.kwargs["Payload"])
+        self.assertEqual(payload["topic"], "Strands の新機能")
+        self.assertEqual(payload["sources"], ["https://strandsagents.com/a"])
+        self.assertNotIn("url", payload)
+        self.assertEqual(json.loads(c["s3"].put_object.call_args.kwargs["Body"])["kind"], "topic")
+
+    def test_missing_material_is_invalid_without_counting(self):
+        r, c = start(url=None)
+        self.assertEqual(r["status"], "invalid")
+        c["dynamodb"].transact_write_items.assert_not_called()
+
+
+class OfferTests(unittest.TestCase):
+    SEARCH = {"search_2026", "search_web", "fetch_url", "search_sessions"}
+
+    def test_offer_only_for_researched_explanations(self):
+        long = "あ" * 250
+        self.assertTrue(slides.offer(long, ["now", "search_2026"], self.SEARCH))
+        self.assertFalse(slides.offer("あ" * 249, ["search_2026"], self.SEARCH))
+        self.assertFalse(slides.offer(long, ["now"], self.SEARCH))
+        self.assertFalse(slides.offer(long, ["fetch_url"], self.SEARCH))
+        self.assertFalse(slides.offer(long, ["search_sessions"], self.SEARCH))
+        self.assertTrue(slides.offer(long, ["search_sessions", "search_web"], self.SEARCH))
+
 class ListTests(unittest.TestCase):
     def test_accepted_job_is_remembered_without_url(self):
         r, c = start()

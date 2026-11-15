@@ -395,20 +395,25 @@ async def fetch_url(url: str) -> dict:
 
 
 @tool
-def make_slides(url: str, request: str = "") -> dict:
-    """利用者が渡した記事のURLから、みのるんのスライドテーマで解説スライドを作り始める。ログインした人だけが使え、1人1日2本まで。
+def make_slides(url: str = "", request: str = "", topic: str = "", notes: str = "", sources: list[str] | None = None) -> dict:
+    """みのるんのスライドテーマで解説スライドを作り始める。ログインした人だけが使え、記事から作るものと合わせて1人1日2本まで。
     でき上がりまで数分かかり、画面にサムネイルとビューアへのリンクが自動で出る（画面を離れても、右上のアイコンの「作ったスライド」から開ける）。呼ぶのは1回の質問で1回まで。
+    作り方は2つ。記事から作るときは url だけを渡す。調べてまとめるときは url を空にし、topic・notes・sources を渡す。
 
     Args:
-        url: 利用者が渡した記事の公開URL（http または https）
+        url: 利用者が渡した記事の公開URL（http または https）。調べてまとめるときは空
         request: 利用者の頼み方の一言（例: 初心者向けに、10枚くらいで）。無ければ空
+        topic: 調べてまとめるときのテーマ（例: Strands Agents の新機能）。100字まで
+        notes: 調べてまとめるときの材料。検索で確かめた事実だけを、出典の番号［1］［2］を付けた箇条書きで1500〜6000字。年が分かる事実は年を書く
+        sources: notes の出典のページのURL（番号の順、5件まで）。ナレッジベースだけで URL が無ければ空
     """
     turn = Turn.current
     if turn is None:
         return {"status": "error"}
     if turn.slides:
         return {"status": "accepted", "note": "この質問ではすでに受け付けています"}
-    result = slides.start(url, request, turn.user, function=SLIDES_FUNCTION, table=SLIDES_TABLE, bucket=SLIDES_BUCKET,
+    material = url if url.strip() else slides.topic_material(topic, notes, sources)
+    result = slides.start(material, request, turn.user, function=SLIDES_FUNCTION, table=SLIDES_TABLE, bucket=SLIDES_BUCKET,
                           user_daily=SLIDES_USER_DAILY, total_daily=SLIDES_TOTAL_DAILY,
                           unlimited=turn.user in SLIDES_UNLIMITED)
     if result.get("status") == "accepted":

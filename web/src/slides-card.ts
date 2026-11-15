@@ -1,10 +1,13 @@
-// URL から作るスライドのカード。受け付けた直後に置き、工房が書く status.json を数秒おきに見て、
+// スライドのカード（記事のURLから作るものと、調べてまとめるもの）。受け付けた直後に置き、工房が書く status.json を数秒おきに見て、
 // 「記事を読む → 構成を考える → スライドを焼く → 仕上げ」の段階を進め、できたら表紙のサムネイルに差し替える。
 
-export interface SlidesStatus { stage: string; message?: string; title?: string; pages?: number; viewer?: string; thumb?: string }
+export interface SlidesStatus { stage: string; kind?: 'article' | 'topic'; message?: string; title?: string; pages?: number; viewer?: string; thumb?: string }
 
 export const STEPS = ['記事を読む', '構成を考える', 'スライドを焼く', '仕上げ'] as const;
 const WAIT_LINES = ['記事を読んでいます', '構成を考えています', 'スライドを焼いています', '余白を測って仕上げています'];
+/** 調べてまとめるときは、最初の段階を「出典を読む」と言い分ける */
+export const stepLabel = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? '出典を読む' : STEPS[i]);
+export const waitLine = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? '出典を読んでいます' : WAIT_LINES[i]);
 
 /** 工房の段階を、画面の4段階のどこまで来たかへ直す（-1 は受付待ち） */
 export function stepOf(stage: string): number {
@@ -30,8 +33,9 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
     const n = stepOf(s.stage);
     fig.querySelectorAll<HTMLElement>('.step').forEach((el, i) => {
       el.classList.toggle('done', i < n); el.classList.toggle('now', i === n);
+      if (i === 0) el.lastChild!.textContent = stepLabel(0, s.kind);
     });
-    if (n >= 0 && n < 4) line.textContent = WAIT_LINES[n] + '…';
+    if (n >= 0 && n < 4) line.textContent = waitLine(n, s.kind) + '…';
   };
   const finish = (s: SlidesStatus) => {
     stopped = true;
@@ -124,12 +128,13 @@ export function slidesList(items: SlidesItem[], status: (job: string) => SlidesS
     const d = `<span class="d">${when(it.at)}</span>`;
     if (kind === 'done') {
       const isNew = unseen.has(it.job) ? '<em class="new">NEW</em>' : '';
-      rows.push(`<li><a href="${esc(it.base)}" target="_blank" rel="noopener"><img src="${esc(it.base)}og.jpg" alt="" width="64" height="36"><span class="t">${isNew}${esc(s!.title || 'スライド')}</span></a>${d}</li>`);
+      const tag = `<em class="kind">${s!.kind === 'topic' ? '調べて' : '記事'}</em>`;
+      rows.push(`<li><a href="${esc(it.base)}" target="_blank" rel="noopener"><img src="${esc(it.base)}og.jpg" alt="" width="64" height="36"><span class="t">${isNew}${tag}${esc(s!.title || 'スライド')}</span></a>${d}</li>`);
     } else if (kind === 'error') {
       rows.push(`<li><span class="t mut">作れませんでした</span>${d}</li>`);
     } else if (kind === 'working') {
       const n = stepOf(s!.stage);
-      const step = n >= 0 && n < 4 ? WAIT_LINES[n] : '順番を待っています';
+      const step = n >= 0 && n < 4 ? waitLine(n, s!.kind) : '順番を待っています';
       rows.push(`<li class="working"><span class="ph"><i></i></span><span class="t"><b>作成中…</b><small>${step}</small></span>${d}</li>`);
     } else if (kind === 'checking') {
       rows.push(`<li><span class="t mut">確かめています…</span>${d}</li>`);

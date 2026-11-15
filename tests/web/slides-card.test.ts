@@ -59,3 +59,12 @@ test('見張り役：留守の間にできたスライドは「できた」の�
   assert.equal(t.badge(), '');
   assert.ok(changes > 0);
 });
+
+test('調べてまとめるときは最初の段階を「出典を読む」と言い分ける', async () => {
+  const { stepLabel, waitLine } = await import('../../web/src/slides-card.ts');
+  assert.equal(stepLabel(0, 'topic'), '出典を読む');
+  assert.equal(stepLabel(0, 'article'), '記事を読む');
+  assert.equal(stepLabel(0), '記事を読む');
+  assert.equal(stepLabel(1, 'topic'), '構成を考える');
+  assert.equal(waitLine(0, 'topic'), '出典を読んでいます');
+});
