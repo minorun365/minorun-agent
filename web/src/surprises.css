@@ -5,7 +5,7 @@
 .surprise h3{font-size:13px;color:#705319;margin:0 20px 6px 0}
 .surprise p{margin:0 0 7px}
 .surprise strong{display:block;font-size:15px;line-height:1.4;margin-bottom:6px}
-.surprise a{display:block;font-size:11px;line-height:1.4;color:#0a64d8;text-decoration:none}
+.surprise a{display:block;font-size:11px;line-height:1.4;color:var(--accent,#0891b2);text-decoration:none}
 .surprise .dismiss{position:absolute;right:0;top:0;width:32px;height:32px;border:0;background:transparent;color:#70664c;font-size:20px;cursor:pointer}
 .surprise.photo{background:#fff;transform:rotate(-3deg);padding:25px 8px 10px}
 .surprise .picture{border:0;padding:0;background:none;width:100%;display:block}
@@ -41,7 +41,7 @@
 .surprise .dismiss{z-index:2}
 .surprise.linked{cursor:pointer;transition:translate .18s ease,box-shadow .18s ease,scale .12s ease}
 @media(hover:hover){.surprise.linked:has(.gift-link:hover){translate:0 -4px;box-shadow:0 11px 25px #2223}}
-.surprise.linked:has(.gift-link:focus-visible){outline:2px solid #0a64d8;outline-offset:3px;translate:0 -4px}
+.surprise.linked:has(.gift-link:focus-visible){outline:2px solid var(--accent,#0891b2);outline-offset:3px;translate:0 -4px}
 .surprise.linked:has(.gift-link:active){scale:.97;translate:0 -1px}
 .surprise .gift-link:focus-visible{outline:none}
 @media(prefers-reduced-motion:reduce){.surprise.linked{transition:none}.surprise.linked:has(.gift-link){translate:none;scale:none}}
