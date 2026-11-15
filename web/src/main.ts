@@ -371,7 +371,7 @@ function renderSuggest(list: string[], retry = false, via: Via = 'starter') {
     b.onclick = () => fn(b); suggest.appendChild(b);
   };
   if (retry) add('もう一度送る', '', (b) => send(lastText, b, lastVia, lastImage));
-  list.forEach((t) => (t === SLIDES_STARTER ? add(t, 'slides', openSlidesCompose) : add(t, '', (b) => send(t, b, via))));
+  list.forEach((t) => (t === SLIDES_STARTER ? add(t, '', openSlidesCompose) : add(t, '', (b) => send(t, b, via))));
   // 一度答えたあとは、続けて聞けることが分かるように「追加で質問」にする
   add(has('started') ? '追加で質問' : '質問する', 'ask', openCompose);
   relayout();
