@@ -16,7 +16,7 @@ import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { AttachError, shrink, upload } from './attach';
 import { parseSlidesList, slidesCard, slidesList, SlidesTracker } from './slides-card';
-import { PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withSlidesStarter } from './slides-hint';
+import { OFFER_CHIP, OFFER_REQUEST, PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withOfferChip, withSlidesStarter } from './slides-hint';
 
 interface MapShown { src: string; alt: string; caption: string; width: number; height: number; source_url: string }
 type AgentEvent =
@@ -28,6 +28,7 @@ type AgentEvent =
   | ({ type: 'preview' } & LinkPreview)
   | ({ type: 'map' } & MapShown)
   | { type: 'slides'; job: string; base: string }
+  | { type: 'slides_offer' }
   | { type: 'catalog_update'; at: string; lines: string[] }
   | { type: 'suggest'; items: string[] }
   | { type: 'error'; message: string }
@@ -373,7 +374,9 @@ function renderSuggest(list: string[], retry = false, via: Via = 'starter') {
     b.onclick = () => fn(b); suggest.appendChild(b);
   };
   if (retry) add('もう一度送る', '', (b) => send(lastText, b, lastVia, lastImage));
-  list.forEach((t) => (t === SLIDES_STARTER ? add(t, '', openSlidesCompose) : add(t, '', (b) => send(t, b, via))));
+  list.forEach((t) => (t === SLIDES_STARTER ? add(t, '', openSlidesCompose)
+    : t === OFFER_CHIP ? add(t, '', (b) => (profile() ? send(OFFER_REQUEST, b, via) : askLoginForSlides()))
+    : add(t, '', (b) => send(t, b, via))));
   // 一度答えたあとは、続けて聞けることが分かるように「追加で質問」にする
   add(has('started') ? '追加で質問' : '質問する', 'ask', openCompose);
   relayout();
@@ -435,7 +438,7 @@ function openSlidesCompose() {
   setSlidesMode(true); openCompose();
 }
 // ログイン前の人がスライドの入口（札・質問候補）を押したら、送らずにみのるんの返事として吹き出しで案内し、右上のアイコンを脈打たせる
-const SLIDES_LOGIN_REPLY = 'URLからスライドを作るのは、ログインした人だけの機能です。右上のアイコンからGoogleでログインすると、記事のURLを送るだけでスライドを作れるようになります（1日2本まで）。';
+const SLIDES_LOGIN_REPLY = 'スライド作成は、ログインした人だけの機能です。右上のアイコンからGoogleでログインすると、記事のURLや、調べてもらった回答からスライドを作れるようになります（1日2本まで）。';
 function askLoginForSlides() {
   if (has('composing')) closeCompose();
   closeGift(); cancelIdle(); turnVersion++;
@@ -580,7 +583,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   thought.classList.add('on'); director.phase('thinking', true);
 
   const tid = crypto.randomUUID().replace(/-/g, '').slice(0, 20);  // この質問の番号（会話の記録と通信エラーを結び付ける）
-  let raw = '', seeking = '', opened = false, failed = false, refused: Refused | null = null, next: string[] = [], limitShare = '', topic = '';
+  let raw = '', seeking = '', opened = false, failed = false, refused: Refused | null = null, next: string[] = [], limitShare = '', topic = '', offer = false;
   // 地図は本文より先に届くので吹き出しの先頭に、照合の結果は末尾に置く
   const figures: HTMLElement[] = [], extras: HTMLElement[] = [];
   let followingUp = false, showingMap = false;
@@ -672,6 +675,8 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
         linkPreview = ev;
       } else if (ev.type === 'suggest') {
         next = ev.items;
+      } else if (ev.type === 'slides_offer') {
+        offer = true;
       } else if (ev.type === 'error') {
         failed = true; director.phase('error'); await open(); raw += (raw ? '\n\n' : '') + ev.message; render(false);
       }
@@ -722,7 +727,9 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   if (failed) director.phase('error');
   else settle();
   busy = false; stage.classList.remove('busy');
-  if (!has('limited')) renderSuggest(next.length ? next : starters([text]), failed && refused?.reason !== 'too_long', next.length ? 'ai' : 'starter');
+  // 調べた説明の回答のあとは、候補の先頭に「この回答をスライドに！」を1つ置く
+  const list = next.length ? next : starters([text]);
+  if (!has('limited')) renderSuggest(offer && !failed ? withOfferChip(list) : list, failed && refused?.reason !== 'too_long', next.length ? 'ai' : 'starter');
   if (!failed && raw) {
     giftState.turns++; saveGifts();
     const isExpo = /expo|展示|ブース/i.test(topic + ' ' + text);

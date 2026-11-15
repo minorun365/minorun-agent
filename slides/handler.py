@@ -104,15 +104,31 @@ RULES = """あなたは、Webの記事を読んで日本語の解説スライド
 """
 
 
+# 調べてまとめるとき（記事ではなく、エージェントが検索で確かめた要点と出典から作る）。RULES の「記事」は「材料」と読み替えさせ、構成だけを差し替える
+TOPIC_RULES = RULES.split("# 構成")[0] + """# 材料から作るときの読み替え
+- 今回は1本の記事ではなく、みのるんエージェントが検索で確かめた要点（<notes>）と、その出典のページの本文（<source>）が材料。上の規則の「記事」は「材料」と読み替える
+- 事実・数字・人名は材料にあるものだけを使う。要点と出典の本文が食い違うときは出典の本文を採る。年が分かる事実は年を落とさない
+- 表紙の出どころの1行は「## みのるんエージェントが調べてまとめた」、表紙の最後の1行はテーマの言い換えにする（公開元の名前は書かない）
+- 記事の紹介のスライドは作らない
+
+# 構成
+- 表紙 → テーマの紹介（何の話か・なぜいま話題か）→ 中扉で区切った本題（2〜4章）→ まとめ
+- 出典のスライドと最後の締めのスライドはこちらで足すので書かない
+"""
+
+
+KIND = {"value": "article"}  # 1回の起動の間だけ持つ。画面が「記事を読む」と「出典を読む」を言い分ける
+
+
 def status(job, stage, **extra):
-    body = json.dumps({"stage": stage, "at": int(time.time()), **extra}, ensure_ascii=False)
+    body = json.dumps({"stage": stage, "kind": KIND["value"], "at": int(time.time()), **extra}, ensure_ascii=False)
     s3.put_object(Bucket=BUCKET, Key=f"s/{job}/status.json", Body=body.encode(),
                   ContentType="application/json", CacheControl="no-cache, max-age=0")
 
 
-def ask_model(messages):
+def ask_model(messages, rules=RULES):
     res = bedrock.converse(
-        modelId=MODEL, system=[{"text": RULES}], messages=messages,
+        modelId=MODEL, system=[{"text": rules}], messages=messages,
         inferenceConfig={"maxTokens": 16000},
         additionalModelRequestFields={"output_config": {"effort": EFFORT}})
     text = "".join(c.get("text", "") for c in res["output"]["message"]["content"])
@@ -144,11 +160,22 @@ def clean(md):
     return md.strip()
 
 
-def deck(md, domain):
+def sources_slide(urls):
+    """出典の一覧のスライド（調べてまとめたときだけ）。モデルに書かせると URL が大きな青い字で折り返すので、決まった体裁で足す"""
+    if not urls:
+        return ""
+    rows = "\n".join(f"<li><b>{html.escape(urllib.parse.urlparse(u).netloc)}</b><small>{html.escape(u)}</small></li>" for u in urls)
+    return ("\n\n---\n\n<style scoped>/*src*/ol{margin:8px 0 0;padding-left:1.4em}"
+            "li{margin:0 0 16px;font-size:24px;line-height:1.4}li b{display:block;font-weight:700}"
+            "li small{display:block;font-size:17px;color:var(--mute,#647b88);word-break:break-all;line-height:1.45;margin-right:200px}</style>\n\n"
+            f"# 出典\n\n<ol>\n{rows}\n</ol>")
+
+
+def deck(md, domain, sources=()):
     front = f"---\nmarp: true\nlang: ja\npaginate: true\ntheme: minorun-glass\nheader: '{domain}'\n---\n\n"
     end = ("\n\n---\n\n<!-- _class: end -->\n<!-- _paginate: false -->\n\n# Thank you!\n\n"
            "みのるんエージェント<small>agent.minoruonda.com</small>\n")
-    return front + md + end
+    return front + md + sources_slide(list(sources)) + end
 
 
 FIT = re.compile(r"\n?<style scoped>/\*fit\*/.*?</style>\n?", re.S)
@@ -246,7 +273,7 @@ VIEWER = """<!DOCTYPE html>
 <title>{title}｜みのるんエージェント</title>
 <meta property="og:type" content="website">
 <meta property="og:title" content="{title}">
-<meta property="og:description" content="みのるんエージェントが記事から作った解説スライド（全{pages}ページ）">
+<meta property="og:description" content="みのるんエージェントが{made}解説スライド（全{pages}ページ）">
 <meta property="og:url" content="{url}">
 <meta property="og:image" content="{og}">
 <meta name="twitter:card" content="summary_large_image">
@@ -273,8 +300,7 @@ footer a{{color:var(--accent)}}
 <header><h1>{title}</h1><a class="share" href="{share}" target="_blank" rel="noopener">Xでシェア</a></header>
 <div class="stage"><img id="slide" src="01.webp" alt="1ページ目"></div>
 <div class="nav"><button id="prev" aria-label="前へ">&#8592;</button><span class="count" id="count">1 / {pages}</span><button id="next" aria-label="次へ">&#8594;</button></div>
-<footer>元の記事：<a href="{source}" rel="noopener nofollow" target="_blank">{source_label}</a><br>
-<a href="{site}/">みのるんエージェント</a>がこの記事から自動で作ったスライドです。内容は元の記事で確かめてください。</footer>
+<footer>{footer}</footer>
 <script>
 const N={pages};let i=1;const img=document.getElementById('slide'),count=document.getElementById('count');
 const name=(n)=>String(n).padStart(2,'0')+'.webp';
@@ -293,7 +319,23 @@ show(1);
 """
 
 
-def publish(job, work, md, url, pages):
+def viewer_texts(title, viewer, sources):
+    """ビューアの紹介文・シェア文・足元。sources は出典のURLの並び（記事から作ったときは記事の1件）。"""
+    link = lambda u: f'<a href="{html.escape(u)}" rel="noopener nofollow" target="_blank">{html.escape(urllib.parse.urlparse(u).netloc)}</a>'
+    site = f'<a href="{SITE}/">みのるんエージェント</a>'
+    if KIND["value"] == "topic":
+        made, verb = "調べてまとめた", "調べて"
+        footer = (("出典：" + "、".join(link(u) for u in sources) + "<br>") if sources else "") + \
+            f"{site}がナレッジベースとWebで調べて自動で作ったスライドです。内容は出典で確かめてください。"
+    else:
+        made, verb = "記事から作った", "記事を渡して"
+        footer = f"元の記事：{link(sources[0])}<br>{site}がこの記事から自動で作ったスライドです。内容は元の記事で確かめてください。"
+    share = "https://x.com/intent/post?text=" + urllib.parse.quote(
+        f"#みのるんエージェント に{verb}「{title}」のスライドを作ってもらったよ！\n{viewer}")
+    return {"made": made, "share": html.escape(share), "footer": footer}
+
+
+def publish(job, work, md, sources, pages):
     title = title_of(md)
     base = f"s/{job}/"
     files = sorted((work / "png").glob("*.png"))
@@ -309,41 +351,78 @@ def publish(job, work, md, url, pages):
     s3.upload_file(str(work / "og.jpg"), BUCKET, base + "og.jpg",
                    ExtraArgs={"ContentType": "image/jpeg", "CacheControl": "public, max-age=31536000, immutable"})
     viewer = f"{SITE}/{base}"
-    share = "https://x.com/intent/post?text=" + urllib.parse.quote(
-        f"#みのるんエージェント に記事を渡して「{title}」のスライドを作ってもらったよ！\n{viewer}")
-    source_label = urllib.parse.urlparse(url).netloc
-    page = VIEWER.format(title=html.escape(title), pages=pages, url=viewer, og=viewer + "og.jpg", share=html.escape(share),
-                         source=html.escape(url), source_label=html.escape(source_label), site=SITE)
+    page = VIEWER.format(title=html.escape(title), pages=pages, url=viewer, og=viewer + "og.jpg", site=SITE,
+                         **viewer_texts(title, viewer, sources))
     s3.put_object(Bucket=BUCKET, Key=base + "index.html", Body=page.encode(),
                   ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300")
     s3.put_object(Bucket=BUCKET, Key=base + "deck.md", Body=md.encode(), ContentType="text/markdown; charset=utf-8")
     return title, viewer
 
 
+async def read_sources(urls):
+    """出典のページを並べて読む。読めなかったページは飛ばす（要点だけでも作れる）"""
+    pages = await asyncio.gather(*[read_url(u) for u in urls], return_exceptions=True)
+    out = []
+    for u, page in zip(urls, pages):
+        text = page.get("page_text", "") if isinstance(page, dict) and page.get("status") == "ok" else ""
+        out.append({"url": u, "text": text[:SOURCE_CHARS]})
+    return out
+
+
+SOURCE_CHARS = 6000  # 出典1件あたり。5件で約3万字に収め、1本の費用を記事のときと同じくらいにする
+
+
+def article_prompt(job, url, ask):
+    """記事を読んで、モデルへ渡す依頼文を作る。読めなければ None"""
+    status(job, "reading")
+    page = asyncio.run(read_url(url))
+    text = page.get("page_text", "")
+    if page.get("status") != "ok" or len(text) < 400:
+        page = read_with_browser(url) or page
+        text = page.get("page_text", "")
+    if page.get("status") != "ok" or len(text) < 400:
+        return None, None
+    return (f"次の記事を解説スライドにしてください。\nURL: {page.get('url') or url}\n"
+            + (f"頼んだ人の一言: {ask}\n" if ask else "")
+            + f"\n<article>\n{text}\n</article>"), urllib.parse.urlparse(page.get("url") or url).netloc
+
+
+def topic_prompt(job, event, ask):
+    """調べた要点と出典の本文から、モデルへ渡す依頼文を作る"""
+    status(job, "reading")
+    urls = [u for u in event.get("sources") or [] if isinstance(u, str) and u.startswith(("http://", "https://"))][:5]
+    read = asyncio.run(read_sources(urls)) if urls else []
+    body = "\n".join(f'<source n="{i}" url="{html.escape(r["url"])}">\n{r["text"]}\n</source>'
+                      for i, r in enumerate(read, 1) if r["text"])
+    print(json.dumps({"job": job, "sources": len(urls), "read": sum(1 for r in read if r["text"])}))
+    return (f"次のテーマを、材料だけを使って解説スライドにしてください。\nテーマ: {event['topic']}\n"
+            + (f"頼んだ人の一言: {ask}\n" if ask else "")
+            + "出典のURL（番号の順）:\n" + "\n".join(f"［{i}］{u}" for i, u in enumerate(urls, 1)) + "\n"
+            + f"\n<notes>\n{event['notes']}\n</notes>\n" + body)
+
+
 def handler(event, context):
-    job, url, ask = event["job"], event["url"], str(event.get("ask", ""))[:300]
+    job, ask = event["job"], str(event.get("ask", ""))[:300]
+    KIND["value"] = "topic" if event.get("topic") else "article"
     started = time.time()
     work = Path("/tmp") / job
     usage = []
     try:
-        status(job, "reading")
-        page = asyncio.run(read_url(url))
-        text = page.get("page_text", "")
-        if page.get("status") != "ok" or len(text) < 400:
-            page = read_with_browser(url) or page
-            text = page.get("page_text", "")
-        if page.get("status") != "ok" or len(text) < 400:
-            status(job, "error", message="記事の本文を読めませんでした。ログインが要るページや、画像・動画だけのページは使えません。")
-            return {"ok": False, "reason": "unreadable"}
+        if KIND["value"] == "topic":
+            rules, sources = TOPIC_RULES, [u for u in event.get("sources") or [] if isinstance(u, str)][:5]
+            prompt, domain = topic_prompt(job, event, ask), "agent.minoruonda.com"
+        else:
+            rules, sources = RULES, [event["url"]]
+            prompt, domain = article_prompt(job, event["url"], ask)
+            if prompt is None:
+                status(job, "error", message="記事の本文を読めませんでした。ログインが要るページや、画像・動画だけのページは使えません。")
+                return {"ok": False, "reason": "unreadable"}
         status(job, "writing")
-        domain = urllib.parse.urlparse(page.get("url") or url).netloc
-        prompt = (f"次の記事を解説スライドにしてください。\nURL: {page.get('url') or url}\n"
-                  + (f"頼んだ人の一言: {ask}\n" if ask else "")
-                  + f"\n<article>\n{text}\n</article>")
         messages = [{"role": "user", "content": [{"text": prompt}]}]
-        raw, u = ask_model(messages)
+        raw, u = ask_model(messages, rules)
         usage.append(u)
-        md = deck(fix_cover(clean(raw)), domain)
+        refs = sources if KIND["value"] == "topic" else ()
+        md = deck(fix_cover(clean(raw)), domain, refs)
         status(job, "rendering")
         result = render(md, work)
         status(job, "checking")
@@ -354,20 +433,20 @@ def handler(event, context):
             messages += [{"role": "assistant", "content": [{"text": raw}]},
                          {"role": "user", "content": [{"text": "焼いて余白を測ったところ、次のスライドが崩れました。"
                           "該当スライドの文字を減らす・項目を減らす・2つのスライドに分けるなどで直し、全体をもう一度、同じ形式で出してください。"
-                          "最後の締めのスライドは数に入っています（直さなくてよい）。\n" + lines}]}]
-            raw2, u = ask_model(messages)
+                          "最後の締めのスライドと出典のスライドは、こちらで足したもの（直さなくてよい）。\n" + lines}]}]
+            raw2, u = ask_model(messages, rules)
             usage.append(u)
-            md2 = deck(fix_cover(clean(raw2)), domain)
+            md2 = deck(fix_cover(clean(raw2)), domain, refs)
             result2 = render(md2, work)
             if len(result2["ng"]) <= len(result["ng"]):
                 md, result = md2, result2
             else:
                 render(md, work)
         md, result = shrink_to_fit(md, result, work)
-        title, viewer = publish(job, work, md, url, result["pages"])
+        title, viewer = publish(job, work, md, sources, result["pages"])
         usd = sum(x["input"] * 4 + x["output"] * 20 for x in usage) / 1_000_000
         status(job, "done", title=title, pages=result["pages"], viewer=viewer, thumb=viewer + "og.jpg")
-        print(json.dumps({"job": job, "ok": True, "pages": result["pages"], "ng_left": len(result["ng"]),
+        print(json.dumps({"job": job, "ok": True, "kind": KIND["value"], "pages": result["pages"], "ng_left": len(result["ng"]),
                           "rounds": len(usage), "usage": usage, "usd": round(usd, 4),
                           "seconds": round(time.time() - started, 1)}))
         return {"ok": True}
