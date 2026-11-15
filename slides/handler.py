@@ -22,6 +22,8 @@ from pathlib import Path
 import boto3
 from botocore.config import Config
 from PIL import Image
+from pptx import Presentation
+from pptx.util import Emu
 
 from url_reader import read_url
 
@@ -215,7 +217,9 @@ VIEWER = """<!DOCTYPE html>
 body{{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Hiragino Sans","Noto Sans JP",sans-serif;display:flex;flex-direction:column;align-items:center}}
 header{{width:100%;max-width:1100px;padding:18px 16px 10px;display:flex;align-items:center;gap:12px}}
 header h1{{flex:1;margin:0;font-size:17px;line-height:1.4;font-weight:700}}
-.share{{flex:none;display:inline-flex;align-items:center;gap:6px;background:#0f1419;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:9px 16px;border-radius:999px}}
+.share,.save{{flex:none;display:inline-flex;align-items:center;gap:6px;background:#0f1419;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:9px 16px;border-radius:999px;white-space:nowrap}}
+.save{{background:var(--btn);color:var(--ink);border:1px solid var(--line)}}
+@media (max-width:520px){{header{{flex-wrap:wrap}}header h1{{flex-basis:100%}}}}
 .stage{{position:relative;width:100%;max-width:1100px;padding:0 16px}}
 .stage img{{display:block;width:100%;height:auto;aspect-ratio:16/9;border-radius:12px;box-shadow:0 14px 40px rgba(8,100,130,.18);background:#f1fafc;user-select:none;-webkit-user-drag:none}}
 .nav{{display:flex;align-items:center;justify-content:center;gap:18px;padding:16px}}
@@ -227,7 +231,7 @@ footer a{{color:var(--accent)}}
 </style>
 </head>
 <body>
-<header><h1>{title}</h1><a class="share" href="{share}" target="_blank" rel="noopener">Xでシェア</a></header>
+<header><h1>{title}</h1>{save}<a class="share" href="{share}" target="_blank" rel="noopener">Xでシェア</a></header>
 <div class="stage"><img id="slide" src="01.webp" alt="1ページ目"></div>
 <div class="nav"><button id="prev" aria-label="前へ">&#8592;</button><span class="count" id="count">1 / {pages}</span><button id="next" aria-label="次へ">&#8594;</button></div>
 <footer>{footer}</footer>
@@ -265,6 +269,33 @@ def viewer_texts(title, viewer, sources):
     return {"made": made, "share": html.escape(share), "footer": footer}
 
 
+SAVE = '<a class="save" href="deck.pptx" download title="1ページを1枚の画像にしたPowerPoint（文字は編集できません）">PPTXで保存</a>'
+
+
+def pptx_name(title):
+    """保存するときのファイル名。ファイル名に使えない字を外し、長すぎる題は切る"""
+    return (re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "", title).strip()[:60] or "スライド") + ".pptx"
+
+
+def build_pptx(images, dst):
+    """焼いた画像を1ページ1枚で全面に貼った PowerPoint を作る。文字は画像なので編集できない（見た目はビューアと同じ）"""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)  # 16:9（13.333×7.5インチ）
+    blank = prs.slide_layouts[6]
+    for img in images:
+        slide = prs.slides.add_slide(blank)
+        slide.shapes.add_picture(str(img), 0, 0, prs.slide_width, prs.slide_height)
+    prs.save(dst)
+    return dst
+
+
+def upload_pptx(job, path, title):
+    s3.upload_file(str(path), BUCKET, f"s/{job}/deck.pptx", ExtraArgs={
+        "ContentType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "ContentDisposition": "attachment; filename=\"slides.pptx\"; filename*=UTF-8''" + urllib.parse.quote(pptx_name(title)),
+        "CacheControl": "public, max-age=31536000, immutable"})
+
+
 def publish(job, work, md, sources, pages):
     title = title_of(md)
     base = f"s/{job}/"
@@ -280,8 +311,15 @@ def publish(job, work, md, sources, pages):
     cover.save(work / "og.jpg", "JPEG", quality=86)
     s3.upload_file(str(work / "og.jpg"), BUCKET, base + "og.jpg",
                    ExtraArgs={"ContentType": "image/jpeg", "CacheControl": "public, max-age=31536000, immutable"})
+    # PowerPoint には PNG のまま貼ると1本10MBを超えるので、文字がにじまない画質の JPEG にする
+    jpgs = []
+    for p in files:
+        j = p.with_suffix(".jpg")
+        Image.open(p).convert("RGB").save(j, "JPEG", quality=92, subsampling=0)
+        jpgs.append(j)
+    upload_pptx(job, build_pptx(jpgs, work / "deck.pptx"), title)
     viewer = f"{SITE}/{base}"
-    page = VIEWER.format(title=html.escape(title), pages=pages, url=viewer, og=viewer + "og.jpg", site=SITE,
+    page = VIEWER.format(title=html.escape(title), pages=pages, url=viewer, og=viewer + "og.jpg", site=SITE, save=SAVE,
                          **viewer_texts(title, viewer, sources))
     s3.put_object(Bucket=BUCKET, Key=base + "index.html", Body=page.encode(),
                   ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300")
