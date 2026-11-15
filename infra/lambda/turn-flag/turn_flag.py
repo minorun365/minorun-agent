@@ -181,6 +181,13 @@ def _value(row, name):
     return row.get(name, {}).get("S", "")
 
 
+SLIDES_TOOL = "make_slides"
+
+
+def _tools(row):
+    return {t.get("S", "") for t in row.get("tools", {}).get("L", [])}
+
+
 def _actor(row):
     user, anon = _value(row, "user"), _value(row, "anon")
     return "u#" + user if user else "a#" + anon if anon else ""
@@ -282,7 +289,11 @@ def process_conversation(keys):
                 history = [{"id": _value(h,"sk"), "question": _value(h,"question")[:2000],
                             "answer": _value(h,"answer")[:600]} for h in rows[max(0,index-12):index]]
                 decision = ({"flag":"normal", "reason":"事前回答", "violation":"none", "evidence":[]}
-                            if "prebaked" in row else classify_turn(_value(row,"question"), _value(row,"answer"), history))
+                            if "prebaked" in row else
+                            # スライド作成のツールを呼んだ行は機能の正規の使い方。モデルに聞かず normal にする
+                            {"flag":"normal", "reason":"スライド作成の依頼", "violation":"none", "evidence":[]}
+                            if SLIDES_TOOL in _tools(row) else
+                            classify_turn(_value(row,"question"), _value(row,"answer"), history))
                 _score(row, history, decision, state, reset)
                 _deliver(_read(TABLE, {k:row[k] for k in ("pk","sk")}))
             return

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SLIDES_STARTER, slidesRequest, wantsSlidesHint, withSlidesStarter } from '../../web/src/slides-hint';
+import { PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withSlidesStarter } from '../../web/src/slides-hint';
 
 test('URLが入っていて、まだスライドを頼んでいないときだけ札を出す', () => {
   assert.equal(wantsSlidesHint('https://qiita.com/minorun365/items/abc'), true);
@@ -22,4 +22,9 @@ test('質問候補には、ときどき最後の1つと入れ替えて混ぜる'
   assert.deepEqual(withSlidesStarter(list, () => 0.9), list);
   assert.deepEqual(withSlidesStarter([], () => 0), []);
   assert.deepEqual(withSlidesStarter(['a', SLIDES_STARTER], () => 0), ['a', SLIDES_STARTER]);
+});
+
+test('入力欄の薄い案内は、スマホ幅で折り返さない長さにする（折り返すと Safari のキーボード上の欄に隠れる）', () => {
+  // 390px の入力欄は全角15字ほどが1行。余裕を見て12字まで
+  for (const t of [PLACEHOLDER, SLIDES_PLACEHOLDER]) assert.ok(t.length <= 12, t);
 });
