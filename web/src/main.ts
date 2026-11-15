@@ -107,6 +107,8 @@ function layout() {
   // 添付した画像の見本が出ているときは、その高さもキャラクターの下に空ける
   const shot = $('#attach');
   const chip = $('#slideChip');
+  // 長いURLなどで入力欄が2行以上に伸びたら、その分だけ注意書き・札・添付の見本を上へずらす（1行のときの高さは左の添付ボタンと同じ）
+  dock.style.setProperty('--grow', Math.max(0, write.offsetHeight - $('#clip').offsetHeight) + 'px');
   const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 + (shot.hidden ? 0 : shot.offsetHeight + 14) + (chip.hidden ? 0 : chip.offsetHeight + 14) : has('limited') ? 0 : suggest.offsetHeight;
   const dockTop = H - pad - inner - (comp ? 10 : 16);
   const avail = dockTop - headB;
