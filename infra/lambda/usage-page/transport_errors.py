@@ -9,6 +9,17 @@ import boto3
 LABELS = {'session_busy': '会話の起動競合', 'http': 'HTTPエラー', 'network': '通信できない', 'timeout': '応答待ちの時間切れ',
           'stream': '回答が途中で切れた', 'agent': '回答処理のエラー'}
 STATES = {'retrying': '再試行中', 'recovered': '自動復旧', 'failed': '未復旧'}
+# 送り直しは数秒で結果を記録し直す。それより長く「再試行中」のままなのは、送り直しの前後でページが閉じられたか
+# 再読み込みされ、結果を送れなかったもの（11/15（日）02:00 の先読み。サーバーは送り直しも質問も受けていた）
+STALE_RETRY = datetime.timedelta(minutes=2)
+
+
+def state_label(r, now=None):
+    if r['state'] == 'retrying':
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        if now - datetime.datetime.fromisoformat(r['updated_at']) > STALE_RETRY:
+            return '結果不明'
+    return STATES.get(r['state'], '不明')
 
 
 def read_errors(day):
@@ -38,7 +49,7 @@ def error_card(rows, day):
     return f'<a class="card error-card" href="{html.escape(url)}"><span>この日の通信・回答エラー（全利用）</span><strong class="{"warn" if unresolved else ""}">{count}<small> 件</small></strong><span>{note}</span></a>'
 
 
-def error_details(rows):
+def error_details(rows, now=None):
     if rows is None:
         content = '<p>エラー記録を取得できませんでした。次の更新で取り直します。</p>'
     elif not rows:
@@ -49,13 +60,15 @@ def error_details(rows):
         for r in rows:
             at = datetime.datetime.fromisoformat(r['at'])
             date = f'{at.month}/{at.day}（{"月火水木金土日"[at.weekday()]}）{at:%H:%M:%S}'
-            status = STATES.get(r['state'], '不明')
+            status = state_label(r, now)
             test_label = ' · 動作テスト' if r['session_id'].startswith('e2e-') else ''
             updated = datetime.datetime.fromisoformat(r['updated_at'])
             updated_text = f'{updated.month}/{updated.day}（{"月火水木金土日"[updated.weekday()]}）{updated:%H:%M:%S}'
             # 記録を足した 10/28（水）より前の行には hidden が無い
             hidden = '' if 'hidden' not in r else f'<p>画面を離れていた：{"はい" if r["hidden"] else "いいえ"}</p>'
             silent = '<p>先読みが失敗しても画面には出ず、質問は通常どおり送られます。</p>' if r['phase'] == 'warmup' and r['state'] != 'recovered' else ''
+            if status == '結果不明':
+                silent += '<p>送り直しの結果が届いていません。送り直しの最中にページが閉じられたか、再読み込みされた可能性があります。</p>'
             user_url = '?'+urllib.parse.urlencode({'v': 'list', 'd': r['day'], 'u': r['actor']})
             entries.append(f'<details data-row="error-{esc(r["id"])}"><summary><div class="qbody"><div class="q">{esc(LABELS.get(r["kind"], "通信エラー"))} · <span class="{"warn" if r["state"] != "recovered" else ""}">{status}</span></div><div class="meta">{date}{test_label} · {"先読み" if r["phase"] == "warmup" else "質問・回答"}</div></div></summary><div class="ans"><p>HTTP：{esc(r["status"])} ／ 試行：{esc(r["attempts"])}回</p><p>利用者：<a href="{html.escape(user_url)}">{esc(r["actor"])}</a></p><p>会話：{esc(r["session_id"])}</p><p>質問ID：{esc(r.get("tid") or "なし")}</p><p>最終記録：{updated_text}</p>{hidden}{silent}</div></details>')
         content = ''.join(entries)

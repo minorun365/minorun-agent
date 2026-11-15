@@ -9,9 +9,11 @@ export class TransportError extends Error {
 const BUSY = '会話の準備に時間がかかっています。少し待って、もう一度送ってください。';
 const GENERIC = 'いまうまくつながりませんでした。少し時間をおいて、もう一度送ってください。';
 const REFUSALS = new Set(['banned', 'daily_limit', 'per_minute', 'too_long', 'bad_id', 'stopped', 'image_limit', 'image_full']);
-// 先読みは1回8秒で打ち切り、もう1回だけ送り直す。サーバーが返し終えていても応答が届かず止まることがある（10/27（火）に3件。
+// 先読みは1回15秒で打ち切り、もう1回だけ送り直す。サーバーが返し終えていても応答が届かず止まることがある（10/27（火）に3件。
 // いずれも Runtime は0.3秒で返し終えていた）。1回目で入れ物は起きているので、送り直しはすぐ返る。
-const WARMUP_TIMEOUT = 8_000;
+// 8秒だった11/15（日）は、しばらく使われず入れ物を作り直した先読み（起動に最大7秒・準備に約3秒）が3件とも8秒を超え、
+// 送り直しで復旧していた。作り直しの最長（約10秒）より長く取り、作り直しを失敗に数えず、二重の起動もさせない。
+const WARMUP_TIMEOUT = 15_000;
 const WARMUP_RESENDS = 1;
 export class ChatTransport {
   private warming?: Promise<Response | undefined>;
