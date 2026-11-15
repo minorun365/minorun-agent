@@ -51,7 +51,16 @@ export class SlidesStack extends cdk.Stack {
       retention: logs.RetentionDays.SIX_MONTHS,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
+    // 名前を minorun-agent- で始める：Claude API の ID 連携のルールが、この前方一致のロールだけを通す
+    const workerRole = new iam.Role(this, 'WorkerRole', {
+      roleName: 'minorun-agent-slides',
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')],
+    });
+    // Claude API の通行証と交換する身元の証明書を STS から受け取る
+    workerRole.addToPolicy(new iam.PolicyStatement({ actions: ['sts:GetWebIdentityToken'], resources: ['*'] }));
     this.worker = new lambda.DockerImageFunction(this, 'Worker', {
+      role: workerRole,
       functionName: 'minorun-agent-slides',
       description: 'URL の記事から minorun-glass のスライドを作ってビューアを公開する',
       code: lambda.DockerImageCode.fromImageAsset(path.join(currentDir, '../../slides'), {
@@ -70,11 +79,21 @@ export class SlidesStack extends cdk.Stack {
         SLIDES_BUCKET: this.bucket.bucketName,
         SITE_URL: props.siteUrl,
         // 2026-11-15 みのるん決定（賢い方の Opus）。Bedrock の利用規約の同意は同日に済ませた
+        // 作れなかった1本を回数から戻すときに使う
+        SLIDES_TABLE: this.quota.tableName,
         SLIDES_MODEL: 'global.anthropic.claude-opus-5-5',
         SLIDES_EFFORT: 'medium',
+        // 回答の Sonnet と同じく Claude API（Max プランの API クレジット）を先に使う。off で Bedrock だけに戻す（2026-11-15 みのるん指示）
+        ANTHROPIC_PRIMARY: 'on',
+        SLIDES_API_MODEL: 'claude-opus-5-5',
+        // Claude Console の Workload identity で作った ID 連携（回答と同じルール）。秘密の値ではない
+        CLAUDE_WIF_RULE_ID: process.env.CLAUDE_WIF_RULE_ID ?? '',
+        CLAUDE_WIF_ORGANIZATION_ID: process.env.CLAUDE_WIF_ORGANIZATION_ID ?? '',
+        CLAUDE_WIF_SERVICE_ACCOUNT_ID: process.env.CLAUDE_WIF_SERVICE_ACCOUNT_ID ?? '',
       },
     });
     this.bucket.grantReadWrite(this.worker, 's/*');
+    this.worker.addToRolePolicy(new iam.PolicyStatement({ actions: ['dynamodb:UpdateItem'], resources: [this.quota.tableArn] }));
     this.worker.addToRolePolicy(new iam.PolicyStatement({
       actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
       resources: [

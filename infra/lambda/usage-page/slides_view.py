@@ -76,6 +76,39 @@ def _logs(start, end):
         return out
 
 
+# 工房が Claude API で書いた分の単価（100万トークンあたりのドル。Bedrock の Opus 5.5 と同じ）
+API_MODEL = "claude-opus-5-5"
+API_PRICE = {"input": 4.00, "output": 20.00}
+
+
+def api_usd_by_hour(start, end):
+    """工房が Claude API（Anthropic のクレジット）で払った Opus の費用を、日本時間の時台ごとに返す。
+    AWS/Bedrock のメトリクスには載らないので、1本ごとの最後のログ行の usage（呼び出しごとのモデル）から足す。"""
+    out = {}
+    try:
+        logs = boto3.client("logs")
+        args = {"logGroupName": LOG_GROUP, "filterPattern": "{ $.job = * && ($.ok IS TRUE || $.ok IS FALSE) }",
+                "startTime": int(start.timestamp() * 1000), "endTime": int(end.timestamp() * 1000)}
+        while True:
+            page = logs.filter_log_events(**args)
+            for e in page.get("events", []):
+                try:
+                    rec = json.loads(e["message"][e["message"].index("{"):])
+                except ValueError:
+                    continue
+                usd = sum((u.get("input", 0) * API_PRICE["input"] + u.get("output", 0) * API_PRICE["output"]) / 1e6
+                          for u in rec.get("usage") or [] if isinstance(u, dict) and u.get("model") == API_MODEL)
+                h = datetime.datetime.fromtimestamp(e["timestamp"] / 1000, JST).replace(minute=0, second=0, microsecond=0)
+                out[h] = out.get(h, 0.0) + usd
+            token = page.get("nextToken")
+            if not isinstance(token, str) or not token or token == args.get("nextToken"):
+                return out
+            args["nextToken"] = token
+    except Exception:
+        print(json.dumps({"slides_api_cost": "unavailable"}))
+        return out
+
+
 def load(start, end):
     """選んだ期間に受け付けたスライド。取れなければ None（0本と表示しない）。"""
     if not (TABLE and BUCKET):
