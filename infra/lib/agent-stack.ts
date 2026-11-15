@@ -17,7 +17,7 @@ export interface AgentStackProps extends cdk.StackProps {
   readonly toolsGateway: { gatewayArn: string; mcpUrl: string };
   readonly knowledgeBucketName: string;
   // URL からスライドを作るツール make_slides が使う（MinorunSlides が持つ）
-  readonly slides: { functionArn: string; tableArn: string; tableName: string; bucketName: string };
+  readonly slides: { runtimeArn: string; tableArn: string; tableName: string; bucketName: string };
 }
 
 export class AgentStack extends cdk.Stack {
@@ -154,7 +154,7 @@ export class AgentStack extends cdk.Stack {
 
     // スライドの依頼：回数の表で数え、進み具合の最初の1行を書き、スライド工房を非同期で起動する
     role.addToPolicy(new iam.PolicyStatement({ actions: ['dynamodb:UpdateItem', 'dynamodb:TransactWriteItems', 'dynamodb:GetItem'], resources: [props.slides.tableArn] }));
-    role.addToPolicy(new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [props.slides.functionArn] }));
+    role.addToPolicy(new iam.PolicyStatement({ actions: ['bedrock-agentcore:InvokeAgentRuntime'], resources: [props.slides.runtimeArn, `${props.slides.runtimeArn}/*`] }));
     role.addToPolicy(new iam.PolicyStatement({ actions: ['s3:PutObject'], resources: [`arn:${this.partition}:s3:::${props.slides.bucketName}/s/*`] }));
 
     // 受け口は IAM（authorizerConfiguration なし）。呼べるのは入口の Gateway のロールだけにする。
@@ -191,7 +191,7 @@ export class AgentStack extends cdk.Stack {
         LOG_TABLE: log.tableName,
         ASSET_BASE: '/assets',
         UPLOAD_BUCKET: this.uploadBucket.bucketName,
-        SLIDES_FUNCTION: props.slides.functionArn,
+        SLIDES_RUNTIME: props.slides.runtimeArn,
         SLIDES_TABLE: props.slides.tableName,
         SLIDES_BUCKET: props.slides.bucketName,
         SLIDES_USER_DAILY: '2',

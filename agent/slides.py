@@ -1,6 +1,6 @@
 """スライドの依頼を受け付ける（ツール make_slides の中身）。記事のURLから作るものと、調べた要点と出典から作るものの2種類。
 
-回数を表で数え（1人1日・全体で1日）、進み具合の最初の1行を公開用 S3 に置き、スライド工房（Lambda）を非同期で起動する。
+回数を表で数え（1人1日・全体で1日）、進み具合の最初の1行を公開用 S3 に置き、スライド工房（AgentCore Runtime）をジョブごとのセッションで起こす。
 数えるのはログインした人だけ。ログインしていない人には login_required を返す。
 """
 
@@ -8,6 +8,7 @@ import datetime
 import ipaddress
 import json
 import secrets
+import threading
 import time
 import urllib.parse
 
@@ -85,10 +86,40 @@ def topic_material(topic, notes, sources):
     return {"kind": "topic", "topic": topic, "notes": notes, "sources": urls[:MAX_SOURCES]}
 
 
-def start(material, request, user, *, function, table, bucket, user_daily, total_daily, unlimited=False):
+def _spawn(fn, *args):
+    threading.Thread(target=fn, args=args, daemon=True).start()
+
+
+def _launch(runtime, body, table, bucket):
+    """工房の Runtime を起こす。セッション ID はジョブごとに変える（1本＝1つの入れ物。33字以上が決まり）。
+    工房は受け取ってすぐ返し、裏で作る。起こせなかったら、画面へ失敗を出し、数えた回数を戻す。"""
+    job = body["job"]
+    try:
+        _client("bedrock-agentcore").invoke_agent_runtime(
+            agentRuntimeArn=runtime, qualifier="DEFAULT", runtimeSessionId=f"slides-job-{job}-{secrets.token_hex(8)}",
+            contentType="application/json", accept="application/json",
+            payload=json.dumps(body, ensure_ascii=False).encode())["response"].read()
+    except Exception as e:
+        print(json.dumps({"slides_launch_error": type(e).__name__, "job": job, "detail": str(e)[:300]}))
+        try:
+            _client("s3").put_object(Bucket=bucket, Key=f"s/{job}/status.json", ContentType="application/json",
+                                     CacheControl="no-cache, max-age=0",
+                                     Body=json.dumps({"stage": "error", "at": int(time.time()),
+                                                      "message": "スライド工房を起こせませんでした。今日の回数には数えないので、少し時間をおいて、もう一度頼んでください。"},
+                                                     ensure_ascii=False).encode())
+            if body.get("counted_day"):
+                for pk in (f"user#{body['user']}#{body['counted_day']}", f"all#{body['counted_day']}"):
+                    _client("dynamodb").update_item(TableName=table, Key={"pk": {"S": pk}}, UpdateExpression="ADD n :minus",
+                                                    ConditionExpression="n > :zero",
+                                                    ExpressionAttributeValues={":minus": {"N": "-1"}, ":zero": {"N": "0"}})
+        except Exception as e2:
+            print(json.dumps({"slides_launch_cleanup_error": type(e2).__name__, "job": job}))
+
+
+def start(material, request, user, *, runtime, table, bucket, user_daily, total_daily, unlimited=False):
     """material は記事のURL（文字列）か、topic_material の結果（調べてまとめる）。
     回数はどちらも同じ枠で数える。unlimited は運営者のテスト用。1人の上限にも全体の上限にも数えない。"""
-    if not function:
+    if not runtime:
         return {"status": "unavailable", "note": "この環境ではスライド作成を使えません"}
     if not user:
         return {"status": "login_required", "note": "スライド作成はログインした人だけが使えます。画面右上からGoogleでログインできます"}
@@ -111,11 +142,11 @@ def start(material, request, user, *, function, table, bucket, user_daily, total
     _client("s3").put_object(Bucket=bucket, Key=f"s/{job}/status.json", ContentType="application/json",
                              CacheControl="no-cache, max-age=0",
                              Body=json.dumps({"stage": "queued", "kind": kind, "at": int(time.time())}).encode())
-    _client("lambda").invoke(FunctionName=function, InvocationType="Event",
-                             Payload=json.dumps({"job": job, **payload, "ask": str(request)[:300], "user": user,
-                                                 # 数えた日。工房が作れなかったときに、この日の回数を1つ戻す
-                                                 **({} if unlimited else {"counted_day": day})},
-                                                ensure_ascii=False).encode())
+    body = {"job": job, **payload, "ask": str(request)[:300], "user": user,
+            # 数えた日。工房が作れなかったときに、この日の回数を1つ戻す
+            **({} if unlimited else {"counted_day": day})}
+    # 工房の入れ物の立ち上げに20秒ほどかかるので、呼び出しは裏で行い、回答を待たせない
+    _spawn(_launch, runtime, body, table, bucket)
     _remember(table, user, job)
     print(json.dumps({"slides_job": job, "kind": kind, "user": user, **({"unlimited": True} if unlimited else {})}))
     return {"status": "accepted", "job": job, "note": "数分ででき上がります。画面を離れても、右上のアイコンの「作ったスライド」から開けます"}

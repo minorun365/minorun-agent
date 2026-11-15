@@ -21,7 +21,7 @@ const knowledge = new KnowledgeStack(app, 'MinorunKnowledge', { env });
 const slides = new SlidesStack(app, 'MinorunSlides', { env, siteUrl: 'https://agent.minoruonda.com' });
 const agent = new AgentStack(app, 'MinorunAgent', {
   env,
-  slides: { functionArn: slides.worker.functionArn, tableArn: slides.quota.tableArn, tableName: slides.quota.tableName, bucketName: slides.bucket.bucketName },
+  slides: { runtimeArn: slides.worker.attrAgentRuntimeArn, tableArn: slides.quota.tableArn, tableName: slides.quota.tableName, bucketName: slides.bucket.bucketName },
   toolsGateway: { gatewayArn: knowledge.toolsGateway.attrGatewayArn, mcpUrl: knowledge.toolsGateway.attrGatewayUrl },
   knowledgeBucketName: `minorun-agent-knowledge-${env.account}`,
 });
@@ -41,6 +41,7 @@ const tokenFile = new URL('../.watch-token', import.meta.url);
 if (!fs.existsSync(tokenFile)) fs.writeFileSync(tokenFile, crypto.randomBytes(18).toString('base64url') + '\n');
 const watch = new WatchStack(app, 'MinorunWatch', {
   env, agent, entry, knowledge,
+  slides: { runtimeArn: slides.worker.attrAgentRuntimeArn, logGroup: slides.workerLogGroup },
   budgetEmail: process.env.ALERT_EMAIL ?? 'alerts@example.com',  // 予算とアラームの送り先
   dailyBudgetUsd: 10000 / 150,
   alertUsd: 10000 / 150,

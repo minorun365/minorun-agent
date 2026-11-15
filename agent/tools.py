@@ -25,7 +25,7 @@ import catalog
 from url_reader import read_url
 from knowledge_context import compact_sources, mark_fragments
 from settings import (ASSET_BASE, CONFERENCE_DAYS, JST, KB_RESULTS, KNOWLEDGE_BUCKET, LAS_VEGAS, REGION,
-                      SLIDES_BUCKET, SLIDES_FUNCTION, SLIDES_TABLE, SLIDES_TOTAL_DAILY, SLIDES_UNLIMITED, SLIDES_USER_DAILY,
+                      SLIDES_BUCKET, SLIDES_RUNTIME, SLIDES_TABLE, SLIDES_TOTAL_DAILY, SLIDES_UNLIMITED, SLIDES_USER_DAILY,
                       TOOLS_GATEWAY_URL, WEB_RESULTS)
 import slides
 
@@ -413,7 +413,7 @@ def make_slides(url: str = "", request: str = "", topic: str = "", notes: str = 
     if turn.slides:
         return {"status": "accepted", "note": "この質問ではすでに受け付けています"}
     material = url if url.strip() else slides.topic_material(topic, notes, sources)
-    result = slides.start(material, request, turn.user, function=SLIDES_FUNCTION, table=SLIDES_TABLE, bucket=SLIDES_BUCKET,
+    result = slides.start(material, request, turn.user, runtime=SLIDES_RUNTIME, table=SLIDES_TABLE, bucket=SLIDES_BUCKET,
                           user_daily=SLIDES_USER_DAILY, total_daily=SLIDES_TOTAL_DAILY,
                           unlimited=turn.user in SLIDES_UNLIMITED)
     if result.get("status") == "accepted":

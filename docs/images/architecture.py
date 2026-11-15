@@ -9,7 +9,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ICONS = HERE / "icons"
-W, H = 1500, 760
+W, H = 1500, 920
 FONT = "Hiragino Sans, Hiragino Kaku Gothic ProN, Noto Sans JP, sans-serif"
 
 
@@ -32,16 +32,18 @@ NODES = {
     "gw": (520, 250, AC, "AgentCore Gateway", "入口・HTTP ターゲット"),
     "lam": (520, 490, LAM, "Lambda", "インターセプター（回数・字数）"),
     "use": (520, 660, DDB, "DynamoDB", "利用回数"),
-    "br": (780, 80, BR, "Amazon Bedrock", "Sonnet 5.5・Haiku 5.5"),
+    "br": (780, 80, BR, "Amazon Bedrock", "Claude（Claude API を優先）"),
     "rt": (780, 250, AC, "AgentCore Runtime", "Strands Agents（Python）"),
     "tgw": (1030, 250, AC, "AgentCore Gateway", "ツール（MCP）"),
     "kb": (1240, 140, BR, "Managed Knowledge Base", "2026年と過去を分けて検索"),
     "ws": (1240, 320, AC, "AgentCore Web Search", "Web 検索"),
-    "mem": (700, 490, AC, "AgentCore Memory", "会話の文脈（7日）"),
-    "log": (880, 490, DDB, "DynamoDB", "会話の記録"),
+    "mem": (680, 490, AC, "AgentCore Memory", "会話の文脈（7日）"),
+    "log": (900, 490, DDB, "DynamoDB", "会話の記録"),
     "ses": (1060, 490, S3, "S3", "セッションの控え"),
     "ref": (1220, 660, LAM, "Lambda", "15分おきに取り直す"),
     "api": (1435, 490, NET, "公式セッション", "カタログ API"),
+    "sw": (780, 820, AC, "AgentCore Runtime", "スライド工房（Marp・Chromium）"),
+    "deck": (380, 820, S3, "S3", "作ったスライド"),
 }
 R = 32  # アイコンの半径
 
@@ -87,6 +89,10 @@ def main():
         line([(x("ses"), 410), (x("api"), 410), (x("api"), y("api") - g)], "回答後に照合", (1250, 434), dashed=True),
         line([(x("ref") - 24, y("ref") - g), (x("ses") + 20, y("ses") + lb + 4)]),
         line([(x("ref") + 24, y("ref") - g), (x("api") - 20, y("api") + lb + 4)]),
+        # スライド作成：ツールがジョブごとのセッションで工房を起こし、工房が焼いたものを CloudFront の /s/* が配る
+        line([(x("rt"), 410), (x("rt"), y("sw") - g)], "ジョブごと", (x("rt") + 44, 640)),
+        line([(x("sw") - g, y("sw")), (x("deck") + g, y("deck"))], "スライドと進み具合", (580, 808)),
+        line([(x("cf") + g, 268), (360, 268), (360, y("deck") - g)], "/s/*", (384, 640)),
     ]
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">
 <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -102,7 +108,7 @@ text{{font-family:{FONT};text-anchor:middle}}
 .bt{{font-size:13px;font-weight:700;fill:#232f3e;text-anchor:start}}
 </style>
 <rect width="{W}" height="{H}" fill="#fff"/>
-<rect x="190" y="20" width="1172" height="720" rx="14" class="b"/>
+<rect x="190" y="20" width="1172" height="880" rx="14" class="b"/>
 <text x="206" y="44" class="bt">AWS（us-west-2）</text>
 {"".join(edges)}
 {"".join(node(*v) for v in N.values())}

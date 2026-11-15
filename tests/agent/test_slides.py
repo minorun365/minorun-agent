@@ -17,15 +17,35 @@ def clients(codes=None):
     ddb.exceptions.TransactionCanceledException = Canceled
     if codes:
         ddb.transact_write_items.side_effect = Canceled(codes)
-    return {"dynamodb": ddb, "s3": MagicMock(), "lambda": MagicMock()}
+    return {"dynamodb": ddb, "s3": MagicMock(), "bedrock-agentcore": MagicMock()}
 
 
 def start(url="https://example.com/post", user="u1", codes=None, unlimited=False):
     c = clients(codes)
-    with patch.object(slides, "_clients", c):
-        r = slides.start(url, "初心者向けに", user, function="fn", table="tb", bucket="bk", user_daily=2, total_daily=50,
+    # 呼び出しは裏のスレッドで行うが、試験ではその場で走らせる
+    with patch.object(slides, "_clients", c), patch.object(slides, "_spawn", lambda fn, *a: fn(*a)):
+        r = slides.start(url, "初心者向けに", user, runtime="arn:rt", table="tb", bucket="bk", user_daily=2, total_daily=50,
                          unlimited=unlimited)
     return r, c
+
+
+class LaunchTests(unittest.TestCase):
+    def test_launch_failure_marks_error_and_refunds(self):
+        c = clients()
+        c["bedrock-agentcore"].invoke_agent_runtime.side_effect = RuntimeError("down")
+        with patch.object(slides, "_clients", c):
+            slides._launch("arn:rt", {"job": "j1", "user": "u1", "counted_day": "2026-11-16"}, "tb", "bk")
+        status = json.loads(c["s3"].put_object.call_args.kwargs["Body"])
+        self.assertEqual(status["stage"], "error")
+        keys = [x.kwargs["Key"]["pk"]["S"] for x in c["dynamodb"].update_item.call_args_list]
+        self.assertEqual(keys, ["user#u1#2026-11-16", "all#2026-11-16"])
+
+    def test_launch_failure_without_count_does_not_refund(self):
+        c = clients()
+        c["bedrock-agentcore"].invoke_agent_runtime.side_effect = RuntimeError("down")
+        with patch.object(slides, "_clients", c):
+            slides._launch("arn:rt", {"job": "j1", "user": "u1"}, "tb", "bk")
+        c["dynamodb"].update_item.assert_not_called()
 
 
 class StartTests(unittest.TestCase):
@@ -39,12 +59,14 @@ class StartTests(unittest.TestCase):
         self.assertEqual(items[1]["Update"]["ExpressionAttributeValues"][":lim"]["N"], "50")
         put = c["s3"].put_object.call_args.kwargs
         self.assertEqual(put["Key"], f"s/{r['job']}/status.json")
-        inv = c["lambda"].invoke.call_args.kwargs
-        self.assertEqual(inv["InvocationType"], "Event")
-        self.assertEqual(json.loads(inv["Payload"])["url"], "https://example.com/post")
+        inv = c["bedrock-agentcore"].invoke_agent_runtime.call_args.kwargs
+        self.assertEqual(inv["agentRuntimeArn"], "arn:rt")
+        self.assertTrue(inv["runtimeSessionId"].startswith(f"slides-job-{r['job']}-"))
+        self.assertGreaterEqual(len(inv["runtimeSessionId"]), 33)  # Runtime のセッション ID は33字以上
+        self.assertEqual(json.loads(inv["payload"])["url"], "https://example.com/post")
         self.assertRegex(r["job"], r"^[A-Za-z0-9]{16}$")
         # 工房が作れなかったときに戻せるよう、数えた日（回数の鍵と同じ日付）を渡す
-        day = json.loads(inv["Payload"])["counted_day"]
+        day = json.loads(inv["payload"])["counted_day"]
         self.assertEqual(items[0]["Update"]["Key"]["pk"]["S"], f"user#u1#{day}")
         self.assertEqual(items[1]["Update"]["Key"]["pk"]["S"], f"all#{day}")
 
@@ -52,8 +74,8 @@ class StartTests(unittest.TestCase):
         r, c = start(codes=["ConditionalCheckFailed", "ConditionalCheckFailed"], unlimited=True)
         self.assertEqual(r["status"], "accepted")
         c["dynamodb"].transact_write_items.assert_not_called()
-        c["lambda"].invoke.assert_called_once()
-        self.assertNotIn("counted_day", json.loads(c["lambda"].invoke.call_args.kwargs["Payload"]))  # 数えていないので戻さない
+        c["bedrock-agentcore"].invoke_agent_runtime.assert_called_once()
+        self.assertNotIn("counted_day", json.loads(c["bedrock-agentcore"].invoke_agent_runtime.call_args.kwargs["payload"]))  # 数えていないので戻さない
 
     def test_unlimited_still_needs_login(self):
         self.assertEqual(start(user="", unlimited=True)[0]["status"], "login_required")
@@ -67,7 +89,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(start(codes=["ConditionalCheckFailed", "None"])[0]["status"], "limit")
         r, c = start(codes=["None", "ConditionalCheckFailed"])
         self.assertEqual(r["status"], "busy")
-        c["lambda"].invoke.assert_not_called()
+        c["bedrock-agentcore"].invoke_agent_runtime.assert_not_called()
 
     def test_rejects_non_public_urls(self):
         for url in ["ftp://example.com/a", "http://localhost:8080/", "http://127.0.0.1/", "http://169.254.169.254/latest",
@@ -102,7 +124,7 @@ class TopicTests(unittest.TestCase):
         r, c = start(url=m)
         self.assertEqual(r["status"], "accepted")
         c["dynamodb"].transact_write_items.assert_called_once()
-        payload = json.loads(c["lambda"].invoke.call_args.kwargs["Payload"])
+        payload = json.loads(c["bedrock-agentcore"].invoke_agent_runtime.call_args.kwargs["payload"])
         self.assertEqual(payload["topic"], "Strands の新機能")
         self.assertEqual(payload["sources"], ["https://strandsagents.com/a"])
         self.assertNotIn("url", payload)

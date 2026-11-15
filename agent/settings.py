@@ -33,7 +33,7 @@ KB_RESULTS = int(os.environ.get("KB_RESULTS", "6"))
 WEB_RESULTS = int(os.environ.get("WEB_RESULTS", "4"))
 
 # URL からスライドを作る機能（2026-11-15 みのるん決定：ログインした人だけ・1人1日2本・全体で1日50本）
-SLIDES_FUNCTION = os.environ.get("SLIDES_FUNCTION", "")
+SLIDES_RUNTIME = os.environ.get("SLIDES_RUNTIME", "")
 SLIDES_TABLE = os.environ.get("SLIDES_TABLE", "")
 SLIDES_BUCKET = os.environ.get("SLIDES_BUCKET", "")
 SLIDES_USER_DAILY = int(os.environ.get("SLIDES_USER_DAILY", "2"))

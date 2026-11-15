@@ -27,6 +27,10 @@ Gateway には Lambda のインターセプターを付けていて、利用者�
 
 エージェントは、ナレッジベースと Web 検索を、もう1つの AgentCore Gateway 越しに呼びます。ナレッジベースを2026年の情報で引くか、過去の情報で引くかは Gateway 側で固定してあり、エージェントから渡せるのは質問文だけです。
 
+ログインした人は、記事の URL や調べたテーマからスライドを作れます。エージェントのツールが回数を数えてから、スライド工房を別の AgentCore Runtime としてジョブごとのセッションで起こします。工房は Marp と Chromium で焼いて余白を測り、崩れたスライドを1回だけ直させてから S3 に置きます。できたスライドは CloudFront の /s/* から開けます。
+
+モデルは Claude API を先に呼び、使えないときだけ Amazon Bedrock に切り替えます。
+
 作りの要点は [docs/design.md](docs/design.md) にまとめてあります。
 
 ## 使っている技術
@@ -34,8 +38,9 @@ Gateway には Lambda のインターセプターを付けていて、利用者�
 | 部分 | 技術 |
 |---|---|
 | エージェント | Strands Agents（Python） |
-| モデル | Claude Sonnet 5.5、Claude Haiku 5.5 |
-| 実行基盤 | Amazon Bedrock AgentCore |
+| モデル | Claude Sonnet 5.5（回答）、Claude Opus 5.5（スライド）、Claude Haiku 5.5（補助） |
+| 実行基盤 | Amazon Bedrock AgentCore（回答とスライド工房の2つの Runtime） |
+| スライド | Marp CLI、Chromium |
 | 知識 | Amazon Bedrock Managed Knowledge Base |
 | 画面 | TypeScript、Vite |
 | インフラ | AWS CDK、[cdkd](https://github.com/go-to-k/cdkd) |

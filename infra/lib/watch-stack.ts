@@ -31,6 +31,8 @@ export interface WatchStackProps extends cdk.StackProps {
   readonly agent: AgentStack;
   readonly entry: EntryStack;
   readonly knowledge: KnowledgeStack;
+  // スライド工房の Runtime（費用の集計に足す）と、そのログ（「スライド」タブが読む）
+  readonly slides: { runtimeArn: string; logGroup: string };
   readonly budgetEmail: string;
   // 1日の予算（ドル）。クレジットを除いた額で見る
   readonly dailyBudgetUsd: number;
@@ -230,7 +232,7 @@ export class WatchStack extends cdk.Stack {
         LOG_TABLE: 'minorun-agent-conversations',
         ERROR_TABLE: 'minorun-agent-transport-errors',
         RUNTIME_ARN: runtimeArn,
-        RUNTIME_ARNS: cdk.Fn.join(',', [props.agent.legacyRuntime.attrAgentRuntimeArn, props.agent.runtimeV2.attrAgentRuntimeArn]),
+        RUNTIME_ARNS: cdk.Fn.join(',', [props.agent.legacyRuntime.attrAgentRuntimeArn, props.agent.runtimeV2.attrAgentRuntimeArn, props.slides.runtimeArn]),
         TOOLS_GATEWAY_ARN: props.knowledge.toolsGateway.attrGatewayArn,
         ALERT_USD: String(props.alertUsd),
         YEN_PER_USD: '150',
@@ -240,15 +242,15 @@ export class WatchStack extends cdk.Stack {
         AUTH_DOMAIN: adminDomain.baseUrl(),
         CLIENT_ID: adminClient.userPoolClientId,
         PUBLIC_BASE: props.adminBaseUrl,
-        // 「スライド」タブ。表・バケット・ログは名前で指す（MinorunSlides への参照を増やさない）
+        // 「スライド」タブ。表とバケットは名前で指す。ログは工房の Runtime が作るロググループ（名前に Runtime の ID が入る）
         SLIDES_TABLE: 'minorun-agent-slides',
         SLIDES_BUCKET: `minorun-agent-slides-${this.account}`,
-        SLIDES_LOG_GROUP: '/aws/lambda/minorun-agent-slides',
+        SLIDES_LOG_GROUP: `${props.slides.logGroup},/aws/lambda/minorun-agent-slides`,
       },
     });
     dynamodb.Table.fromTableName(this, 'SlidesTableByName', 'minorun-agent-slides').grant(usagePage, 'dynamodb:Scan');
     usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [`arn:${this.partition}:s3:::minorun-agent-slides-${this.account}/s/*/status.json`] }));
-    usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:FilterLogEvents'], resources: [this.formatArn({ service: 'logs', resource: 'log-group', resourceName: '/aws/lambda/minorun-agent-slides:*', arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME })] }));
+    usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:FilterLogEvents'], resources: [`${props.slides.logGroup}:*`, '/aws/lambda/minorun-agent-slides:*'].map((resourceName) => this.formatArn({ service: 'logs', resource: 'log-group', resourceName, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME })) }));
     // 表は名前で指す（MinorunAgent からの参照を増やすと、そちらを出し直すまでこのスタックを出せない）
     dynamodb.Table.fromTableName(this, 'ConversationLogByName', 'minorun-agent-conversations').grant(usagePage, 'dynamodb:Scan');
     dynamodb.Table.fromTableName(this, 'TransportErrorsByName', 'minorun-agent-transport-errors').grant(usagePage, 'dynamodb:Query');
