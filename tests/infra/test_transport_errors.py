@@ -80,6 +80,14 @@ class IncidentTests(unittest.TestCase):
         self.assertIn('&lt;script&gt;',detail); self.assertNotIn('<script>',detail)
         self.assertIn('自動復旧',detail); self.assertIn('00:20:00',detail)
 
+    def test_retrying_left_over_is_shown_as_unknown(self):
+        row=dict(day='2026-11-15', id='1', at='2026-11-15T02:00:31+09:00', updated_at='2026-11-15T02:00:31+09:00', actor='A-abc', session_id='s'*20, tid='', phase='warmup', kind='network', state='retrying', status=0, attempts=1)
+        jst=datetime.timezone(datetime.timedelta(hours=9))
+        fresh=page.error_details([row], datetime.datetime(2026,11,15,2,1,0,tzinfo=jst))
+        self.assertIn('再試行中', fresh); self.assertNotIn('結果不明', fresh)
+        stale=page.error_details([row], datetime.datetime(2026,11,15,2,5,0,tzinfo=jst))
+        self.assertIn('結果不明', stale); self.assertIn('再読み込み', stale); self.assertNotIn('再試行中', stale)
+
     def test_read_failure_not_reported_as_zero(self):
         self.table.query.side_effect=RuntimeError('ddb')
         with patch.object(page.boto3, 'client', return_value=self.table):
