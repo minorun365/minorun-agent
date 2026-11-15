@@ -85,7 +85,7 @@ def start(url, request, user, *, function, table, bucket, user_daily, total_dail
                              Payload=json.dumps({"job": job, "url": url, "ask": str(request)[:300], "user": user}).encode())
     _remember(table, user, job)
     print(json.dumps({"slides_job": job, "user": user, **({"unlimited": True} if unlimited else {})}))
-    return {"status": "accepted", "job": job, "note": "1〜3分ででき上がり、画面にサムネイルが出ます"}
+    return {"status": "accepted", "job": job, "note": "数分ででき上がります。画面を離れても、右上のアイコンの「作ったスライド」から開けます"}
 
 
 KEEP = 10  # 一覧に出す件数（新しい順）

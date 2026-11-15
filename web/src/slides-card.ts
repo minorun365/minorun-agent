@@ -22,7 +22,7 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
   const fig = document.createElement('figure');
   fig.className = 'slides-card working';
   fig.innerHTML = `<div class="slides-steps">${STEPS.map((s, i) => `<span class="step" data-i="${i}"><i></i>${s}</span>`).join('')}</div>`
-    + `<div class="slides-bar"><span></span></div><figcaption class="slides-line">受け付けました。少しお待ちください</figcaption>`;
+    + `<div class="slides-bar"><span></span></div><figcaption class="slides-line">受け付けました。閉じても続きます</figcaption>`;
   const line = fig.querySelector('.slides-line') as HTMLElement;
   const started = Date.now();
   let stopped = false;
