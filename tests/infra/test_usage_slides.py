@@ -66,14 +66,32 @@ class SlidesTabTests(unittest.TestCase):
                 patch.object(sv, '_jobs', return_value=jobs), patch.object(m, 'bans', return_value=[]), \
                 patch.object(m, '_owner_actors', return_value={'user-aaaaaaaaaaaaaaaa'}):
             page = m.render('slides', None, 1)
-            self.assertIn('スライド 1', page)
+            self.assertIn('スライド<span class="tab-count">1</span>', page)
             self.assertIn('<h3>一般</h3>', page)
             self.assertNotIn('<h3>本人</h3>', page)
             everyone = m.render('slides', None, 1, u='all')
-            self.assertIn('スライド 2', everyone)
+            self.assertIn('スライド<span class="tab-count">2</span>', everyone)
             summary = m.render(None, None, 1)
-            self.assertIn('スライド 1', summary)
+            self.assertIn('スライド<span class="tab-count">1</span>', summary)
             self.assertNotIn('og.jpg', summary)
+
+
+    def test_opus_cost_goes_to_total_and_to_the_slide_question(self):
+        self.metrics[('opus', 'out')] = {self.start + dt.timedelta(hours=1): 50000}  # 50万分の1 → $1.00
+        self.rows[2]['tools'] = ['make_slides']
+        d, hrs, total, rows = m.report(u='all')
+        self.assertAlmostEqual(d['cost']['opus'], 1.0)
+        self.assertAlmostEqual(d['aws_total'], 13.001)  # 元の 12.006 から Brave 1回分を引き、Opus $1 を足す
+        slide_row = next(r for r in rows if r['pk'] == 's3')
+        self.assertGreater(slide_row['estimated_usd'], 1.0)
+        self.assertAlmostEqual(sum(p['estimated_usd'] for p in d['people']) + d['unallocated_usd'], d['total'])
+        self.assertIn('Opus 5.5（スライド作成）', m.render(None, None, 1))
+
+    def test_opus_without_slide_question_stays_unallocated(self):
+        self.metrics[('opus', 'out')] = {self.start: 50000}
+        d, hrs, total, rows = m.report(u='all')
+        self.assertAlmostEqual(d['unallocated_usd'], 7.0)
+        self.assertAlmostEqual(sum(p['estimated_usd'] for p in d['people']) + d['unallocated_usd'], d['total'])
 
 
 if __name__ == '__main__':

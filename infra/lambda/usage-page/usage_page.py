@@ -70,18 +70,21 @@ _SESSION_KEY = hashlib.sha256(f"usage-page-session:{TOKEN}".encode()).digest()
 PRICE = {
     "sonnet": {"in": 2.00, "out": 10.00, "cache_read": 0.10, "cache_write": 2.50},   # 100万トークンあたり
     "haiku": {"in": 0.10, "out": 0.50, "cache_read": 0.01, "cache_write": 0.125},
+    # スライド工房。global の単価（料金 API pricing:GetProducts、2026-11-15 に確かめた値）
+    "opus": {"in": 4.00, "out": 20.00, "cache_read": 0.20, "cache_write": 5.00},
     "vcpu_hour": 0.1276,
     "gb_hour": 0.0169,
     "web_search": 0.007,      # 1件（$7 / 1,000件）
     "brave": 0.005,           # 1件（$5 / 1,000件）
     "kb_retrieve": 0.001,     # 1件
 }
-MODELS = {"sonnet": "global.anthropic.claude-sonnet-5-5", "haiku": "global.anthropic.claude-haiku-5-5"}
+MODELS = {"sonnet": "global.anthropic.claude-sonnet-5-5", "haiku": "global.anthropic.claude-haiku-5-5",
+          "opus": "global.anthropic.claude-opus-5-5"}
 TOKEN_METRICS = {"in": "InputTokenCount", "out": "OutputTokenCount",
                  "cache_read": "CacheReadInputTokenCount", "cache_write": "CacheWriteInputTokenCount"}
 # Claude API（Anthropic）で呼んだモデル。AWS/Bedrock のメトリクスには載らないので、1問1行の表の usage.calls から足す
 API_MODELS = {"claude-sonnet-5-5"}
-LABELS = {"claude_api": "Sonnet 5.5（回答・Claude API）", "sonnet": "Sonnet 5.5（回答・Bedrock）", "haiku": "Haiku 5.5（判定・要約・候補）", "runtime": "AgentCore Runtime",
+LABELS = {"claude_api": "Sonnet 5.5（回答・Claude API）", "sonnet": "Sonnet 5.5（回答・Bedrock）", "haiku": "Haiku 5.5（判定・要約・候補）", "opus": "Opus 5.5（スライド作成）", "runtime": "AgentCore Runtime",
           "web_search": "AgentCore Web Search", "brave": "Brave", "x": "X検索", "kb": "ナレッジベースの検索"}
 REASONS = {"per_minute": "1分の上限", "daily_limit": "1日の上限", "bad_id": "IDの形", "too_long": "文字数", "stopped": "停止中", "banned": "利用停止"}
 FLAG_LABELS = {"off_topic": "目的外", "injection": "指示の書き換え", "personal_info": "個人情報", "bug_report": "不具合の報告", "abuse": "良識の逸脱"}
@@ -666,13 +669,18 @@ def report(day=None, u="general", detail=True):
         _, brave, kb = _tool_costs(rs)
         hc = _cost(m, h, brave, kb, x=_x_cost(rs), api=_api_cost(rs))
         # 検索2種類と Claude API は質問の行に残るので、その利用者に直接紐づける。
-        shared = {k: v for k, v in hc.items() if k not in ("brave", "kb", "x", "claude_api")}
+        shared = {k: v for k, v in hc.items() if k not in ("brave", "kb", "x", "claude_api", "opus")}
         per_question = sum(shared.values()) / len(rs) if rs else 0.0
+        # スライド作成の Opus は、その時台にスライドを頼んだ質問へ割る（頼んだ質問が無い時台は全体にだけ残す）
+        makers = {id(r) for r in rs if "make_slides" in (r.get("tools") or [])}
+        per_slide = hc.get("opus", 0.0) / len(makers) if makers else 0.0
         if not rs:
             unallocated += sum(hc.values())
+        elif not makers:
+            unallocated += hc.get("opus", 0.0)
         for r in rs:
             _, b, k = _tool_costs([r])
-            r["estimated_usd"] = per_question + b + k + _x_cost([r]) + _api_cost([r])
+            r["estimated_usd"] = per_question + b + k + _x_cost([r]) + _api_cost([r]) + (per_slide if id(r) in makers else 0.0)
             person = people.setdefault(r["identifier"], {"audience": r["audience"], "identifier": r["identifier"], "questions": 0, "estimated_usd": 0.0})
             person["questions"] += 1
             person["estimated_usd"] += r["estimated_usd"]
@@ -1351,7 +1359,7 @@ def render(view, day, page, f=None, u=None, qid=None, group="registered"):
     slides_html, slides_count = _slides(d, rows, view, multi)
     tabs = "".join(f'<a class="{on(v).strip()}" href="{html.escape(_url(v=None if v == "sum" else v, d=ds, u=u, f=f, q=qid))}">{n}</a>'
                    for v, n in (("sum", "要約"), ("hours", "日ごと" if multi else "1時間ごと"), ("list", "質問の一覧"),
-                                ("slides", f"スライド {slides_count}" if slides_count else "スライド")))
+                                ("slides", f'スライド<span class="tab-count">{slides_count}</span>' if slides_count else "スライド")))
     keep = None if view == "sum" else view
     controls = _period_controls(d, view, u, f, group)
     summary_html = _summary_html(d, ban)
