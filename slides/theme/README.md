@@ -1,7 +1,19 @@
 # スライドのテーマ
 
-スライド工房は、このフォルダの `minorun-glass.css` を Marp のテーマとして読み込みます（`slides/handler.py` の `THEME`）。公開版にはテーマの CSS を入れていないので、使うときは各自で用意してここに置きます。
+スライド工房は、このフォルダの `minorun-glass.css` を Marp のテーマとして読み込みます（`slides/handler.py` の `THEME`）。淡いターコイズの地に、右下から青とターコイズの輪がのぞき、カードは白いすりガラスで輪が透けて見えるテーマです。
 
-- CSS の先頭に `/* @theme minorun-glass */` を書く（デッキのフロントマターがこの名前を指定するため）
-- 指示文（`slides/handler.py` の `RULES`）が使うクラスを持たせる：表紙 `section.top`、中扉 `section.crosshead`、締め `section.end`、手順 `.steps`、流れ図 `.flow`、依頼文 `.prompt`、要点 `p.point`
-- 書体はコンテナに入れた Noto Sans JP（見出しと本文）・Inter を指定する（`slides/Dockerfile`）。外部の書体を `@import` で読むと、書き出し時の通信を止めているため反映されない
+指示文（`slides/handler.py` の `RULES`）は、次のクラスだけを使ってスライドを書きます。
+
+| クラス | 用途 |
+|---|---|
+| `section.top` | 表紙 |
+| `section.crosshead` | 中扉 |
+| `section.end` | 締め（工房が最後に足す） |
+| `.steps` | 番号つきの手順のカード |
+| `.flow` | 流れのカード（間の矢印はテーマが描く） |
+| `.prompt` | 依頼文や原文の一節を入れる板 |
+| `p.point` と `mark` | 結論の1行と、文字の下半分に引くマーカー |
+
+書体は、コンテナに入れた Noto Sans JP（見出しと本文）と Inter を指定しています（`slides/Dockerfile`）。書き出しの間は外への通信を止めているので、`@import` で外部の書体を読んでも反映されません。別の書体へ替えるときは、コンテナに入れてから `--head` と `--body` を書き換えます。
+
+テーマを差し替えるときは、CSS の先頭に `/* @theme minorun-glass */` を書き、上のクラスを持たせます。デッキのフロントマターがこの名前を指定するためです。
