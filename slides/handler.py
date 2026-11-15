@@ -40,6 +40,18 @@ s3 = boto3.client("s3", region_name=REGION)
 bedrock = boto3.client("bedrock-runtime", region_name=REGION,
                        config=Config(read_timeout=600, connect_timeout=10, retries={"max_attempts": 2}))
 
+# Opus は回答の Sonnet と同じく Claude API を先に呼び、使えないときだけ Bedrock で書く（2026-11-15 みのるん指示）。
+# 認証は回答と同じ ID 連携（実行ロール minorun-agent-slides が STS の証明書を Claude API の通行証と交換する）
+API_MODEL = os.environ.get("SLIDES_API_MODEL", "claude-opus-5-5")
+WIF = {"federation_rule_id": os.environ.get("CLAUDE_WIF_RULE_ID", ""),
+       "organization_id": os.environ.get("CLAUDE_WIF_ORGANIZATION_ID", ""),
+       "service_account_id": os.environ.get("CLAUDE_WIF_SERVICE_ACCOUNT_ID", "") or None}
+# この入れ物（Lambda の実行環境）で Claude API を使えるか。待っても直らない失敗のあとは呼ばない
+API = {"client": None,
+       "off": None if os.environ.get("ANTHROPIC_PRIMARY", "on") == "on" and WIF["federation_rule_id"]
+       and WIF["organization_id"] else "switched_off",
+       "busy_until": 0.0}
+
 RULES = """あなたは、Webの記事を読んで日本語の解説スライドを Marp の Markdown で書く担当です。
 テーマは minorun-glass（淡いターコイズの地に白いガラスのカード）。見た目はテーマが持つので、あなたは中身と型を書くだけです。
 
@@ -128,14 +140,69 @@ def status(job, stage, **extra):
                   ContentType="application/json", CacheControl="no-cache, max-age=0")
 
 
+def _identity_token():
+    sts = boto3.client("sts", region_name="us-east-1")  # GetWebIdentityToken は地域の窓口だけで受け付ける
+    return sts.get_web_identity_token(Audience=["https://api.anthropic.com"], SigningAlgorithm="RS256",
+                                      DurationSeconds=900)["WebIdentityToken"]
+
+
+def _permanent(error):
+    """クレジット切れ・認証の取り消しなど、待っても直らない失敗か（agent/fallback.py と同じ線引き）。"""
+    import anthropic
+    if isinstance(error, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return True
+    if isinstance(error, anthropic.WorkloadIdentityError):
+        return not re.search(r"HTTP 5\d\d", str(error))
+    if type(error).__name__ == "ClientError" and "GetWebIdentityToken" in str(error):
+        return True
+    if isinstance(error, anthropic.APIStatusError):
+        if error.status_code == 402 or getattr(error, "type", None) == "billing_error":
+            return True
+        if error.status_code == 400 and "credit balance" in str(error).lower():
+            return True
+    return False
+
+
+def _ask_claude_api(messages, rules):
+    import anthropic
+    import httpx
+    if API["client"] is None:
+        API["client"] = anthropic.Anthropic(
+            credentials=anthropic.WorkloadIdentityCredentials(identity_token_provider=_identity_token, **WIF),
+            max_retries=0, timeout=httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0))
+    msgs = [{"role": m["role"], "content": [{"type": "text", "text": c["text"]} for c in m["content"]]}
+            for m in messages]
+    # 出力が長い（最大1.6万トークン）ので、SDK の決まりどおり stream で受けて最後にまとめる
+    with API["client"].messages.stream(model=API_MODEL, system=rules, messages=msgs, max_tokens=16000,
+                                       output_config={"effort": EFFORT}) as stream:
+        final = stream.get_final_message()
+    text = "".join(b.text for b in final.content if b.type == "text")
+    u = final.usage
+    return text, {"input": u.input_tokens + (u.cache_read_input_tokens or 0) + (u.cache_creation_input_tokens or 0),
+                  "output": u.output_tokens, "model": API_MODEL}
+
+
 def ask_model(messages, rules=RULES):
+    """Claude API を先に呼び、使えないとき（断られた・混雑・通信の失敗）は同じ依頼を Bedrock で書く。
+    利用者は完成を待っているだけなので、途中で失敗しても Bedrock で最初から書き直せばよい。"""
+    if not API["off"] and time.time() >= API["busy_until"]:
+        try:
+            return _ask_claude_api(messages, rules)
+        except Exception as e:
+            if _permanent(e):
+                API["off"] = type(e).__name__
+                route = "disabled"
+            else:  # 混雑・一時的な障害・想定外。その回は Bedrock、60秒後に Claude API へ戻す
+                API["busy_until"] = time.time() + 60
+                route = "busy"
+            print(json.dumps({"model_route": route, "reason": type(e).__name__, "detail": str(e)[:300]}))
     res = bedrock.converse(
         modelId=MODEL, system=[{"text": rules}], messages=messages,
         inferenceConfig={"maxTokens": 16000},
         additionalModelRequestFields={"output_config": {"effort": EFFORT}})
     text = "".join(c.get("text", "") for c in res["output"]["message"]["content"])
     u = res.get("usage", {})
-    return text, {"input": u.get("inputTokens", 0), "output": u.get("outputTokens", 0)}
+    return text, {"input": u.get("inputTokens", 0), "output": u.get("outputTokens", 0), "model": MODEL}
 
 
 ALLOWED = {"div", "span", "b", "br", "mark", "p", "small"}
@@ -439,6 +506,26 @@ def topic_prompt(job, event, ask):
             + f"\n<notes>\n{event['notes']}\n</notes>\n" + body)
 
 
+QUOTA_TABLE = os.environ.get("SLIDES_TABLE", "")
+
+
+def refund(event):
+    """作れなかった1本を、その人と全体の今日の回数から戻す（本文を読めない記事などで枠を失わせない）。
+    数えていない依頼（運営者のテスト）と、もう0のときは何もしない。"""
+    day, user = event.get("counted_day"), event.get("user")
+    if not (QUOTA_TABLE and day and user):
+        return
+    ddb = boto3.client("dynamodb", region_name=REGION)
+    for pk in (f"user#{user}#{day}", f"all#{day}"):
+        try:
+            ddb.update_item(TableName=QUOTA_TABLE, Key={"pk": {"S": pk}}, UpdateExpression="ADD n :minus",
+                            ConditionExpression="n > :zero",
+                            ExpressionAttributeValues={":minus": {"N": "-1"}, ":zero": {"N": "0"}})
+        except Exception as e:  # 戻せなくても、利用者への知らせ（error の status）は先に書いてある
+            print(json.dumps({"job": event.get("job"), "refund": "failed", "pk": pk.split("#")[0], "reason": type(e).__name__}))
+    print(json.dumps({"job": event.get("job"), "refund": "done"}))
+
+
 def handler(event, context):
     job, ask = event["job"], str(event.get("ask", ""))[:300]
     KIND["value"] = "topic" if event.get("topic") else "article"
@@ -453,7 +540,8 @@ def handler(event, context):
             rules, sources = RULES, [event["url"]]
             prompt, domain = article_prompt(job, event["url"], ask)
             if prompt is None:
-                status(job, "error", message="記事の本文を読めませんでした。ログインが要るページや、画像・動画だけのページは使えません。")
+                status(job, "error", message="記事の本文を読めませんでした。ログインが要るページや、画像・動画だけのページは使えません。今日の回数には数えません。")
+                refund(event)
                 return {"ok": False, "reason": "unreadable"}
         status(job, "writing")
         messages = [{"role": "user", "content": [{"text": prompt}]}]
@@ -491,7 +579,8 @@ def handler(event, context):
     except Exception as e:
         print(json.dumps({"job": job, "ok": False, "error": type(e).__name__, "detail": str(e)[:500], "stderr": (getattr(e, "stderr", None) or b"")[-1500:].decode("utf-8", "replace") if isinstance(getattr(e, "stderr", None), bytes) else str(getattr(e, "stderr", "") or "")[-1500:],
                           "usage": usage, "seconds": round(time.time() - started, 1)}))
-        status(job, "error", message="スライドを作れませんでした。少し時間をおいて、もう一度頼んでください。")
+        status(job, "error", message="スライドを作れませんでした。今日の回数には数えないので、少し時間をおいて、もう一度頼んでください。")
+        refund(event)
         return {"ok": False}
     finally:
         shutil.rmtree(work, ignore_errors=True)

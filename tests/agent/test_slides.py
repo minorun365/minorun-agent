@@ -43,12 +43,17 @@ class StartTests(unittest.TestCase):
         self.assertEqual(inv["InvocationType"], "Event")
         self.assertEqual(json.loads(inv["Payload"])["url"], "https://example.com/post")
         self.assertRegex(r["job"], r"^[A-Za-z0-9]{16}$")
+        # 工房が作れなかったときに戻せるよう、数えた日（回数の鍵と同じ日付）を渡す
+        day = json.loads(inv["Payload"])["counted_day"]
+        self.assertEqual(items[0]["Update"]["Key"]["pk"]["S"], f"user#u1#{day}")
+        self.assertEqual(items[1]["Update"]["Key"]["pk"]["S"], f"all#{day}")
 
     def test_unlimited_user_skips_counting(self):
         r, c = start(codes=["ConditionalCheckFailed", "ConditionalCheckFailed"], unlimited=True)
         self.assertEqual(r["status"], "accepted")
         c["dynamodb"].transact_write_items.assert_not_called()
         c["lambda"].invoke.assert_called_once()
+        self.assertNotIn("counted_day", json.loads(c["lambda"].invoke.call_args.kwargs["Payload"]))  # 数えていないので戻さない
 
     def test_unlimited_still_needs_login(self):
         self.assertEqual(start(user="", unlimited=True)[0]["status"], "login_required")

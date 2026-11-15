@@ -40,9 +40,13 @@ def valid_url(url):
         return "." in host
 
 
-def _count(table, user, user_daily, total_daily):
+def _today():
+    return datetime.datetime.now(JST).strftime("%Y-%m-%d")
+
+
+def _count(table, user, user_daily, total_daily, day=None):
     """1人と全体の件数を同時に1つ増やす。どちらかが上限なら増やさずに理由を返す。"""
-    day = datetime.datetime.now(JST).strftime("%Y-%m-%d")
+    day = day or _today()
     expires = int(time.time()) + 3 * 86400
     def item(pk, limit):
         return {"Update": {"TableName": table, "Key": {"pk": {"S": pk}},
@@ -97,7 +101,8 @@ def start(material, request, user, *, function, table, bucket, user_daily, total
         payload, kind = material, "topic"
     else:
         return {"status": "invalid", "note": "スライドにする材料が足りません。先に調べた要点（300字以上）を渡してください"}
-    blocked = None if unlimited else _count(table, user, user_daily, total_daily)
+    day = _today()
+    blocked = None if unlimited else _count(table, user, user_daily, total_daily, day)
     if blocked == "limit":
         return {"status": "limit", "note": f"今日の分（1人1日{user_daily}本）を使い切りました。明日（日本時間の0時以降）にまた使えます"}
     if blocked == "busy":
@@ -107,7 +112,9 @@ def start(material, request, user, *, function, table, bucket, user_daily, total
                              CacheControl="no-cache, max-age=0",
                              Body=json.dumps({"stage": "queued", "kind": kind, "at": int(time.time())}).encode())
     _client("lambda").invoke(FunctionName=function, InvocationType="Event",
-                             Payload=json.dumps({"job": job, **payload, "ask": str(request)[:300], "user": user},
+                             Payload=json.dumps({"job": job, **payload, "ask": str(request)[:300], "user": user,
+                                                 # 数えた日。工房が作れなかったときに、この日の回数を1つ戻す
+                                                 **({} if unlimited else {"counted_day": day})},
                                                 ensure_ascii=False).encode())
     _remember(table, user, job)
     print(json.dumps({"slides_job": job, "kind": kind, "user": user, **({"unlimited": True} if unlimited else {})}))
