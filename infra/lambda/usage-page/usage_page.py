@@ -6,6 +6,7 @@
   GET <関数URL>                          … 要約（今日の質問数・利用者数・評価・概算コスト）
   GET <関数URL>?v=hours&d=YYYY-MM-DD      … 1時間ごとの表（会話の数・質問の数・概算コスト）
   GET <関数URL>?v=list&d=YYYY-MM-DD&f=bad&p=2 … 質問の一覧（新しい順・50件ずつ。f で評価あり・良くない・自由入力に絞る）
+  GET <関数URL>?v=slides&d=YYYY-MM-DD    … 利用者が作ったスライド（サムネイル・題・頼んだ質問・枚数・作成費）
   GET <関数URL>?k=<合言葉>&format=json&d=YYYY-MM-DD … その日の要約・1時間ごと・質問の一覧・要注意の一覧（JSON）
   （要約には、公開からの累計・直近7日の1日平均×30日の月額ペースも出す）
   EventBridge から15分おき … 今日の概算コストを MinorunAgent/EstimatedCostUsd に出す（アラームが見る）
@@ -33,6 +34,7 @@ import uuid
 
 import boto3
 import periods
+import slides_view
 from transport_errors import read_errors, error_card, error_details
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
@@ -1009,7 +1011,7 @@ REFRESH_SCRIPT = """<script id="dashboard-refresh">
         if (!response.ok || response.redirected) return;
         next = new DOMParser().parseFromString(await response.text(), 'text/html');
       }
-      const selectors = ['#summary-panel', '#people-panel', '#errors-panel', '#hours-panel', '#list-panel', 'header .at', '#people-counts', 'header .day', 'nav.tabs'];
+      const selectors = ['#summary-panel', '#people-panel', '#errors-panel', '#hours-panel', '#list-panel', '#slides-panel', 'header .at', '#people-counts', 'header .day', 'nav.tabs'];
       if (selectors.some(s => !next.querySelector(s))) return;
       if (next.querySelector('#owner-csrf')) document.querySelector('#owner-csrf').value = next.querySelector('#owner-csrf').value;
       const search = document.querySelector('#person-search');
@@ -1313,9 +1315,29 @@ def _period_controls(d, view, u, f, group):
             f'<div class="period-nav">{nav}</div>{quick}')
 
 
+def _slides(d, rows, view, multi):
+    """スライドのタブ。本数はどのタブでも出し（表を1回読むだけ）、サムネイルと費用は開いたときだけ集める。"""
+    owners = _owner_actors() if d["u"] in ("general", "owner") else set()
+    def keep(user):
+        r = {"user": user, "pk": ""}
+        r["audience"] = _audience(r, owners)
+        return _selected(r, d["u"])
+    if view != "slides":
+        try:
+            jobs = slides_view._jobs(d["day"], d["end"]) if slides_view.TABLE else []
+        except Exception:
+            jobs = []
+        return '<div class="card" hidden></div>', sum(keep(j["user"]) for j in jobs)
+    jobs = slides_view.load(d["day"], d["end"])
+    if jobs is not None:
+        jobs = slides_view.attach([j for j in jobs if keep(j["user"])], rows)
+    label = "この期間" if multi else "この日"
+    return slides_view.panel(jobs, d["now"], multi, _mask, _url, label), len(jobs or [])
+
+
 def render(view, day, page, f=None, u=None, qid=None, group="registered"):
-    view = view if view in ("hours", "list", "errors", "people") else "sum"
-    d, hrs, total, rows = report(day, u, detail=view == "list")
+    view = view if view in ("hours", "list", "errors", "people", "slides") else "sum"
+    d, hrs, total, rows = report(day, u, detail=view in ("list", "slides"))
     u = d["u"]
     now, start = d["now"], d["day"]
     ban = _ban_summary(bans(), now)
@@ -1326,8 +1348,10 @@ def render(view, day, page, f=None, u=None, qid=None, group="registered"):
     d["follow_today"] = follow_today
     ds = d["selection"]
     date_tabs = ""
+    slides_html, slides_count = _slides(d, rows, view, multi)
     tabs = "".join(f'<a class="{on(v).strip()}" href="{html.escape(_url(v=None if v == "sum" else v, d=ds, u=u, f=f, q=qid))}">{n}</a>'
-                   for v, n in (("sum", "要約"), ("hours", "日ごと" if multi else "1時間ごと"), ("list", "質問の一覧")))
+                   for v, n in (("sum", "要約"), ("hours", "日ごと" if multi else "1時間ごと"), ("list", "質問の一覧"),
+                                ("slides", f"スライド {slides_count}" if slides_count else "スライド")))
     keep = None if view == "sum" else view
     controls = _period_controls(d, view, u, f, group)
     summary_html = _summary_html(d, ban)
@@ -1351,6 +1375,7 @@ def render(view, day, page, f=None, u=None, qid=None, group="registered"):
 <div class="cols"><section id="hours-panel" class="panel{on('hours')}">{_hours_html(hrs, total, date_tabs, multi)}</section>
 <section id="list-panel" class="panel{on('list')}">{list_html}</section></div>
 <section id="errors-panel" class="panel{on('errors')}">{error_list}</section>
+<section id="slides-panel" class="panel{on('slides')}">{slides_html}</section>
 <section id="people-panel" class="panel{on('people')}">{_people_list(d, group)}</section>
 <p class="note">質問一覧のモデル費用は、回答・候補生成・判定・要約などの記録済み使用量から計算した概算です。事前回答はモデルを呼ばないため0円。記録がない・不完全な質問は未計測と表示します。サーバー・検索などの費用は含みません。利用者別の費用は時間帯の費用を質問数で按分した目安です（Braveとナレッジベースの検索は記録回数から計算）。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。Claude API の分は AWS の請求に載らないので、質問ごとに記録した使用量から足している（払いは Anthropic のクレジット）。確定値は AWS Budgets（1日 $30。AWS の分だけ）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
 </div>{REFRESH_SCRIPT}</body></html>"""
@@ -1604,3 +1629,5 @@ header.dashboard-top .day{display:grid;grid-template-columns:auto minmax(0,1fr);
 @media(max-width:899px){header.dashboard-top .day{grid-template-columns:1fr;gap:10px}.period-units{display:grid;grid-template-columns:repeat(4,1fr);width:100%}.period-units a{min-width:0;padding:0 4px}.period-nav{justify-content:space-between}.period-nav b{flex:1;min-width:0;font-size:13px}}
 @media(max-width:699px){.people-panel{grid-template-columns:1fr}.people-pair{gap:10px}.user-directory{padding:14px}.user-row{display:grid}}
 """
+
+CSS += slides_view.CSS
