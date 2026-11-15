@@ -432,10 +432,16 @@ function openSlidesCompose() {
   if (!profile()) { askLoginForSlides(); return; }
   setSlidesMode(true); openCompose();
 }
-// ログイン前の人がスライドの入口を押したら、送らずにログインのメニューを開き、ログインした人だけの機能だと一言添える
+// ログイン前の人がスライドの入口（札・質問候補）を押したら、送らずにみのるんの返事として吹き出しで案内し、右上のアイコンを脈打たせる
+const SLIDES_LOGIN_REPLY = 'URLからスライドを作るのは、ログインした人だけの機能です。右上のアイコンからGoogleでログインすると、記事のURLを送るだけでスライドを作れるようになります（1日2本まで）。';
 function askLoginForSlides() {
   if (has('composing')) closeCompose();
-  renderMe(SLIDES_LOGIN_NOTE); freshNew = new Set(); toggleMe(true);
+  closeGift(); cancelIdle(); turnVersion++;
+  stage.classList.add('started', 'answering');
+  greet.classList.remove('on'); thought.classList.remove('on'); doing.classList.remove('on');
+  answer.classList.remove('oops'); answer.innerHTML = md(SLIDES_LOGIN_REPLY); answer.scrollTop = 0;
+  bubble.classList.add('on'); director.answer(SLIDES_LOGIN_REPLY, false); layout();
+  meBtn.classList.remove('nudge'); void meBtn.offsetWidth; meBtn.classList.add('nudge');
 }
 function renderSlideChip() {
   const show = has('composing') && !attached && wantsSlidesHint(q.value);
@@ -782,15 +788,14 @@ function renderList() {
   const box = $('#myslides');
   if (box) box.replaceChildren(slidesList(slides.items, slides.get, new Set([...slides.unseen, ...freshNew])));
 }
-const SLIDES_LOGIN_NOTE = 'URLからスライドを作るのは、ログインした人だけの機能です。';
-function renderMe(note = '') {
+function renderMe() {
   const p = profile();
   meBtn.innerHTML = PERSON + '<i class="badge" aria-hidden="true"></i>';
   meBtn.classList.toggle('in', !!p);
   renderBadge();
   mePop.innerHTML = p
     ? `<p class="lead">ログイン中です。</p>${PERKS}<div id="myslides"></div><button class="out" id="logout" type="button">ログアウト</button>`
-    : `${note ? `<p class="needlogin">${note}</p>` : ''}<p class="lead">ログインすると、こんなことができます。</p>${PERKS}
+    : `<p class="lead">ログインすると、こんなことができます。</p>${PERKS}
        <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>Google でログイン</span></button>`;
   $('#glogin')?.addEventListener('click', () => login());
   $('#logout')?.addEventListener('click', () => logout());

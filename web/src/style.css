@@ -1,5 +1,5 @@
 *,*::before,*::after{box-sizing:border-box}
-:root{color-scheme:light;--bg:#fff;--card:#fff;--cloud:#f0f1f3;--mark:#dbe9ff;--edge-x:18px;--edge-y:10px;--edge-b:16px;--ink:#16181d;--sub:#5b616e;--mut:#9aa0ab;--line:#eceef2;--soft:#f5f6f8;--accent:#0a64d8;--vvh:100dvh}
+:root{color-scheme:light;--bg:#fff;--card:#fff;--cloud:#f0f1f3;--mark:#cff4fa;--edge-x:18px;--edge-y:10px;--edge-b:16px;--ink:#16181d;--sub:#5b616e;--mut:#9aa0ab;--line:#eceef2;--soft:#f5f6f8;--accent:#0891b2;--vvh:100dvh}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overscroll-behavior:none}
 body{position:absolute;inset:0;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
   -webkit-font-smoothing:antialiased;font-feature-settings:"palt" 1;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
@@ -109,7 +109,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 .chip.ask::before{content:"";width:13px;height:13px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4' fill='none' stroke='black' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4' fill='none' stroke='black' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat}
 .stage.composing .suggest,.stage.busy .suggest{opacity:0;transform:translateY(10px);pointer-events:none}
 .mist{position:absolute;left:-10%;right:-10%;bottom:0;height:190px;z-index:-1;pointer-events:none;
-  background:radial-gradient(60% 42% at 50% 35%,rgba(10,100,216,.07),rgba(10,100,216,.025) 45%,rgba(255,255,255,0) 78%);
+  background:radial-gradient(60% 42% at 50% 35%,rgba(8,145,178,.07),rgba(8,145,178,.025) 45%,rgba(255,255,255,0) 78%);
   transform:scale(.25);transform-origin:50% 35%;opacity:0;transition:transform .7s cubic-bezier(.2,.9,.2,1),opacity .5s ease}
 .stage.composing .mist{transform:scale(1);opacity:1}
 .stage.kbd .dock{padding-bottom:0}
@@ -151,9 +151,9 @@ td:first-child{font-weight:700;white-space:nowrap}
 .fly{position:fixed;z-index:9;font-size:16px;font-weight:600;color:var(--ink);white-space:nowrap;pointer-events:none;will-change:transform,opacity;
   padding:9px 15px;border-radius:999px;background:#fff;box-shadow:0 4px 18px rgba(22,24,29,.12)}
 .fly-ball{position:fixed;z-index:9;width:22px;height:22px;border-radius:50%;pointer-events:none;will-change:transform,opacity;
-  background:radial-gradient(circle,#fff 0,rgba(255,255,255,.95) 22%,rgba(214,232,255,.75) 45%,rgba(190,218,255,.3) 66%,rgba(190,218,255,0) 80%);
-  box-shadow:0 0 18px 8px rgba(196,222,255,.32);filter:blur(.6px)}
-:root[data-theme=dark] .fly-ball{box-shadow:0 0 14px 4px rgba(140,190,255,.45)}
+  background:radial-gradient(circle,#fff 0,rgba(255,255,255,.95) 22%,rgba(207,250,254,.75) 45%,rgba(165,243,252,.3) 66%,rgba(165,243,252,0) 80%);
+  box-shadow:0 0 18px 8px rgba(165,243,252,.32);filter:blur(.6px)}
+:root[data-theme=dark] .fly-ball{box-shadow:0 0 14px 4px rgba(103,232,249,.45)}
 
 /* ここから下は本番で足したもの */
 .bubble a{color:var(--accent);word-break:break-all}
@@ -210,8 +210,8 @@ td:first-child{font-weight:700;white-space:nowrap}
   .stage.composing .slidechip{bottom:calc(var(--edge-b) + 88px)}
 }
 /* ダークモードの案（?theme=dark で表示。iOS のダークの地色 #000 につなげる） */
-:root[data-theme=dark]{color-scheme:dark;--bg:#000;--card:#1c1c1e;--cloud:#2c2c2e;--mark:rgba(78,161,255,.35);
-  --ink:#f2f2f7;--sub:#c7c7cc;--mut:#8e8e93;--line:#2c2c2e;--soft:#1c1c1e;--accent:#4ea1ff}
+:root[data-theme=dark]{color-scheme:dark;--bg:#000;--card:#1c1c1e;--cloud:#2c2c2e;--mark:rgba(34,211,238,.28);
+  --ink:#f2f2f7;--sub:#c7c7cc;--mut:#8e8e93;--line:#2c2c2e;--soft:#1c1c1e;--accent:#22d3ee}
 :root[data-theme=dark] .bubble{box-shadow:0 10px 40px rgba(0,0,0,.6),0 0 0 1px var(--line)}
 :root[data-theme=dark] .thought .cloud span{color:#d1d1d6}
 :root[data-theme=dark] .chara .shadow{background:rgba(255,255,255,.07)}
@@ -225,8 +225,8 @@ td:first-child{font-weight:700;white-space:nowrap}
 :root[data-theme=dark] .bubble a.src{background:#2c2c2e;color:#c7c7cc}
 :root[data-theme=dark] .bubble .update{background:#3a2f12}
 :root[data-theme=dark] .zoom{background:rgba(0,0,0,.97)}
-:root[data-theme=dark] .mist{background:radial-gradient(60% 42% at 50% 35%,rgba(78,161,255,.12),rgba(78,161,255,.04) 45%,rgba(0,0,0,0) 78%)}
-:root[data-theme=dark] .chara img{filter:drop-shadow(0 0 1.5px rgba(255,255,255,.55)) drop-shadow(0 0 14px rgba(120,170,255,.12))}
+:root[data-theme=dark] .mist{background:radial-gradient(60% 42% at 50% 35%,rgba(34,211,238,.12),rgba(34,211,238,.04) 45%,rgba(0,0,0,0) 78%)}
+:root[data-theme=dark] .chara img{filter:drop-shadow(0 0 1.5px rgba(255,255,255,.55)) drop-shadow(0 0 14px rgba(103,232,249,.12))}
 /* ログイン：時計の右の丸いアイコンと、押すと出る小さなカード */
 .top .right{display:flex;align-items:flex-start;gap:12px}
 .me{flex:none;width:32px;height:32px;margin-top:1px;padding:0;border:0;border-radius:50%;background:var(--soft);color:var(--sub);
@@ -242,7 +242,6 @@ td:first-child{font-weight:700;white-space:nowrap}
 .gbtn:hover{background:var(--soft)}
 .gbtn svg{width:18px;height:18px;flex:none}
 .mepop .out{display:block;margin:4px auto 0;border:0;background:none;color:var(--sub);font:inherit;font-size:13px;cursor:pointer;text-decoration:underline}
-.mepop .needlogin{margin:0 0 12px;padding:8px 12px;border-radius:10px;background:var(--soft);font-size:13px;font-weight:700;line-height:1.6;color:var(--ink)}
 .mepop .lead{margin:0 0 8px;font-size:13.5px;line-height:1.7;color:var(--sub)}
 .mepop .perks{list-style:none;margin:0 0 14px;padding:0;font-size:13px;line-height:1.6;color:var(--sub)}
 .mepop .perks li{position:relative;padding:3px 0 3px 18px}
@@ -282,7 +281,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 .bubble .slides-card.ready img{cursor:pointer}
 .bubble .slides-card.ready figcaption{font-size:12.5px;color:var(--sub)}
 .bubble .slides-card.ready figcaption b{color:var(--accent);margin-right:.4em;background:none}
-@keyframes slides-pulse{0%,100%{box-shadow:0 0 0 0 rgba(10,100,216,.45)}50%{box-shadow:0 0 0 6px rgba(10,100,216,0)}}
+@keyframes slides-pulse{0%,100%{box-shadow:0 0 0 0 rgba(8,145,178,.45)}50%{box-shadow:0 0 0 6px rgba(8,145,178,0)}}
 @keyframes slides-flow{to{left:100%}}
 @media(prefers-reduced-motion:reduce){.bubble .slides-bar span,.bubble .slides-steps .step.now i{animation:none}}
 /* 作ったスライドの一覧（ログインのメニュー）。作成中の進み具合もここに出す */
@@ -307,5 +306,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 .me .badge{display:none;position:absolute;top:-1px;right:-1px;width:11px;height:11px;border-radius:50%;box-shadow:0 0 0 2px var(--bg)}
 .me[data-badge=working] .badge{display:block;background:var(--accent);animation:me-pulse 1.2s ease-in-out infinite}
 .me[data-badge=ready] .badge{display:block;background:#e5484d}
-@keyframes me-pulse{0%,100%{box-shadow:0 0 0 2px var(--bg),0 0 0 2px rgba(10,100,216,.45)}50%{box-shadow:0 0 0 2px var(--bg),0 0 0 6px rgba(10,100,216,0)}}
-@media(prefers-reduced-motion:reduce){.me .badge,.mepop .myslides .ph i{animation:none}}
+@keyframes me-pulse{0%,100%{box-shadow:0 0 0 2px var(--bg),0 0 0 2px rgba(8,145,178,.45)}50%{box-shadow:0 0 0 2px var(--bg),0 0 0 6px rgba(8,145,178,0)}}
+/* ログイン前にスライドの入口を押したとき：アイコンを3回脈打たせて場所を示す */
+.me.nudge{animation:me-pulse 1.2s ease-in-out 3}
+@media(prefers-reduced-motion:reduce){.me.nudge,.me .badge,.mepop .myslides .ph i{animation:none}}
