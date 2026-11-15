@@ -207,6 +207,9 @@ def panel(jobs, now, multi, mask, url, period_label):
 
 
 CSS = """
+/* タブ名のあとの本数は、名前と区別できる小さな丸い札にする */
+nav.tabs a .tab-count{display:inline-block;min-width:18px;margin-left:6px;padding:0 6px;border-radius:9px;background:#eef1f5;color:var(--sub);font-size:11px;font-weight:600;line-height:18px;text-align:center;vertical-align:1px}
+nav.tabs a.on .tab-count{background:var(--accent);color:#fff}
 .slide-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px;padding:0 20px 20px}
 .slide-card{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;display:flex;flex-direction:column;min-width:0}
 .slide-card.error{border-color:#f3c4c0}
