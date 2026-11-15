@@ -47,7 +47,7 @@ import tools
 import topics
 import usage
 from tool_status import knowledge_label
-from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN, MODEL_MAIN_API, SLIDES_FUNCTION, SLIDES_TABLE
+from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN, MODEL_MAIN_API, SLIDES_RUNTIME, SLIDES_TABLE
 
 app = BedrockAgentCoreApp()
 
@@ -529,7 +529,7 @@ async def invoke(payload, context):
                     yield {"type": "catalog_update", "at": result["checked_at"], "lines": lines}
             else:
                 catalog_state = "unchecked"
-        if not failed and SLIDES_FUNCTION and not turn.slides and slides.offer("".join(answer), turn.tools_used, research.SEARCH_TOOLS):
+        if not failed and SLIDES_RUNTIME and not turn.slides and slides.offer("".join(answer), turn.tools_used, research.SEARCH_TOOLS):
             yield {"type": "slides_offer"}
         if not failed:
             # 受付直後に並行して作った候補を1回だけ使う。

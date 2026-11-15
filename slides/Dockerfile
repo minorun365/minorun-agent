@@ -1,4 +1,4 @@
-# スライド工房（Lambda のコンテナ）。Marp CLI と Chromium で焼き、Python が段取りをする
+# スライド工房（AgentCore Runtime のコンテナ。2026-11-16 に Lambda から移した）。Marp CLI と Chromium で焼き、Python が段取りをする
 FROM --platform=linux/arm64 public.ecr.aws/docker/library/python:3.13-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -13,11 +13,12 @@ RUN mkdir -p /usr/share/fonts/truetype/web && cd /usr/share/fonts/truetype/web \
     && fc-cache -f
 
 ENV PYTHONUNBUFFERED=1 CHROME_PATH=/usr/lib/chromium/chromium MARP_MODULES=/usr/local/lib/node_modules/@marp-team/marp-cli/node_modules/ HOME=/tmp
-WORKDIR /var/task
+WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py *.mjs ./
 COPY theme/ ./theme/
 
-ENTRYPOINT ["python", "-m", "awslambdaric"]
-CMD ["handler.handler"]
+# AgentCore Runtime の決まり：8080 番で /invocations と /ping を受ける
+EXPOSE 8080
+CMD ["python", "app.py"]

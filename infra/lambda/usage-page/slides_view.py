@@ -18,11 +18,12 @@ import boto3
 
 TABLE = os.environ.get("SLIDES_TABLE", "")
 BUCKET = os.environ.get("SLIDES_BUCKET", "")
-LOG_GROUP = os.environ.get("SLIDES_LOG_GROUP", "/aws/lambda/minorun-agent-slides")
+# 工房の最後の1行を読むロググループ。いまは Runtime のもの、2026-11-15 分は Lambda のころのもの（カンマ区切り）
+LOG_GROUPS = [g.strip() for g in os.environ.get("SLIDES_LOG_GROUP", "").split(",") if g.strip()]
 JST = datetime.timezone(datetime.timedelta(hours=9))
 STAGES = {"queued": "順番待ち", "reading": "記事を読んでいる", "writing": "書いている", "rendering": "焼いている",
           "checking": "余白を測っている", "fixing": "崩れを直している"}
-# 工房の Lambda は15分で切れる。それより長く途中のままなのは、落ちて status を書けなかったもの
+# 工房の Runtime は1本20分で打ち切る。それより長く途中のままなのは、落ちて status を書けなかったもの
 STALE = 20 * 60
 MATCH = datetime.timedelta(minutes=15)
 URL = re.compile(r"https?://[^\s<>\"'）」]+")
@@ -53,27 +54,31 @@ def _status(job):
         return {"stage": "unknown"}
 
 
+def _finals(start, end):
+    """工房が1本ごとに最後に出す1行（job と ok を持つ JSON）を、(時刻ミリ秒, 中身) で順に返す。"""
+    logs = boto3.client("logs")
+    for group in LOG_GROUPS:
+        args = {"logGroupName": group, "filterPattern": "{ $.job = * && ($.ok IS TRUE || $.ok IS FALSE) }",
+                "startTime": int(start.timestamp() * 1000), "endTime": int(end.timestamp() * 1000)}
+        try:
+            while True:
+                page = logs.filter_log_events(**args)
+                for e in page.get("events", []):
+                    try:
+                        yield e["timestamp"], json.loads(e["message"][e["message"].index("{"):])
+                    except ValueError:
+                        continue
+                token = page.get("nextToken")
+                if not isinstance(token, str) or not token or token == args.get("nextToken"):
+                    break
+                args["nextToken"] = token
+        except Exception as e:
+            print(json.dumps({"slides_logs": "unavailable", "group": group, "error": type(e).__name__}))
+
+
 def _logs(start, end):
-    """工房が1本ごとに最後に出す1行（job と ok を持つ JSON）を番号で引けるようにする。"""
-    out = {}
-    try:
-        logs = boto3.client("logs")
-        args = {"logGroupName": LOG_GROUP, "filterPattern": "{ $.job = * && ($.ok IS TRUE || $.ok IS FALSE) }",
-                "startTime": int(start.timestamp() * 1000), "endTime": int((end + datetime.timedelta(minutes=20)).timestamp() * 1000)}
-        while True:
-            page = logs.filter_log_events(**args)
-            for e in page.get("events", []):
-                try:
-                    rec = json.loads(e["message"][e["message"].index("{"):])
-                except ValueError:
-                    continue
-                out[rec.get("job")] = rec
-            if not page.get("nextToken"):
-                return out
-            args["nextToken"] = page["nextToken"]
-    except Exception:
-        print(json.dumps({"slides_logs": "unavailable"}))
-        return out
+    """最後の1行を番号で引けるようにする。"""
+    return {rec.get("job"): rec for _, rec in _finals(start, end + datetime.timedelta(minutes=20))}
 
 
 # 工房が Claude API で書いた分の単価（100万トークンあたりのドル。Bedrock の Opus 5.5 と同じ）
@@ -85,28 +90,12 @@ def api_usd_by_hour(start, end):
     """工房が Claude API（Anthropic のクレジット）で払った Opus の費用を、日本時間の時台ごとに返す。
     AWS/Bedrock のメトリクスには載らないので、1本ごとの最後のログ行の usage（呼び出しごとのモデル）から足す。"""
     out = {}
-    try:
-        logs = boto3.client("logs")
-        args = {"logGroupName": LOG_GROUP, "filterPattern": "{ $.job = * && ($.ok IS TRUE || $.ok IS FALSE) }",
-                "startTime": int(start.timestamp() * 1000), "endTime": int(end.timestamp() * 1000)}
-        while True:
-            page = logs.filter_log_events(**args)
-            for e in page.get("events", []):
-                try:
-                    rec = json.loads(e["message"][e["message"].index("{"):])
-                except ValueError:
-                    continue
-                usd = sum((u.get("input", 0) * API_PRICE["input"] + u.get("output", 0) * API_PRICE["output"]) / 1e6
-                          for u in rec.get("usage") or [] if isinstance(u, dict) and u.get("model") == API_MODEL)
-                h = datetime.datetime.fromtimestamp(e["timestamp"] / 1000, JST).replace(minute=0, second=0, microsecond=0)
-                out[h] = out.get(h, 0.0) + usd
-            token = page.get("nextToken")
-            if not isinstance(token, str) or not token or token == args.get("nextToken"):
-                return out
-            args["nextToken"] = token
-    except Exception:
-        print(json.dumps({"slides_api_cost": "unavailable"}))
-        return out
+    for ts, rec in _finals(start, end):
+        usd = sum((u.get("input", 0) * API_PRICE["input"] + u.get("output", 0) * API_PRICE["output"]) / 1e6
+                  for u in rec.get("usage") or [] if isinstance(u, dict) and u.get("model") == API_MODEL)
+        h = datetime.datetime.fromtimestamp(ts / 1000, JST).replace(minute=0, second=0, microsecond=0)
+        out[h] = out.get(h, 0.0) + usd
+    return out
 
 
 def load(start, end):

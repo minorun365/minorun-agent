@@ -1,6 +1,6 @@
-"""スライド工房（Lambda）。URL の記事から minorun-glass テーマの解説スライドを作り、めくれるビューアとして公開する。
+"""スライド工房の中身（入口は app.py の AgentCore Runtime）。URL の記事から minorun-glass テーマの解説スライドを作り、めくれるビューアとして公開する。
 
-エージェントのツール make_slides がジョブを受け付け、この関数を非同期で起動する（画面までの入口は60秒で切れるため）。
+エージェントのツール make_slides がジョブを受け付け、ジョブごとのセッションで工房の Runtime を起こす（画面までの入口は60秒で切れるため）。
 進み具合は公開用 S3 の s/<ジョブ>/status.json に書き、画面が数秒おきに読みに来る。
   reading → writing → rendering → checking（直すときだけ fixing）→ done / error
 
@@ -46,7 +46,7 @@ API_MODEL = os.environ.get("SLIDES_API_MODEL", "claude-opus-5-5")
 WIF = {"federation_rule_id": os.environ.get("CLAUDE_WIF_RULE_ID", ""),
        "organization_id": os.environ.get("CLAUDE_WIF_ORGANIZATION_ID", ""),
        "service_account_id": os.environ.get("CLAUDE_WIF_SERVICE_ACCOUNT_ID", "") or None}
-# この入れ物（Lambda の実行環境）で Claude API を使えるか。待っても直らない失敗のあとは呼ばない
+# この入れ物（Runtime のセッション）で Claude API を使えるか。待っても直らない失敗のあとは呼ばない
 API = {"client": None,
        "off": None if os.environ.get("ANTHROPIC_PRIMARY", "on") == "on" and WIF["federation_rule_id"]
        and WIF["organization_id"] else "switched_off",
