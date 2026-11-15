@@ -123,18 +123,18 @@ td:first-child{font-weight:700;white-space:nowrap}
 .clip{flex:none;width:46px;height:46px;border-radius:50%;border:0;background:transparent;color:var(--mut);display:grid;place-items:center;cursor:pointer}
 .clip:hover,.clip.has{color:var(--ink)}
 /* 添付した画像の小さな見本。入力欄のすぐ上、注意書きの上に出す */
-.attach{position:absolute;left:0;right:0;width:max-content;margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 84px);
+.attach{position:absolute;left:0;right:0;width:max-content;margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 84px + var(--grow,0px));
   opacity:0;pointer-events:none;transition:opacity .3s ease}
 .attach[hidden]{display:none}
 .stage.composing .attach{opacity:1;pointer-events:auto}
-.stage.kbd .attach{bottom:94px}
+.stage.kbd .attach{bottom:calc(94px + var(--grow,0px))}
 /* 入力にURLが入ったときだけ出す「この記事をスライドにする」の札。添付の見本と同じ高さに置く（画像を添付している間は出さない） */
-.slidechip{position:absolute;left:0;right:0;width:max-content;max-width:calc(100% - 32px);margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 88px);
+.slidechip{position:absolute;left:0;right:0;width:max-content;max-width:calc(100% - 32px);margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 88px + var(--grow,0px));
   padding:8px 16px;border-radius:999px;border:1.5px solid var(--accent);background:var(--card);color:var(--accent);font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;
   box-shadow:0 4px 18px rgba(20,22,28,.12);opacity:0;pointer-events:none;transition:opacity .3s ease}
 .slidechip[hidden]{display:none}
 .stage.composing .slidechip{opacity:1;pointer-events:auto}
-.stage.kbd .slidechip{bottom:98px}
+.stage.kbd .slidechip{bottom:calc(98px + var(--grow,0px))}
 .slidechip:hover{background:var(--mark)}
 .attach img{display:block;max-width:132px;max-height:88px;border-radius:12px;box-shadow:0 4px 18px rgba(20,22,28,.18),0 0 0 1px var(--line)}
 .attach button{position:absolute;top:-9px;right:-9px;width:26px;height:26px;border-radius:50%;border:0;background:var(--ink);color:#fff;font-size:15px;line-height:1;cursor:pointer}
@@ -177,10 +177,10 @@ td:first-child{font-weight:700;white-space:nowrap}
   font-size:11px;font-weight:600;line-height:1.7;text-decoration:none;white-space:nowrap;vertical-align:1px;word-break:normal}
 .bubble a.src:hover{background:#e8ecf3;color:var(--ink)}
 /* 入力を開いたときだけ、入力欄のすぐ上に出す注意書き */
-.notice{position:absolute;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 58px);margin:0;text-align:center;
+.notice{position:absolute;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 58px + var(--grow,0px));margin:0;text-align:center;
   font-size:11.5px;line-height:1.6;color:var(--mut);opacity:0;transform:translateY(6px);pointer-events:none;transition:opacity .4s ease .2s,transform .4s ease .2s}
 .stage.composing .notice{opacity:1;transform:none}
-.stage.kbd .notice{bottom:68px}
+.stage.kbd .notice{bottom:calc(68px + var(--grow,0px))}
 /* 開いて少ししてから左上に出るあいさつ（キャラの方へしっぽを向ける） */
 /* 位置は main.ts の layout() が頭の座標から決める */
 .greet{position:absolute;z-index:4;left:12px;top:0;max-width:235px;margin:0;
@@ -205,8 +205,8 @@ td:first-child{font-weight:700;white-space:nowrap}
     margin: max(32px,calc((var(--vvh) - 820px) / 2)) auto 0}
   .stage.composing .dock{padding-bottom:var(--edge-b)}
   .stage.composing .write{bottom:var(--edge-b)}
-  .stage.composing .attach{bottom:calc(var(--edge-b) + 84px)}
-  .stage.composing .slidechip{bottom:calc(var(--edge-b) + 88px)}
+  .stage.composing .attach{bottom:calc(var(--edge-b) + 84px + var(--grow,0px))}
+  .stage.composing .slidechip{bottom:calc(var(--edge-b) + 88px + var(--grow,0px))}
 }
 /* ダークモードの案（?theme=dark で表示。iOS のダークの地色 #000 につなげる） */
 :root[data-theme=dark]{color-scheme:dark;--bg:#000;--card:#1c1c1e;--cloud:#2c2c2e;--mark:rgba(34,211,238,.28);
