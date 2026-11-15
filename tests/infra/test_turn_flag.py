@@ -77,6 +77,18 @@ class NotificationTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):m._notify([self.entry])
         self.sns.publish.assert_not_called()
 
+
+class SlidesRequestTests(unittest.TestCase):
+    def test_make_slides_row_is_normal_without_model(self):
+        row = {'pk': {'S': 'c'}, 'sk': {'S': 't1'}, 'user': {'S': 'u'}, 'question': {'S': 'https://example.com これをスライドにして'},
+               'tools': {'L': [{'S': 'make_slides'}]}}
+        with patch.object(m, '_read', return_value=row), patch.object(m, '_history_rows', return_value=[row]), \
+             patch.object(m, '_score') as score, patch.object(m, '_deliver'), patch.object(m, 'classify_turn') as model:
+            m.process_conversation({'pk': row['pk'], 'sk': row['sk']})
+        model.assert_not_called()
+        decision = score.call_args.args[2]
+        self.assertEqual((decision['flag'], decision['violation']), ('normal', 'none'))
+
 if __name__=='__main__':unittest.main()
 
 

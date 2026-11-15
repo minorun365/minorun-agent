@@ -2,7 +2,7 @@
 // ①入力欄にURLが入ったら「この記事をスライドにする」の札 ②入力欄の薄い字 ③質問候補にときどき1つ、で知らせる。
 
 export const PLACEHOLDER = '質問、または記事のURL';
-export const SLIDES_PLACEHOLDER = 'スライドにする記事のURLを貼ってください';
+export const SLIDES_PLACEHOLDER = '記事のURLを入力';
 export const SLIDES_STARTER = 'URLをスライドに要約して！';
 export const SLIDES_REQUEST = 'この記事をスライドにして';
 /** 質問候補に混ぜる割合（3〜4回に1回） */

@@ -119,7 +119,7 @@ def suggest_next(current, shelf, question, answer=""):
         items = next(json.loads(m) for m in reversed(re.findall(r"\[[^\[\]]*\]", raw)) if _json_ok(m))
         items = [re.sub(r"\s+", " ", str(i)).strip() for i in items if str(i).strip()]
         items = [i if i.endswith(("？", "?")) else i + "？" for i in items]
-        return list(dict.fromkeys(i for i in items if len(i) <= 28 and i != question))[:3]
+        return list(dict.fromkeys(i for i in items if len(i) <= 24 and i != question))[:3]
     except Exception as e:
         print(json.dumps({"suggest_error": type(e).__name__, "raw": (locals().get("raw") or "")[:200]}, ensure_ascii=False))
         return []
