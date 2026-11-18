@@ -10,9 +10,10 @@ import re
 import secrets
 
 import boto3
+import fallback
 import usage
 
-from settings import MODEL_AUX, REGION
+from settings import MODEL_AUX, MODEL_AUX_API, REGION
 
 _bedrock = boto3.client("bedrock-runtime", region_name=REGION)
 
@@ -32,21 +33,27 @@ def _ask(system, text, max_tokens=800):
     phase = "topic" if system == JUDGE else "suggest" if system == NEXT else "summary" if system == SUMMARY else "research_check"
     if ledger:
         ledger.begin()
-    res, failed = {}, False
+    # Claude API（Max プランの API クレジット）を先に使い、使えなければ Bedrock で聞く
+    model, tokens, failed = MODEL_AUX, None, False
     try:
+        got = fallback.ask_text(MODEL_AUX_API, system, text, max_tokens, "low")
+        if got:
+            model, (out, tokens) = MODEL_AUX_API, got
+            return out
         res = _bedrock.converse(
             modelId=MODEL_AUX, system=[{"text": system}],
             messages=[{"role": "user", "content": [{"text": text}]}],
             inferenceConfig={"maxTokens": max_tokens},
             additionalModelRequestFields={"output_config": {"effort": "low"}},
         )
+        tokens = res.get("usage")
+        return "".join(b.get("text", "") for b in res["output"]["message"]["content"])
     except BaseException:
         failed = True
         raise
     finally:
         if ledger:
-            ledger.end(MODEL_AUX, phase, res.get("usage"), failed)
-    return "".join(b.get("text", "") for b in res["output"]["message"]["content"])
+            ledger.end(model, phase, tokens, failed)
 
 
 JUDGE = (Path(__file__).with_name("judge.local.txt").read_text().strip() if Path(__file__).with_name("judge.local.txt").exists() else "")

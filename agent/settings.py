@@ -9,6 +9,7 @@ MODEL_MAIN = os.environ.get("MODEL_MAIN", "global.anthropic.claude-sonnet-5-5")
 # 回答は Claude API のこのモデルを先に使う（使えないときは MODEL_MAIN の Bedrock。agent/fallback.py）
 MODEL_MAIN_API = os.environ.get("MODEL_MAIN_API", "claude-sonnet-5-5")
 MODEL_AUX = os.environ.get("MODEL_AUX", "global.anthropic.claude-haiku-5-5")
+MODEL_AUX_API = os.environ.get("MODEL_AUX_API", "claude-haiku-5-5")
 # 回答の考える量（low / medium）。待ち時間と答えの質で決める
 MAIN_EFFORT = os.environ.get("MAIN_EFFORT", "low")
 TOOLS_GATEWAY_URL = os.environ.get("TOOLS_GATEWAY_URL", "")

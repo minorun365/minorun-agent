@@ -142,3 +142,94 @@ class Ledger(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuxAsk(unittest.TestCase):
+    """話題の判定・要約の1往復（ask_text）も Claude API を先に使う。"""
+
+    def setUp(self):
+        self.state = mock.patch.multiple(fallback._State, disabled_reason=None, busy_until=0.0)
+        self.aux = mock.patch.multiple(fallback._Aux, client=None, busy_until=0.0)
+        self.state.start(); self.aux.start()
+        self.addCleanup(self.state.stop); self.addCleanup(self.aux.stop)
+
+    def _client(self, result=None, error=None):
+        client = mock.Mock()
+        if error:
+            client.messages.create.side_effect = error
+        else:
+            client.messages.create.return_value = result
+        fallback._Aux.client = client
+        return client
+
+    def test_answers_with_claude_api_and_returns_bedrock_shaped_usage(self):
+        from types import SimpleNamespace as NS
+        msg = NS(content=[NS(type="text", text='{"decision": "same"}')],
+                 usage=NS(input_tokens=1000, output_tokens=100, cache_read_input_tokens=None,
+                          cache_creation_input_tokens=0))
+        client = self._client(msg)
+        text, tokens = fallback.ask_text("claude-haiku-5-5", "sys", "q", 2000, "low")
+        self.assertEqual(text, '{"decision": "same"}')
+        self.assertEqual(tokens, {"inputTokens": 1000, "outputTokens": 100,
+                                  "cacheReadInputTokens": 0, "cacheWriteInputTokens": 0})
+        kwargs = client.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-haiku-5-5")
+        self.assertEqual(kwargs["output_config"], {"effort": "low"})
+
+    def test_out_of_credit_stops_claude_api_for_answers_too(self):
+        self._client(error=CREDIT())
+        self.assertIsNone(fallback.ask_text("claude-haiku-5-5", "sys", "q", 2000, "low"))
+        self.assertTrue(fallback._State.disabled_reason)
+
+    def test_busy_only_pauses_the_aux_side(self):
+        self._client(error=OVERLOADED())
+        self.assertIsNone(fallback.ask_text("claude-haiku-5-5", "sys", "q", 2000, "low"))
+        self.assertIsNone(fallback._State.disabled_reason)
+        self.assertEqual(fallback._State.busy_until, 0.0)
+        self.assertGreater(fallback._Aux.busy_until, 0.0)
+
+    def test_switched_off_skips_claude_api(self):
+        fallback._State.disabled_reason = "switched_off"
+        client = self._client()
+        self.assertIsNone(fallback.ask_text("claude-haiku-5-5", "sys", "q", 2000, "low"))
+        client.messages.create.assert_not_called()
+
+    def test_topics_records_claude_api_haiku_cost(self):
+        import topics
+        ledger = usage.Ledger()
+        token = usage.CURRENT.set(ledger)
+        try:
+            with mock.patch.object(fallback, "ask_text", return_value=("ok", {"inputTokens": 1000, "outputTokens": 100})), \
+                 mock.patch.object(topics._bedrock, "converse") as converse:
+                self.assertEqual(topics._ask(topics.NEXT, "q"), "ok")
+                converse.assert_not_called()
+        finally:
+            usage.CURRENT.reset(token)
+        result = ledger.snapshot(0)
+        self.assertEqual(result["calls"][0]["model"], "claude-haiku-5-5")
+        self.assertAlmostEqual(result["usd"], .00015)
+
+
+class WarmUp(unittest.TestCase):
+    def setUp(self):
+        self.state = mock.patch.multiple(fallback._State, disabled_reason=None, busy_until=0.0)
+        self.aux = mock.patch.multiple(fallback._Aux, client=None, busy_until=0.0)
+        self.state.start(); self.aux.start()
+        self.addCleanup(self.state.stop); self.addCleanup(self.aux.stop)
+
+    def test_counts_tokens_once_to_fetch_the_pass_before_the_first_question(self):
+        client = mock.Mock()
+        fallback._Aux.client = client
+        fallback.warm_up("claude-haiku-5-5")
+        client.messages.count_tokens.assert_called_once()
+
+    def test_switched_off_does_nothing(self):
+        fallback._State.disabled_reason = "switched_off"
+        with mock.patch.object(fallback.anthropic, "Anthropic") as make:
+            fallback.warm_up("claude-haiku-5-5")
+            make.assert_not_called()
+
+    def test_answer_and_aux_share_one_credential(self):
+        with mock.patch.dict(fallback._CREDS, clear=True), \
+             mock.patch.object(fallback.anthropic, "WorkloadIdentityCredentials", side_effect=lambda **k: object()):
+            self.assertIs(fallback.credentials(), fallback.credentials())

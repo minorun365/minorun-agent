@@ -96,3 +96,25 @@ class SlidesTabTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SlidesLogCacheTests(unittest.TestCase):
+    def test_second_read_only_fetches_unsettled_tail(self):
+        sv._SEEN.clear()
+        calls = []
+
+        def fake(_logs, group, s, e):
+            calls.append((s, e))
+            return [(t, {'job': str(t)}) for t in (1000, 5000) if s <= t < e]
+        now = 10 * 60 * 1000 + 6000
+        with patch.object(sv, '_filter', side_effect=fake), patch.object(sv.boto3, 'client'):
+            self.assertEqual([t for t, _ in sv._group('g', 0, now, now)], [1000, 5000])
+            calls.clear()
+            # 公開日からの範囲を読み直しても、覚えた範囲の後ろ（直近10分）だけを探す
+            self.assertEqual([t for t, _ in sv._group('g', 0, now + 1000, now + 1000)], [1000, 5000])
+            self.assertEqual(calls, [(6000, 7000), (7000, now + 1000)])
+            calls.clear()
+            # 覚えた範囲の中の1日分は、探さずに覚えた行から切り出す
+            self.assertEqual([t for t, _ in sv._group('g', 4000, 6000, now + 1000)], [5000])
+            self.assertEqual(calls, [])
+        sv._SEEN.clear()

@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as cdk from 'aws-cdk-lib';
 import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
@@ -252,7 +253,8 @@ export class WatchStack extends cdk.Stack {
     usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [`arn:${this.partition}:s3:::minorun-agent-slides-${this.account}/s/*/status.json`] }));
     usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:FilterLogEvents'], resources: [`${props.slides.logGroup}:*`, '/aws/lambda/minorun-agent-slides:*'].map((resourceName) => this.formatArn({ service: 'logs', resource: 'log-group', resourceName, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME })) }));
     // 表は名前で指す（MinorunAgent からの参照を増やすと、そちらを出し直すまでこのスタックを出せない）
-    dynamodb.Table.fromTableName(this, 'ConversationLogByName', 'minorun-agent-conversations').grant(usagePage, 'dynamodb:Scan');
+    // 利用停止のページは、止めた人の決め手の会話を会話IDの Query で読む（点数の経過）
+    dynamodb.Table.fromTableName(this, 'ConversationLogByName', 'minorun-agent-conversations').grant(usagePage, 'dynamodb:Scan', 'dynamodb:Query');
     dynamodb.Table.fromTableName(this, 'TransportErrorsByName', 'minorun-agent-transport-errors').grant(usagePage, 'dynamodb:Query');
     usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['cloudwatch:GetMetricData'], resources: ['*'] }));
     usagePage.addToRolePolicy(new iam.PolicyStatement({
@@ -330,12 +332,39 @@ export class WatchStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_14,
       architecture: lambda.Architecture.ARM_64,
       handler: 'turn_flag.handler',
-      code: lambda.Code.fromAsset(path.join(currentDir, '../lambda/turn-flag'), { exclude: ['**/__pycache__', '**/*.pyc'] }),
+      // Claude API の SDK（anthropic）を一緒に入れる。Docker を使わず、手元の uv で Lambda（arm64）向けの wheel を取る
+      code: lambda.Code.fromAsset(path.join(currentDir, '../lambda/turn-flag'), {
+        exclude: ['**/__pycache__', '**/*.pyc'],
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_14.bundlingImage,
+          local: {
+            tryBundle(outputDir: string) {
+              const src = path.join(currentDir, '../lambda/turn-flag');
+              execFileSync('uv', ['pip', 'install', '--quiet', '--target', outputDir, '--python-platform', 'aarch64-manylinux2014',
+                '--python-version', '3.14', '--only-binary', ':all:', 'anthropic==0.125.0'], { stdio: 'inherit' });
+              for (const f of fs.readdirSync(src)) if (f.endsWith('.py')) fs.copyFileSync(path.join(src, f), path.join(outputDir, f));
+              return true;
+            },
+          },
+        },
+      }),
+      // ID 連携のルールは minorun-agent- で始まるロールだけを通すので、名前を固定する
+      role: new iam.Role(this, 'TurnFlagRole', {
+        roleName: 'minorun-agent-turn-flag',
+        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')],
+      }),
       timeout: cdk.Duration.seconds(60),
       memorySize: 256,
       logGroup: flagLogs,
       environment: {
         MODEL_ID: haikuProfile,
+        // 仕分けも Claude API を先に使う（止めるときは off）。ID は agent-stack.ts の回答と同じルール
+        ANTHROPIC_PRIMARY: 'on',
+        MODEL_API: 'claude-haiku-5-5',
+        CLAUDE_WIF_RULE_ID: process.env.CLAUDE_WIF_RULE_ID ?? '',
+        CLAUDE_WIF_ORGANIZATION_ID: process.env.CLAUDE_WIF_ORGANIZATION_ID ?? '',
+        CLAUDE_WIF_SERVICE_ACCOUNT_ID: process.env.CLAUDE_WIF_SERVICE_ACCOUNT_ID ?? '',
         LOG_TABLE: 'minorun-agent-conversations',
         STATE_TABLE: 'minorun-agent-usage',
         ADMIN_BASE_URL: props.adminBaseUrl,
@@ -353,6 +382,7 @@ export class WatchStack extends cdk.Stack {
     dynamodb.Table.fromTableName(this, 'ConversationLogForFlag', 'minorun-agent-conversations').grant(turnFlag, 'dynamodb:UpdateItem', 'dynamodb:GetItem', 'dynamodb:Query');
     dynamodb.Table.fromTableName(this, 'UsageTableForFlag', 'minorun-agent-usage').grant(turnFlag, 'dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:PutItem', 'dynamodb:ConditionCheckItem');
     alertTopic.grantPublish(turnFlag);
+    turnFlag.addToRolePolicy(new iam.PolicyStatement({ actions: ['sts:GetWebIdentityToken'], resources: ['*'] }));
     // Bedrock は Haiku 5.5 の global の推論プロファイル（と、その行き先のモデル）だけ
     turnFlag.addToRolePolicy(new iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],

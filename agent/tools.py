@@ -8,6 +8,7 @@ import datetime
 import email.utils
 import html
 import json
+import os
 import re
 import threading
 import time
@@ -161,14 +162,30 @@ def search_web(query: str) -> dict:
 _brave_key = None
 
 
+def _brave_api_key():
+    """保管庫 brave から Brave のキーを読む。
+
+    Runtime が workload token を渡すのはユーザーID付きで呼ばれたときだけで、入口の Gateway 経由では来ない。
+    そのときは CDK で作った名前付きのワークロード ID（環境変数 BRAVE_WORKLOAD）で自分で取る。
+    SDK の IdentityClient.get_api_key は async なので使わず、boto3 を同期で呼ぶ。
+    """
+    client = boto3.client("bedrock-agentcore", region_name=REGION)
+    token = Turn.current.workload_token if Turn.current else None
+    if not token and os.environ.get("BRAVE_WORKLOAD"):
+        token = client.get_workload_access_token(workloadName=os.environ["BRAVE_WORKLOAD"])["workloadAccessToken"]
+    if not token:
+        raise RuntimeError("Brave のキーを取れない（workload token が無く、BRAVE_WORKLOAD も無い）")
+    key = client.get_resource_api_key(resourceCredentialProviderName="brave",
+                                      workloadIdentityToken=token)["apiKey"]
+    if not isinstance(key, str) or not key:
+        raise RuntimeError("Brave のキーが文字列で返らなかった")
+    return key
+
+
 def _brave(query, freshness="pw"):
     global _brave_key
     if _brave_key is None:
-        from bedrock_agentcore.services.identity import IdentityClient
-        token = Turn.current.workload_token if Turn.current else None
-        if not token:
-            raise RuntimeError("workload token が無い")
-        _brave_key = IdentityClient(REGION).get_api_key(provider_name="brave", agent_identity_token=token)
+        _brave_key = _brave_api_key()
     params = {"q": query, "country": "JP", "search_lang": "jp", "ui_lang": "ja-JP", "count": WEB_RESULTS}
     if freshness:
         params["freshness"] = freshness

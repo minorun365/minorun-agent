@@ -54,26 +54,58 @@ def _status(job):
         return {"stage": "unknown"}
 
 
+# ロググループごとに、読み終えた範囲 [始め, 終わり) とその中の行を覚えておく（温まった Lambda の中だけ）。
+# 15秒ごとの部分更新のたびに公開日から全部を探し直すと、空のページを何十回もめくって数秒かかるため、
+# 2回目からは覚えた範囲の後ろだけを読む。ログは数分遅れて届くことがあるので、直近の分は覚えない。
+_SEEN = {}
+SETTLE_MS = 10 * 60 * 1000
+
+
+def _filter(logs, group, start_ms, end_ms):
+    args = {"logGroupName": group, "filterPattern": "{ $.job = * && ($.ok IS TRUE || $.ok IS FALSE) }",
+            "startTime": start_ms, "endTime": end_ms}
+    out = []
+    while True:
+        page = logs.filter_log_events(**args)
+        for e in page.get("events", []):
+            try:
+                out.append((e["timestamp"], json.loads(e["message"][e["message"].index("{"):])))
+            except ValueError:
+                continue
+        token = page.get("nextToken")
+        if not isinstance(token, str) or not token or token == args.get("nextToken"):
+            return out
+        args["nextToken"] = token
+
+
+def _group(group, start_ms, end_ms, now_ms):
+    logs = boto3.client("logs")
+    try:
+        seen = _SEEN.get(group)
+        if seen and seen[0] <= start_ms:
+            begin, events = seen[1], list(seen[2])
+        else:
+            begin, events = start_ms, []
+        settled = max(begin, min(end_ms, now_ms - SETTLE_MS))
+        if settled > begin:
+            events += _filter(logs, group, begin, settled)
+            _SEEN[group] = (seen[0] if seen and seen[0] <= start_ms else start_ms, settled, events)
+            events = list(events)
+        if end_ms > settled:
+            events += _filter(logs, group, settled, end_ms)
+        return [(ts, rec) for ts, rec in events if start_ms <= ts < end_ms]
+    except Exception as e:
+        print(json.dumps({"slides_logs": "unavailable", "group": group, "error": type(e).__name__}))
+        return []
+
+
 def _finals(start, end):
     """工房が1本ごとに最後に出す1行（job と ok を持つ JSON）を、(時刻ミリ秒, 中身) で順に返す。"""
-    logs = boto3.client("logs")
-    for group in LOG_GROUPS:
-        args = {"logGroupName": group, "filterPattern": "{ $.job = * && ($.ok IS TRUE || $.ok IS FALSE) }",
-                "startTime": int(start.timestamp() * 1000), "endTime": int(end.timestamp() * 1000)}
-        try:
-            while True:
-                page = logs.filter_log_events(**args)
-                for e in page.get("events", []):
-                    try:
-                        yield e["timestamp"], json.loads(e["message"][e["message"].index("{"):])
-                    except ValueError:
-                        continue
-                token = page.get("nextToken")
-                if not isinstance(token, str) or not token or token == args.get("nextToken"):
-                    break
-                args["nextToken"] = token
-        except Exception as e:
-            print(json.dumps({"slides_logs": "unavailable", "group": group, "error": type(e).__name__}))
+    start_ms, end_ms = int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+    now_ms = int(datetime.datetime.now(JST).timestamp() * 1000)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(LOG_GROUPS))) as pool:
+        for events in pool.map(lambda g: _group(g, start_ms, end_ms, now_ms), LOG_GROUPS):
+            yield from events
 
 
 def _logs(start, end):

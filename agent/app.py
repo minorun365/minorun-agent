@@ -47,7 +47,7 @@ import tools
 import topics
 import usage
 from tool_status import knowledge_label
-from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_MAIN, MODEL_MAIN_API, SLIDES_RUNTIME, SLIDES_TABLE
+from settings import MAIN_EFFORT, MAX_TOOL_CALLS, MODEL_AUX, MODEL_AUX_API, MODEL_MAIN, MODEL_MAIN_API, SLIDES_RUNTIME, SLIDES_TABLE
 
 app = BedrockAgentCoreApp()
 
@@ -122,6 +122,12 @@ def _main_model():
     return fallback.FallbackModel(make, _model(MODEL_MAIN, 4000, MAIN_EFFORT))
 
 
+def _aux_model():
+    """会話の要約の Haiku も Claude API を先に使い、使えなければ Bedrock で要約する。"""
+    make = fallback.anthropic_model(usage.MeteredAnthropicModel, MODEL_AUX_API, 2000, "low", _cache())
+    return fallback.FallbackModel(make, _model(MODEL_AUX, 2000, "low"))
+
+
 def _answer_models(ledger):
     """この質問の回答で実際に使ったモデル（Claude API か Bedrock か）。"""
     with ledger.condition:
@@ -152,7 +158,7 @@ class Conversation:
             callback_handler=None,
             conversation_manager=SummarizingConversationManager(
                 summary_ratio=0.3, preserve_recent_messages=10,
-                summarization_agent=Agent(model=_model(MODEL_AUX, 2000, "low"),
+                summarization_agent=Agent(model=_aux_model(),
                                           system_prompt=topics.SUMMARY_GROUNDING, callback_handler=None)),
             hooks=[ToolLimit()],
             trace_attributes={"session.id": session, "user.id": actor},
@@ -167,7 +173,8 @@ CONVERSATIONS: dict[str, Conversation] = {}
 
 def _warm_up():
     """会話ごとに新しい入れ物が立つので、最初の質問が来る前にツールの接続と控えの読み込みを済ませる。"""
-    for name, step in (("mcp", tools.mcp), ("catalog", catalog.snapshot)):
+    for name, step in (("mcp", tools.mcp), ("catalog", catalog.snapshot),
+                       ("claude_api", lambda: fallback.warm_up(MODEL_AUX_API))):
         try:
             step()
         except Exception as e:

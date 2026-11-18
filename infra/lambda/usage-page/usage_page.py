@@ -16,6 +16,7 @@
 """
 
 import base64
+import concurrent.futures
 import datetime
 import hashlib
 import hmac
@@ -93,6 +94,10 @@ PHONE = re.compile(r"(\+?\d[\d\- ]{8,}\d)")
 
 cw = boto3.client("cloudwatch")
 ddb = boto3.client("dynamodb")
+# 表の並行読み（区画ごと）と、互いに待たない取得の並行実行。前者の中で後者を待たないので詰まらない
+SCAN_SEGMENTS = 4
+POOL = concurrent.futures.ThreadPoolExecutor(max_workers=12)
+TASKS = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 
 
 def _day(d):
@@ -167,12 +172,19 @@ def _rows(start, end, fields):
         "ExpressionAttributeValues": {":s": {"S": start.isoformat(timespec="seconds")},
                                       ":e": {"S": end.isoformat(timespec="seconds")}}}
     kwargs["ExpressionAttributeNames"]["#c"] = "created_at"
-    while True:
-        page = ddb.scan(**kwargs)
-        rows += [_plain(r) for r in page["Items"]]
-        if "LastEvaluatedKey" not in page:
-            return rows
-        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+    # 表には日付の索引が無く毎回全件を読むので、表を区画に分けて並行に読む（1MBずつの順番待ちを減らす）
+    def segment(i):
+        args, out = dict(kwargs, Segment=i, TotalSegments=SCAN_SEGMENTS), []
+        while True:
+            page = ddb.scan(**args)
+            out += [_plain(r) for r in page["Items"]]
+            if "LastEvaluatedKey" not in page:
+                return out
+            args["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+    for part in POOL.map(segment, range(SCAN_SEGMENTS)):
+        rows += part
+    return rows
 
 
 def _plain(item):
@@ -280,12 +292,13 @@ def _pace(now):
         return cached[1]
     since = COST_SINCE
     week = max(since, (now - datetime.timedelta(days=7)).replace(minute=0, second=0, microsecond=0))
-    m = _metrics(since, now, 3600)
+    fm = TASKS.submit(_metrics, since, now, 3600)
+    fo = TASKS.submit(slides_view.api_usd_by_hour, since, now)
     rows = _rows(since, now, ["created_at", "tools", "x_search", "usage.calls"])
+    m, oa = fm.result(), fo.result()
     recent = [r for r in rows if datetime.datetime.fromisoformat(r["created_at"]) >= week]
     _, brave, kb = _tool_costs(rows)
     _, wbrave, wkb = _tool_costs(recent)
-    oa = slides_view.api_usd_by_hour(since, now)
     all_cost = _cost(m, None, brave, kb, x=_x_cost(rows), api=_api_cost(rows), opus_api=oa)
     total = sum(all_cost.values())
     week_usd = sum(_cost(m, None, wbrave, wkb, since=week, x=_x_cost(recent), api=_api_cost(recent), opus_api=oa).values())
@@ -299,17 +312,19 @@ def _pace(now):
 
 def summary(day=None):
     now, start, end = _day(day)
-    m = _metrics(start, end, 86400)
+    fp, fj = TASKS.submit(_pace, now), TASKS.submit(_rejected, start, end)
+    fm, fo = TASKS.submit(_metrics, start, end, 86400), TASKS.submit(slides_view.api_usd_by_hour, start, end)
     rows = _rows(start, end, ["created_at", "anon", "tools", "first_ms", "feedback", "via", "x_search", "usage.calls"])
+    m = fm.result()
     tools, brave, kb = _tool_costs(rows)
-    cost = _cost(m, None, brave, kb, x=_x_cost(rows), api=_api_cost(rows), opus_api=slides_view.api_usd_by_hour(start, end))
+    cost = _cost(m, None, brave, kb, x=_x_cost(rows), api=_api_cost(rows), opus_api=fo.result())
     firsts = sorted(r["first_ms"] for r in rows if r.get("first_ms") is not None)
     return {"now": now, "day": start, "questions": len(rows), "users": len({r.get("anon") for r in rows}),
-            "first_p50": statistics.median(firsts) if firsts else None, "rejected": _rejected(start, end),
+            "first_p50": statistics.median(firsts) if firsts else None, "rejected": fj.result(),
             "tools": tools, "cost": cost, "total": sum(cost.values()), "aws_total": _aws(cost),
             "feedback": {v: sum(1 for r in rows if r.get("feedback") == v) for v in ("good", "bad")},
             "via": {v: sum(1 for r in rows if r.get("via") == v) for v in VIA_LABELS},
-            "pace": _pace(now)}
+            "pace": fp.result()}
 
 
 def hours(day):
@@ -402,7 +417,7 @@ def bans():
                     "reason": i.get("reason", {}).get("S", ""), "question": i.get("question", {}).get("S", ""),
                     "day": i.get("day", {}).get("S", "") or at[:10], "linked_from": i.get("linked_from", {}).get("S", ""),
                     "views": int(i.get("views", {}).get("N", "0")), "attempts": int(i.get("attempts", {}).get("N", "0")),
-                    "seen_at": i.get("seen_at", {}).get("S", ""),
+                    "seen_at": i.get("seen_at", {}).get("S", ""), "score": int(i.get("score", {}).get("N", "0")),
                     **{k: i.get(k, {}).get("S", "") for k in ("conv_pk", "conv_sk", "reviewed_at")}})
     return sorted(out, key=lambda b: b["at"], reverse=True)
 
@@ -427,7 +442,7 @@ def _ban_history(identifier):
     """停止したIDに一致する書き込みを、日付を限定せず全ページ読む。"""
     _ban_key(identifier)
     value = identifier[2:]
-    fields = ["pk", "sk", "created_at", "question", "answer", "anon", "user", "flag", "flag_reason", "via"]
+    fields = ["pk", "sk", "created_at", "question", "answer", "anon", "user", "flag", "flag_reason", "via", *MODERATION_FIELDS]
     kwargs = {"TableName": TABLE,
               "ProjectionExpression": ",".join(f"#f{i}" for i in range(len(fields))),
               "ExpressionAttributeNames": {f"#f{i}": f for i, f in enumerate(fields)}}
@@ -518,6 +533,153 @@ def _ban_post(row, cause, opened=False):
             f'<div class="ans">{_md(_mask(row.get("answer")))}</div></details>')
 
 
+# 会話の判定で止まった停止（turn_flag.py の source）。cumulative は累積6点、auto は累積判定より前の1回判定。
+JUDGED_SOURCES = ("cumulative", "auto")
+SOURCE_LABELS = {"cumulative": "累積判定で自動停止", "auto": "1回の判定で自動停止（累積判定より前の仕組み）",
+                 "guard": "防御役による自動停止", "manual": "手動停止", "linked": "関連IDによる停止"}
+# turn_flag.py の POINTS と同じ種別。点数は会話の行の moderation_delta をそのまま出す。
+KIND_LABELS = {"pressure": "攻撃的な要求の繰り返し", "probing": "非公開情報の探索", "repeated_scope": "範囲外の要求の繰り返し",
+               "private_question": "私的な属性・財産の質問", "severe": "重い違反（脅し・差別・侮辱など）"}
+BAN_LIMIT = 6
+JUDGED_CARDS = 10
+MODERATION_FIELDS = ["moderation_delta", "moderation_total", "moderation_kind", "moderation_banned"]
+
+
+def _conversation(conv_pk):
+    """停止の決め手になった会話の全行（会話IDがキーなので Query で足りる）。古い順"""
+    fields = ["pk", "sk", "created_at", "question", "anon", "user", "flag", "flag_reason", *MODERATION_FIELDS]
+    kwargs = {"TableName": TABLE, "KeyConditionExpression": "#p = :p",
+              "ProjectionExpression": ",".join(f"#f{i}" for i in range(len(fields))),
+              "ExpressionAttributeNames": {"#p": "pk", **{f"#f{i}": f for i, f in enumerate(fields)}},
+              "ExpressionAttributeValues": {":p": {"S": conv_pk}}}
+    rows = []
+    while True:
+        page = ddb.query(**kwargs)
+        rows += [_plain(r) for r in page["Items"]]
+        if "LastEvaluatedKey" not in page:
+            return sorted(rows, key=lambda r: (r.get("created_at", ""), r.get("sk", "")))
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def _points(row):
+    v = row.get("moderation_delta")
+    return int(v) if isinstance(v, (int, float)) else 0
+
+
+def _score_rows(rows, b):
+    """停止した本人の、決め手の会話の行だけを古い順に。別人の行は混ぜない。"""
+    value = b["identifier"][2:]
+    mine = [r for r in rows if r.get("pk") == b.get("conv_pk") and
+            (r.get("anon") == value or r.get("user") == value or r.get("anon") == "user-" + value)]
+    return sorted(mine, key=lambda r: (r.get("created_at", ""), r.get("sk", "")))
+
+
+def _clock(value):
+    try:
+        return f"{datetime.datetime.fromisoformat(value).astimezone(JST):%H:%M:%S}"
+    except (TypeError, ValueError):
+        return "--:--:--"
+
+
+def _reach(steps):
+    """最初に点が入ってから停止の書き込みまでの時間。"""
+    if len(steps) < 2:
+        return "1回で到達"
+    try:
+        a, z = (datetime.datetime.fromisoformat(steps[i].get("created_at")) for i in (0, -1))
+    except (TypeError, ValueError):
+        return f"{len(steps)}回で到達"
+    sec = max(0, int((z - a).total_seconds()))
+    span = f"{sec // 3600}時間{sec % 3600 // 60}分" if sec >= 3600 else f"{sec // 60}分{sec % 60}秒" if sec >= 60 else f"{sec}秒"
+    return f"{len(steps)}回・{span}で到達"
+
+
+def _score_html(b, rows, key):
+    """点が入った書き込みを時刻順に並べ、6点に届くまでを見せる（案B）。"""
+    mine = _score_rows(rows, b)
+    steps = [r for r in mine if _points(r) > 0]
+    decisive = next((r for r in mine if _caused_ban(r, b)), None)
+    if decisive is not None and decisive not in steps:
+        steps.append(decisive)
+    if not steps:
+        q = _mask(b.get("question"))
+        return ('<p class="note">点数の経過は記録にありません。</p>' +
+                (f'<div class="score-step last"><span>{_clock(b.get("at"))}</span><span class="pt">停止</span>'
+                 f'<span>{html.escape(q)}<br><span class="meta alert">停止の決め手</span></span></div>' if q else ""))
+    total = b.get("score") or max((int(r["moderation_total"]) for r in steps if isinstance(r.get("moderation_total"), (int, float))), default=0)
+    out = []
+    if b.get("source") == "cumulative":
+        width = min(100, round(100 * total / BAN_LIMIT)) if total else 0
+        out.append(f'<div class="score-bar"><i style="width:{width}%"></i></div>'
+                   f'<div class="meta">{total}点 / {BAN_LIMIT}点で停止（{_reach([r for r in steps if _points(r) > 0] or steps)}）</div>')
+    for r in steps:
+        last = _caused_ban(r, b)
+        kind = KIND_LABELS.get(r.get("moderation_kind"), "") or _mask(r.get("flag_reason"))
+        note = ('<span class="meta alert">停止の決め手' + (f' · {html.escape(kind)}' if kind else '') + '</span>') if last else \
+               (f'<span class="meta">{html.escape(kind)}</span>' if kind else '')
+        pt = f'+{_points(r)}' if _points(r) else "停止"
+        out.append(f'<div class="score-step{" last" if last else ""}"><span>{_clock(r.get("created_at"))}</span>'
+                   f'<span class="pt">{pt}</span><span>{html.escape(_mask(r.get("question")))}{"<br>" + note if note else ""}</span></div>')
+    zero = [r for r in mine if r not in steps]
+    if zero:
+        out.append(f'<details class="score-zero" data-row="{html.escape("zero|" + key, quote=True)}"><summary>0点の書き込み{len(zero)}件も見る</summary>' +
+                   "".join(f'<div class="score-step"><span>{_clock(r.get("created_at"))}</span><span class="pt0">0</span>'
+                           f'<span>{html.escape(_mask(r.get("question")))}</span></div>' for r in zero) + '</details>')
+    return "".join(out)
+
+
+def _judged_card(b):
+    try:
+        rows = _conversation(b["conv_pk"]) if b.get("conv_pk") else []
+    except Exception as e:  # 1人分の読み出しの失敗で一覧全体を落とさない。黙って「記録なし」に見せないようログへ残す
+        print(json.dumps({"ban_conversation": "unavailable", "error": type(e).__name__}))
+        rows = []
+    new = '<span class="alert">新着</span>' if not b.get("reviewed_at") else '<span class="meta">確認済み</span>'
+    count = len(_score_rows(rows, b))
+    link = html.escape(_url(v="bans", u=b["identifier"]))
+    kind = "" if b.get("source") == "cumulative" else " · " + SOURCE_LABELS.get(b.get("source"), "")
+    return (f'<article class="score-card"><div class="ban-person-title"><a href="{link}"><strong>{html.escape(b["identifier"])}</strong></a>{new}</div>'
+            f'<div class="meta">停止 {_ban_time(b["at"])}' + (f' · この会話の質問 {count}件' if count else '') + html.escape(kind) + '</div>'
+            + _score_html(b, rows, b["identifier"]) +
+            f'<div class="meta score-more"><a href="{link}">詳細ページへ ›</a></div></article>')
+
+
+def _ban_row(b):
+    new = '<span class="alert">新着</span>' if not b.get("reviewed_at") else '<span class="meta">確認済み</span>'
+    return (f'<a class="ban-person" href="{html.escape(_url(v="bans", u=b["identifier"]))}">'
+            f'<div class="ban-person-title"><strong>{html.escape(b["identifier"])}</strong>{new}</div>'
+            f'<div class="meta">停止 {_ban_time(b["at"])} · {html.escape(SOURCE_LABELS.get(b.get("source"), "停止"))}</div>'
+            f'<p>{html.escape(_mask(b.get("reason")) or ("停止済みのIDとの関連による停止" if b.get("source") == "linked" else "手動停止"))}</p>'
+            f'<div class="meta">停止後のアクセス {b.get("views", 0)}回 · 送信の試行 {b.get("attempts", 0)}回</div></a>')
+
+
+def _ban_list(items):
+    """会話の判定で止まった人をカードで前に出し、手動・関連・防御役の停止は下に畳む。"""
+    judged = [b for b in items if b.get("source") in JUDGED_SOURCES]
+    others = [b for b in items if b.get("source") not in JUDGED_SOURCES]
+    out = [f'<section class="judged"><h2>会話の判定で止めた人 <small>{len(judged)}人・新しい順</small></h2>']
+    if judged:
+        out.append('<p class="note">点が入った書き込みを時刻順に並べています。6点に届いた書き込みが停止の決め手です。</p>')
+        out.extend(_judged_card(b) for b in judged[:JUDGED_CARDS])
+        if len(judged) > JUDGED_CARDS:
+            out.append(f'<details class="ban-others" data-row="judged-rest"><summary>さらに前の{len(judged) - JUDGED_CARDS}人</summary>' +
+                       "".join(_ban_row(b) for b in judged[JUDGED_CARDS:]) + '</details>')
+    else:
+        out.append('<p>会話の判定で止めた人はいません。</p>')
+    out.append('</section>')
+    if others:
+        counts = {}
+        for b in others:
+            counts[b.get("source")] = counts.get(b.get("source"), 0) + 1
+        label = "・".join(f'{SOURCE_LABELS.get(k, "その他の停止")} {n}件' for k, n in
+                         sorted(counts.items(), key=lambda kv: -kv[1]))
+        fresh = sum(1 for b in others if not b.get("reviewed_at"))
+        out.append(f'<details class="ban-others" data-row="others"><summary>{html.escape(label)}' +
+                   (f' <span class="alert">新着 {fresh}</span>' if fresh else '') + '</summary>' +
+                   "".join(_ban_row(b) for b in others) + '</details>')
+    return out
+
+
 def render_bans(identifier=None, page=1):
     items = bans()
     selected = next((b for b in items if b["identifier"] == identifier), None)
@@ -526,14 +688,7 @@ def render_bans(identifier=None, page=1):
     if identifier and not selected:
         content.append('<p>このIDの利用停止記録はありません。</p>')
     elif not selected:
-        content.append('<p class="note">IDを選ぶと、停止の理由・書き込み・停止後のアクセスを確認できます。</p>')
-        for b in items:
-            new = '<span class="alert">新着</span>' if not b.get("reviewed_at") else '<span class="meta">確認済み</span>'
-            content.append(f'<a class="ban-person" href="{html.escape(_url(v="bans", u=b["identifier"]))}">'
-                           f'<div class="ban-person-title"><strong>{html.escape(b["identifier"])}</strong>{new}</div>'
-                           f'<div class="meta">停止 {_ban_time(b["at"])}</div>'
-                           f'<p>{html.escape(_mask(b.get("reason")) or ("停止済みのIDとの関連による停止" if b.get("source") == "linked" else "手動停止"))}</p>'
-                           f'<div class="meta">停止後のアクセス {b.get("views", 0)}回 · 送信の試行 {b.get("attempts", 0)}回</div></a>')
+        content.extend(_ban_list(items))
         if not items:
             content.append('<p>利用停止中のIDはありません。</p>')
     else:
@@ -541,11 +696,13 @@ def render_bans(identifier=None, page=1):
         cause = _ban_cause(b, items)
         rows = _ban_history(identifier)
         decisive = next((r for r in rows if _caused_ban(r, cause)), None)
+        cause_rows = rows
         # 関連IDで行った元の書き込みも、正確なキーが一致したときだけ表示する。
-        if not decisive and cause is not b and cause.get("conv_pk") and cause.get("conv_sk"):
-            decisive = next((r for r in _ban_history(cause["identifier"]) if _caused_ban(r, cause)), None)
+        if cause is not b and cause.get("conv_pk") and (cause.get("conv_sk") or cause.get("source") in JUDGED_SOURCES):
+            cause_rows = _ban_history(cause["identifier"])
+            decisive = decisive or next((r for r in cause_rows if _caused_ban(r, cause)), None)
         content.append(f'<h2 class="ban-id">{html.escape(identifier)}</h2>'
-                       f'<div class="meta">停止 {_ban_time(b["at"])} · {_mask({"auto":"自動停止", "manual":"手動停止", "linked":"関連IDによる停止"}.get(b.get("source"), "停止"))}</div>'
+                       f'<div class="meta">停止 {_ban_time(b["at"])} · {html.escape(SOURCE_LABELS.get(b.get("source"), "停止"))}</div>'
                        '<div id="review-status" class="meta" role="status">' + ('確認済み' if b.get('reviewed_at') else '確認状態を保存中…') + '</div>')
         content.append(f'<div class="ban-visits"><div><span>停止後のアクセス</span><strong>{b.get("views", 0)}<small>回</small></strong></div>'
                        f'<div><span>質問・評価の送信試行</span><strong>{b.get("attempts", 0)}<small>回</small></strong></div></div>'
@@ -554,6 +711,8 @@ def render_bans(identifier=None, page=1):
                        f'<p>{html.escape(_mask(cause.get("reason")) or "理由の記録なし")}</p>')
         if cause is not b:
             content.append(f'<p class="meta">元の停止：<a href="{html.escape(_url(v="bans", u=cause["identifier"]))}">{html.escape(cause["identifier"])}</a></p>')
+        if cause.get("source") in JUDGED_SOURCES and cause.get("conv_pk"):
+            content.append('<h3>点数の経過</h3>' + _score_html(cause, cause_rows, "detail|" + cause["identifier"]))
         if decisive:
             content.append(_ban_post(decisive, cause, True))
         else:
@@ -653,13 +812,16 @@ def _question_id(r):
 def report(day=None, u="general", detail=True):
     """画面と JSON が共有する1回の取得結果。費用は時台ごとの質問数で按分する。"""
     u = u or "general"
+    # 公開からの累計（_pace）・登録者・持ち主は期間によらないので、質問の読み込みと並行に始める
+    fp = TASKS.submit(_pace, _day(day)[0])
+    fr, fw = TASKS.submit(_registered_users), TASKS.submit(_owner_actors)
     now, start, rows = questions(day, detail)
     mode, _, period_end = periods.bounds(day, now, COST_SINCE)
     end = min(start + datetime.timedelta(days=1), now) if mode == "day" else period_end
-    m = _metrics(start, end, 3600)
-    oa = slides_view.api_usd_by_hour(start, end)
-    registered = _registered_users()
-    owners = _owner_actors()
+    fm = TASKS.submit(_metrics, start, end, 3600)
+    fo = TASKS.submit(slides_view.api_usd_by_hour, start, end)
+    fj = TASKS.submit(_rejected, start, end)
+    m, oa, registered, owners = fm.result(), fo.result(), fr.result(), fw.result()
     groups = {}
     for r in rows:
         r["audience"] = _audience(r, owners)
@@ -718,8 +880,8 @@ def report(day=None, u="general", detail=True):
          "questions": len(selected),
          "users": len({_actor(r) for r in selected if _actor(r) != "unknown"}),
          "first_p50": statistics.median(firsts) if firsts else None,
-         "rejected": _rejected(start, end), "tools": tools, "cost": costs,
-         "total": sum(costs.values()), "aws_total": _aws(costs), "pace": _pace(now),
+         "rejected": fj.result(), "tools": tools, "cost": costs,
+         "total": sum(costs.values()), "aws_total": _aws(costs), "pace": fp.result(),
          "feedback": {v: sum(r.get("feedback") == v for r in selected) for v in ("good", "bad")},
          "via": {v: sum(r.get("via") == v for r in selected) for v in VIA_LABELS},
          "registered_google": len(registered) if registered is not None else None,
@@ -1618,6 +1780,14 @@ CSS += """
 .ban-visits span{display:block;font-size:13px;color:var(--sub)}.ban-visits strong{display:block;font-size:34px;font-weight:600}.ban-visits small{margin-left:6px}
 .ban-cause{background:var(--soft);border-radius:10px;padding:18px;margin:24px 0}.ban-cause h2{padding:0}.ban-cause p{overflow-wrap:anywhere}.ban-wrap .meta{font-size:12px}
 .ban-wrap .list{max-height:none;overflow:visible;padding:0}.ban-wrap section>h2{padding-left:0}.ban-cause .ans{background:#fff}
+.ban-wrap section>h2 small{font-size:13px;font-weight:400;color:var(--sub);margin-left:6px}.ban-cause h3{font-size:15px;margin:16px 0 4px}
+.score-card{border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:0 0 16px;background:#fff;color:var(--ink)}
+.score-bar{height:6px;border-radius:3px;background:var(--line);margin:12px 0 4px;position:relative;overflow:hidden}.score-bar i{position:absolute;inset:0 auto 0 0;background:var(--warn);border-radius:3px}
+.score-step{display:grid;grid-template-columns:64px 44px minmax(0,1fr);gap:8px;align-items:start;padding:8px 4px;border-top:1px dashed var(--line);font-size:14px;overflow-wrap:anywhere}
+.score-step .pt{font-weight:700;color:var(--warn)}.score-step .pt0{color:var(--sub)}.score-step.last{background:var(--warn-soft);color:var(--ink);border-radius:6px}
+.score-zero,.ban-others{margin-top:8px}.score-zero summary,.ban-others summary{cursor:pointer;font-size:13px;color:var(--accent);padding:8px 0}
+.ban-others{background:var(--soft);color:var(--ink);border-radius:10px;padding:6px 16px;margin:8px 0 24px}.ban-others summary{font-size:14px;color:var(--ink)}
+.score-more{margin-top:10px}
 """
 
 CSS += """

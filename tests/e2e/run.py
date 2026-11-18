@@ -8,6 +8,7 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import pathlib
 import re
 import time
 import urllib.error
