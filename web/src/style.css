@@ -120,6 +120,9 @@ td:first-child{font-weight:700;white-space:nowrap}
 .stage.composing .dock{padding-bottom:0}
 .stage.composing .write{opacity:1;pointer-events:auto;bottom:0}
 /* 入力欄の左：画像を添付するボタン（右の送信ボタンと同じ幅なので、入力欄は中央のまま） */
+/* 入力をやめて元の画面へ戻るボタン */
+.back{flex:none;width:46px;height:46px;border-radius:50%;border:0;background:var(--soft);color:var(--sub);display:grid;place-items:center;cursor:pointer}
+.back:active{background:var(--line)}
 .clip{flex:none;width:46px;height:46px;border-radius:50%;border:0;background:transparent;color:var(--mut);display:grid;place-items:center;cursor:pointer}
 .clip:hover,.clip.has{color:var(--ink)}
 /* 添付した画像の小さな見本。入力欄のすぐ上、注意書きの上に出す */
