@@ -310,9 +310,10 @@ def _pace(now):
     return out
 
 
-def summary(day=None):
+def summary(day=None, pace=True):
+    """pace=False は定期実行用。公開からの累計（全行と工房のログを読み直す重い処理）を省く。"""
     now, start, end = _day(day)
-    fp, fj = TASKS.submit(_pace, now), TASKS.submit(_rejected, start, end)
+    fp, fj = (TASKS.submit(_pace, now) if pace else None), TASKS.submit(_rejected, start, end)
     fm, fo = TASKS.submit(_metrics, start, end, 86400), TASKS.submit(slides_view.api_usd_by_hour, start, end)
     rows = _rows(start, end, ["created_at", "anon", "tools", "first_ms", "feedback", "via", "x_search", "usage.calls"])
     m = fm.result()
@@ -324,7 +325,7 @@ def summary(day=None):
             "tools": tools, "cost": cost, "total": sum(cost.values()), "aws_total": _aws(cost),
             "feedback": {v: sum(1 for r in rows if r.get("feedback") == v) for v in ("good", "bad")},
             "via": {v: sum(1 for r in rows if r.get("via") == v) for v in VIA_LABELS},
-            "pace": fp.result()}
+            "pace": fp.result() if fp else None}
 
 
 def hours(day):
@@ -536,7 +537,7 @@ def _ban_post(row, cause, opened=False):
 # 会話の判定で止まった停止（turn_flag.py の source）。cumulative は累積6点、auto は累積判定より前の1回判定。
 JUDGED_SOURCES = ("cumulative", "auto")
 SOURCE_LABELS = {"cumulative": "累積判定で自動停止", "auto": "1回の判定で自動停止（累積判定より前の仕組み）",
-                 "guard": "防御役による自動停止", "manual": "手動停止", "linked": "関連IDによる停止"}
+                 "manual": "手動停止", "linked": "関連IDによる停止"}
 # turn_flag.py の POINTS と同じ種別。点数は会話の行の moderation_delta をそのまま出す。
 KIND_LABELS = {"pressure": "攻撃的な要求の繰り返し", "probing": "非公開情報の探索", "repeated_scope": "範囲外の要求の繰り返し",
                "private_question": "私的な属性・財産の質問", "severe": "重い違反（脅し・差別・侮辱など）"}
@@ -654,7 +655,7 @@ def _ban_row(b):
 
 
 def _ban_list(items):
-    """会話の判定で止まった人をカードで前に出し、手動・関連・防御役の停止は下に畳む。"""
+    """会話の判定で止まった人をカードで前に出し、手動・関連の停止は下に畳む。"""
     judged = [b for b in items if b.get("source") in JUDGED_SOURCES]
     others = [b for b in items if b.get("source") not in JUDGED_SOURCES]
     out = [f'<section class="judged"><h2>会話の判定で止めた人 <small>{len(judged)}人・新しい順</small></h2>']
@@ -1714,8 +1715,8 @@ def _rolling_cost(now):
 
 def handler(event, _context):
     if "requestContext" not in event:
-        # 定期実行：今日の概算コストをメトリクスに出す（EMF）
-        d = summary()
+        # 定期実行：今日の概算コストをメトリクスに出す（EMF）。費用のアラームの元なので、表示用の重い集計は省いて必ず間に合わせる
+        d = summary(pace=False)
         print(json.dumps({"_aws": {"Timestamp": int(d["now"].timestamp() * 1000), "CloudWatchMetrics": [{
             "Namespace": "MinorunAgent", "Dimensions": [[]],
             "Metrics": [{"Name": "EstimatedCostUsd", "Unit": "None"}, {"Name": "QuestionsToday", "Unit": "Count"},

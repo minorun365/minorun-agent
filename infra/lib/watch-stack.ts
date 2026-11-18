@@ -103,6 +103,28 @@ export class WatchStack extends cdk.Stack {
 
     }
 
+    // 失敗の集約（2026-11-19 みのるん決定）。回答は返り続けるが中の一部だけが失敗する型は、部品ごとのアラームでは拾えない
+    // （Brave の検索が10/25から3週間すべて失敗していた）。メールは送らず、ダッシュボードと毎朝の見回り（Claude Code）で読む
+    new logs.MetricFilter(this, 'ToolErrorFilter', {
+      logGroup: logs.LogGroup.fromLogGroupName(this, 'SpanLogs', 'aws/spans'),
+      // aws/spans は同じアカウントの別アプリも書くので、このアプリの Runtime（minorun_agent*）が出した道具の失敗だけを数える
+      filterPattern: logs.FilterPattern.literal(
+        '{ $.name = "execute_tool*" && $.status.code = "ERROR" && $.resource.attributes.[\'service.name\'] = "minorun_agent*" }'),
+      metricNamespace: NS, metricName: 'ToolErrors', metricValue: '1',
+    });
+    // Runtime とスライド工房が握りつぶして続けた失敗（{"after_answer_error": ...} のような「〜_error」の行）
+    for (const [id, group] of [
+      ['LogErrorV1Filter', `/aws/bedrock-agentcore/runtimes/${props.agent.legacyRuntime.attrAgentRuntimeId}-DEFAULT`],
+      ['LogErrorV2Filter', `/aws/bedrock-agentcore/runtimes/${props.agent.runtimeV2.attrAgentRuntimeId}-DEFAULT`],
+      ['LogErrorSlidesFilter', props.slides.logGroup],
+    ] as const) {
+      new logs.MetricFilter(this, id, {
+        logGroup: logs.LogGroup.fromLogGroupName(this, `${id}Logs`, group),
+        filterPattern: logs.FilterPattern.literal('%_error.: %'),
+        metricNamespace: NS, metricName: 'LogErrors', metricValue: '1',
+      });
+    }
+
     // オンライン評価（2026-10-25 決定：全セッション。同日に停止）。結果は専用のロググループと Bedrock-AgentCore/Evaluations へ
     // （名前空間を変える metricsNamespace は API にはあるが CloudFormation の型にまだ無い）
     const evalRole = new iam.Role(this, 'EvaluationRole', {
@@ -225,7 +247,8 @@ export class WatchStack extends cdk.Stack {
       architecture: lambda.Architecture.ARM_64,
       handler: 'usage_page.handler',
       code: lambda.Code.fromAsset(path.join(currentDir, '../lambda/usage-page'), { exclude: ['**/__pycache__', '**/*.pyc'] }),
-      timeout: cdk.Duration.seconds(20),
+      // 15分おきの概算コストの計測は会話の表を読むので、表が育つと20秒を超えることがあった（11/15〜18 に12回打ち切り、費用のアラームの元が欠けた）
+      timeout: cdk.Duration.seconds(60),
       memorySize: 1024,
       logGroup: pageLogs,
       environment: {
@@ -430,8 +453,8 @@ export class WatchStack extends cdk.Stack {
       schedule: events.Schedule.cron({ minute: '0', hour: '18', weekDay: 'SAT' }), // 日本時間の日曜3時
       targets: [new targets.LambdaFunction(pruneImages, { retryAttempts: 0 })],
     });
-    // 失敗したときだけ1通。週1回の処理なので、戻ったことの通知は送らない
-    new cw.Alarm(this, 'PruneImagesFailAlarm', {
+    // 急ぎではないのでメールは送らない（2026-11-19 みのるん決定：メールは攻撃・広い停止・費用だけ）。ダッシュボードと毎朝の見回りで読む
+    const pruneAlarm = new cw.Alarm(this, 'PruneImagesFailAlarm', {
       alarmName: 'みのるんエージェント｜イメージの掃除が失敗した',
       alarmDescription: '週1回のイメージ掃除（minorun-agent-prune-images）が失敗した。何も消していないか、途中まで消した状態。Lambda のログを見る',
       metric: pruneImages.metricErrors({ period: cdk.Duration.minutes(5), statistic: 'Sum' }),
@@ -439,11 +462,13 @@ export class WatchStack extends cdk.Stack {
       comparisonOperator: cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       evaluationPeriods: 1,
       treatMissingData: cw.TreatMissingData.NOT_BREACHING,
-    }).addAlarmAction(new cwActions.SnsAction(alertTopic));
+    });
 
     // 致命的なエラーのメール（2026-10-25、先行公開の開始に合わせて）。メールの件名はアラーム名がそのまま入るので日本語にする
+    const mailAlarms: cw.IAlarm[] = [costAlarm, rollingCostAlarm];
     const alarm = (id: string, name: string, description: string, props2: Omit<cw.AlarmProps, 'alarmName' | 'alarmDescription'>) => {
       const a2 = new cw.Alarm(this, id, { alarmName: `みのるんエージェント｜${name}`, alarmDescription: description, ...props2 });
+      mailAlarms.push(a2);
       a2.addAlarmAction(new cwActions.SnsAction(alertTopic));
       a2.addOkAction(new cwActions.SnsAction(alertTopic));
       return a2;
@@ -471,6 +496,28 @@ export class WatchStack extends cdk.Stack {
         usingMetrics: { e: interceptorMetric('Errors'), t: interceptorMetric('Throttles') },
       }),
       threshold: 1, comparisonOperator: gte, evaluationPeriods: 1, treatMissingData: cw.TreatMissingData.NOT_BREACHING,
+    });
+
+    // 失敗の集約のアラーム。メールは送らず、ダッシュボードのアラームの欄にだけ出る
+    const LAMBDAS = ['interceptor', 'usage-page', 'turn-metrics', 'turn-flag', 'sessions-refresh', 'x-search', 'prune-images'];
+    const lambdaErrors = Object.fromEntries(LAMBDAS.map((name, i) => [`l${i}`, new cw.Metric({
+      namespace: 'AWS/Lambda', metricName: 'Errors', statistic: 'Sum', period: cdk.Duration.minutes(5),
+      dimensionsMap: { FunctionName: `minorun-agent-${name}` },
+    })]));
+    const failures = new cw.MathExpression({
+      expression: ['FILL(t, 0)', 'FILL(g, 0)', ...Object.keys(lambdaErrors).map((k) => `FILL(${k}, 0)`)].join(' + '),
+      label: '失敗の合計', period: cdk.Duration.minutes(5),
+      usingMetrics: {
+        t: new cw.Metric({ namespace: NS, metricName: 'ToolErrors', statistic: 'Sum', period: cdk.Duration.minutes(5) }),
+        g: new cw.Metric({ namespace: NS, metricName: 'LogErrors', statistic: 'Sum', period: cdk.Duration.minutes(5) }),
+        ...lambdaErrors,
+      },
+    });
+    const failuresAlarm = new cw.Alarm(this, 'FailuresAlarm', {
+      alarmName: 'みのるんエージェント｜失敗が出ている（メールなし）',
+      alarmDescription: '道具の失敗・ログの「〜_error」・Lambda のエラーの合計が5分間に1件以上。毎朝の見回りが内訳を読んで直す',
+      metric: failures, threshold: 1, comparisonOperator: cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1, treatMissingData: cw.TreatMissingData.NOT_BREACHING,
     });
 
     // ダッシュボード（1時間ごと）
@@ -502,6 +549,17 @@ export class WatchStack extends cdk.Stack {
       dashboardName: 'minorun-agent',
       defaultInterval: cdk.Duration.days(3),
       widgets: [
+        [
+          new cw.AlarmStatusWidget({
+            title: 'アラーム（上の2つはメールなし）', width: 8, height: 6,
+            alarms: [failuresAlarm, pruneAlarm, ...mailAlarms],
+          }),
+          new cw.GraphWidget({
+            title: '失敗の内訳（1時間ごと）', width: 16, height: 6,
+            left: [m('ToolErrors', 'Sum', '道具の失敗'), m('LogErrors', 'Sum', 'ログの「〜_error」'), m('AgentErrors', 'Sum', 'エージェントの失敗'),
+              search(`SEARCH('{AWS/Lambda,FunctionName} MetricName="Errors" FunctionName="minorun-agent-"', 'Sum', 3600)`, '')],
+          }),
+        ],
         [
           new cw.GraphWidget({
             title: '質問数と断った数（1時間ごと）', width: 12,

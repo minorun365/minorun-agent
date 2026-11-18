@@ -1,4 +1,5 @@
 [
+ {"q": "ここ数日でネットに出たre:Invent 2026の参加ブログを1つ教えて", "tools": ["search_recent"]},
  {"q": "AWS re:Inventって何？", "tools": ["search_2026", "search_past"]},
  {"q": "バッジはどこで受け取る？", "tools": ["search_2026"]},
  {"q": "基調講演はいつある？", "tools": ["search_sessions", "search_2026"]},

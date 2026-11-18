@@ -8,8 +8,10 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import os
 import pathlib
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -22,6 +24,55 @@ INTERNAL = re.compile(r"search_\w+|get_announcements|show_map|\bnow\b\(|ツー�
 ASKING = re.compile(r"(調べ|取得し|確認し|検索し)ましょうか")
 LINK = re.compile(r"\[([^\]\n]{1,30})\]\((https?://[^\s)]+)\)")
 SYSTEM_LEAK = re.compile(r"# 人柄|# 答える範囲|# ツールの使い方|あなたは「みのるんエージェント」です")
+
+
+# 道具が中で失敗しても、モデルは別の道具で答えを作るので本文だけでは気づけない（Brave の失敗を3週間見逃した）。
+# 問いのあと、トレース（us-west-2 の aws/spans）で会話ID ごとに execute_tool の成否を読み、ERROR が1件でもあれば NG にする
+SPAN_WAIT_S = 240
+
+
+def _logs(*args):
+    env = {**os.environ, "AWS_PROFILE": os.environ.get("AWS_PROFILE", "sandbox")}
+    out = subprocess.run(["aws", "logs", *args, "--region", "us-west-2", "--output", "json"],
+                         capture_output=True, text=True, timeout=60, env=env, check=True)
+    return json.loads(out.stdout)
+
+
+def tool_spans(sessions, start, end):
+    """会話IDごとの execute_tool のスパンを [{session, tool, status, message}] で返す。"""
+    ids = ", ".join(json.dumps(x) for x in sessions)
+    q = ("fields attributes.session.id as session, attributes.gen_ai.tool.name as tool, status.code as status, "
+         f"status.message as message | filter name like /^execute_tool / and attributes.session.id in [{ids}] | limit 10000")
+    qid = _logs("start-query", "--log-group-name", "aws/spans", "--start-time", str(int(start)),
+                "--end-time", str(int(end)), "--query-string", q)["queryId"]
+    for _ in range(60):
+        r = _logs("get-query-results", "--query-id", qid)
+        if r["status"] in ("Complete", "Failed", "Cancelled", "Timeout"):
+            break
+        time.sleep(2)
+    if r["status"] != "Complete":
+        raise RuntimeError(f"トレースの検索が {r['status']}")
+    return [{f["field"]: f["value"] for f in row} for row in r["results"]]
+
+
+def check_tool_spans(rows, start):
+    """rows に道具の失敗を NG として書き足す。スパンが届くまで最大 SPAN_WAIT_S 秒待つ。"""
+    used = {r["session"] for r in rows if r.get("tools")}
+    sessions = sorted({r["session"] for r in rows})
+    deadline = time.time() + SPAN_WAIT_S
+    while True:
+        spans = tool_spans(sessions, start - 60, time.time() + 60)
+        seen = {s.get("session") for s in spans}
+        if used <= seen or time.time() > deadline:
+            break
+        time.sleep(20)
+    last = {r["session"]: r for r in rows}  # 何往復かある問いは最後の行にまとめて書く
+    for s in spans:
+        if s.get("status") == "ERROR":
+            last[s["session"]]["ng"].append(f"道具 {s.get('tool')} が失敗: {s.get('message') or '理由なし'}")
+    for sid in sorted(used - seen):
+        last[sid]["ng"].append("道具を使ったのにトレースに成否が無い（届くのが遅い・会話IDの対応が変わった）")
+    return spans
 
 
 def ask(url, text, anon, session):
@@ -129,8 +180,24 @@ def main():
     ap.add_argument("--url", default=DEFAULT_URL)
     ap.add_argument("--only", type=int, help="先頭の N 件だけ")
     ap.add_argument("--workers", type=int, default=3)
+    ap.add_argument("--cases", default="cases.json", help="問いのファイル（tests/e2e/ 内）。smoke.json は全道具を1回ずつ呼ぶ毎朝の見回り用")
+    ap.add_argument("--no-spans", action="store_true", help="トレースで道具の成否を読まない（AWS に入れない環境だけ）")
+    ap.add_argument("--check-session", action="append", default=[],
+                    help="問いを流さず、過去の会話IDの道具の成否だけを読む（--since-hours 前から）")
+    ap.add_argument("--since-hours", type=float, default=24)
     a = ap.parse_args()
-    cases = json.loads((HERE / "cases.json").read_text())[: a.only]
+    if a.check_session:
+        rows = [{"session": s, "q": s, "ng": [], "tools": ["?"]} for s in a.check_session]
+        global SPAN_WAIT_S
+        SPAN_WAIT_S = 0
+        spans = check_tool_spans(rows, time.time() - a.since_hours * 3600)
+        for s in spans:
+            print(s.get("status"), s.get("tool"), s.get("session"), s.get("message") or "")
+        for r in rows:
+            print("NG  " if r["ng"] else "OK  ", r["session"], " / ".join(r["ng"]))
+        raise SystemExit(1 if any(r["ng"] for r in rows) else 0)
+    started = time.time()
+    cases = json.loads((HERE / a.cases).read_text())[: a.only]
     rows = []
     with cf.ThreadPoolExecutor(a.workers) as ex:
         futs = []
@@ -140,6 +207,16 @@ def main():
         for f in futs:
             rows += f.result()
     rows.sort(key=lambda r: r["i"])
+    if a.no_spans:
+        print("※ --no-spans：道具の成否はトレースで確かめていない")
+    else:
+        try:
+            spans = check_tool_spans(rows, started)
+            bad = sum(1 for s in spans if s.get("status") == "ERROR")
+            print(f"道具のスパン {len(spans)}件（失敗 {bad}件）")
+        except Exception as e:
+            for r in rows:
+                r["ng"].append(f"道具の成否をトレースで確かめられない: {type(e).__name__}: {e}"[:300])
     for r in rows:
         mark = "NG  " if r["ng"] else ("WARN" if r["warn"] else "OK  ")
         print(f"{mark} {r['q'][:28]:<28} {r.get('chars','-'):>4}字 最初{r['first_s']}秒 {' / '.join(r['ng'] + r['warn'])}")
@@ -149,7 +226,7 @@ def main():
     print(f"\n{len(rows)}問：NG {ng}・WARN {warn}・OK {len(rows) - ng - warn}／最初の文字まで 中央値 {firsts[len(firsts)//2] if firsts else '-'}秒")
     rep = HERE / "reports"
     rep.mkdir(exist_ok=True)
-    (rep / time.strftime("%Y%m%d-%H%M%S.json")).write_text(json.dumps(rows, ensure_ascii=False, indent=1))
+    (rep / time.strftime(f"%Y%m%d-%H%M%S-{Path(a.cases).stem}.json")).write_text(json.dumps(rows, ensure_ascii=False, indent=1))
     raise SystemExit(1 if ng else 0)
 
 
