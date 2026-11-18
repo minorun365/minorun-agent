@@ -465,6 +465,9 @@ q.addEventListener('input', () => { sendBtn.classList.toggle('on', canSend()); g
 q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submitTyped(); } });
 q.addEventListener('blur', () => setTimeout(() => { if (has('composing') && !canSend() && !picking && document.activeElement !== q) closeCompose(); }, 120));
 bindSubmitButton(sendBtn, submitTyped);
+// 入力をやめて元の画面へ戻る。書きかけの文と添付は残し、次に開いたときに続きから書ける
+bindSubmitButton($('#back'), closeCompose);
+q.addEventListener('keydown', (e) => { if (e.key === 'Escape' && has('composing')) { e.preventDefault(); closeCompose(); } });
 stage.addEventListener('pointerdown', (e) => { if (has('composing') && !dock.contains(e.target as Node)) closeCompose(); });
 
 // 送った質問が丸い玉に縮み、画面の右側を弧を描いて回り込んで、キャラの頭の上へ飛んでいく
