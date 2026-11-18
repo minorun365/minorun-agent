@@ -1,0 +1,15 @@
+[
+ {"q": "re:Invent 2026のバッジはどこで受け取る？", "tools": ["search_2026"]},
+ {"q": "去年のre:Inventで、キーノートは何時ごろから並んでた？", "tools": ["search_past"]},
+ {"q": "re:Invent 2026でAgentCoreのセッションはある？", "tools": ["search_sessions"]},
+ {"q": "いまラスベガスは何時？", "tools": ["now"]},
+ {"q": "会場どうしの位置関係が分かる地図を見せて", "tools": ["show_map"]},
+ {"q": "みのるんが現地から出した速報はある？", "tools": ["get_announcements"]},
+ {"q": "ここ10日でAWSのWhat's Newに出たBedrockの発表を1つ教えて", "tools": ["search_whats_new"]},
+ {"q": "AWS公式ブログで最近出たAgentCoreの記事を1つ教えて", "tools": ["search_aws_blog"]},
+ {"q": "ここ数日でネットに出たre:Invent 2026の参加ブログを1つ教えて", "tools": ["search_recent"]},
+ {"q": "JAWS-UGの「のぐモン」さんってどんな人？", "tools": ["search_japanese", "search_2026"]},
+ {"q": "Xで今日のre:Invent関連の投稿を1つ探して", "tools": ["search_x_posts"]},
+ {"q": "https://aws.amazon.com/jp/events/reinvent/ のページには何が書いてある？", "tools": ["fetch_url"]},
+ {"q": "Web検索で、ラスベガスの今週の天気を調べて", "tools": ["search_web", "search_recent"]}
+]
