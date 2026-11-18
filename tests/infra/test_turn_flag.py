@@ -114,3 +114,35 @@ class BanTests(unittest.TestCase):
         with patch.object(m, 'process_conversation') as process:
             m.handler({'Records': records}, None)
         process.assert_called_once_with(self.keys)
+
+
+class ClaudeApiFirst(unittest.TestCase):
+    """仕分けも Claude API を先に使い、使えなければ Bedrock で聞く。"""
+
+    def setUp(self):
+        self.tf = tf = m
+        self.saved = dict(tf.API)
+        self.addCleanup(lambda: tf.API.update(self.saved))
+
+    def _msg(self, text):
+        from types import SimpleNamespace as NS
+        return NS(content=[NS(type="text", text=text)])
+
+    def test_uses_claude_api_when_on(self):
+        client = MagicMock()
+        client.messages.create.return_value = self._msg("ok")
+        self.tf.API.update(off=None, busy_until=0.0, client=client)
+        with patch.object(self.tf.bedrock, "converse") as converse:
+            self.assertEqual(self.tf._ask("q"), "ok")
+            converse.assert_not_called()
+        self.assertEqual(client.messages.create.call_args.kwargs["model"], self.tf.API_MODEL)
+
+    def test_falls_back_to_bedrock_and_pauses_on_failure(self):
+        client = MagicMock()
+        client.messages.create.side_effect = RuntimeError("boom")
+        self.tf.API.update(off=None, busy_until=0.0, client=client)
+        with patch.object(self.tf.bedrock, "converse", return_value={
+                "output": {"message": {"content": [{"text": "bedrock"}]}}}):
+            self.assertEqual(self.tf._ask("q"), "bedrock")
+        self.assertIsNone(self.tf.API["off"])
+        self.assertGreater(self.tf.API["busy_until"], 0)

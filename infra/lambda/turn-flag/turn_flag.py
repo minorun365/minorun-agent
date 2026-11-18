@@ -23,6 +23,13 @@ RULE_VERSION = json.loads(Path(__file__).with_name("moderation.local.json").read
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
 bedrock = boto3.client("bedrock-runtime")
+# 仕分けも Claude API（Max プランの API クレジット）を先に使い、使えなければ Bedrock で聞く（2026-11-19）
+API_MODEL = os.environ.get("MODEL_API", "claude-haiku-5-5")
+WIF = {"federation_rule_id": os.environ.get("CLAUDE_WIF_RULE_ID", ""),
+       "organization_id": os.environ.get("CLAUDE_WIF_ORGANIZATION_ID", ""),
+       "service_account_id": os.environ.get("CLAUDE_WIF_SERVICE_ACCOUNT_ID") or None}
+API = {"client": None, "busy_until": 0.0,
+       "off": None if os.environ.get("ANTHROPIC_PRIMARY", "off") == "on" and WIF["federation_rule_id"] else "switched_off"}
 ddb = boto3.client("dynamodb")
 sns = boto3.client("sns")
 
@@ -36,10 +43,51 @@ def classify(question, answer):
     return decision["flag"], decision["reason"]
 
 
-def classify_turn(question, answer, history):
-    if not SYSTEM or not POINTS or LIMIT <= 0 or not RULE_VERSION:
-        raise RuntimeError("system.local.txt と moderation.local.json を設定してください")
-    text = json.dumps({"history": history, "question": question[:2000], "answer_head": (answer or "")[:600]}, ensure_ascii=False)
+def _identity_token():
+    sts = boto3.client("sts", region_name="us-east-1")  # GetWebIdentityToken は地域の窓口だけで受け付ける
+    return sts.get_web_identity_token(Audience=["https://api.anthropic.com"], SigningAlgorithm="RS256",
+                                      DurationSeconds=900)["WebIdentityToken"]
+
+
+def _permanent(error):
+    """クレジット切れ・認証の取り消しなど、待っても直らない失敗か（agent/fallback.py と同じ線引き）。"""
+    import anthropic
+    if isinstance(error, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return True
+    if isinstance(error, anthropic.WorkloadIdentityError):
+        return not re.search(r"HTTP 5\d\d", str(error))
+    if type(error).__name__ == "ClientError" and "GetWebIdentityToken" in str(error):
+        return True
+    if isinstance(error, anthropic.APIStatusError):
+        if error.status_code == 402 or getattr(error, "type", None) == "billing_error":
+            return True
+        if error.status_code == 400 and "credit balance" in str(error).lower():
+            return True
+    return False
+
+
+def _ask(text):
+    """Claude API を先に呼び、使えないとき（断られた・混雑・通信の失敗）は同じ依頼を Bedrock で聞く。"""
+    if not API["off"] and time.time() >= API["busy_until"]:
+        try:
+            import anthropic
+            import httpx
+            if API["client"] is None:
+                API["client"] = anthropic.Anthropic(
+                    credentials=anthropic.WorkloadIdentityCredentials(identity_token_provider=_identity_token, **WIF),
+                    max_retries=0, timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0))
+            msg = API["client"].messages.create(
+                model=API_MODEL, system=SYSTEM, max_tokens=2000,
+                messages=[{"role": "user", "content": text}], output_config={"effort": "low"})
+            return "".join(b.text for b in msg.content if b.type == "text")
+        except Exception as e:
+            if isinstance(e, ImportError) or _permanent(e):
+                API["off"] = type(e).__name__
+                route = "disabled"
+            else:  # 混雑・一時的な障害・想定外。その回は Bedrock、60秒後に Claude API へ戻す
+                API["busy_until"] = time.time() + 60
+                route = "busy"
+            print(json.dumps({"model_route": route, "reason": type(e).__name__, "detail": str(e)[:300]}))
     res = bedrock.converse(
         modelId=MODEL, system=[{"text": SYSTEM}],
         messages=[{"role": "user", "content": [{"text": text}]}],
@@ -47,7 +95,14 @@ def classify_turn(question, answer, history):
         inferenceConfig={"maxTokens": 2000},
         additionalModelRequestFields={"output_config": {"effort": "low"}},
     )
-    raw = "".join(b.get("text", "") for b in res["output"]["message"]["content"])
+    return "".join(b.get("text", "") for b in res["output"]["message"]["content"])
+
+
+def classify_turn(question, answer, history):
+    if not SYSTEM or not POINTS or LIMIT <= 0 or not RULE_VERSION:
+        raise RuntimeError("system.local.txt と moderation.local.json を設定してください")
+    text = json.dumps({"history": history, "question": question[:2000], "answer_head": (answer or "")[:600]}, ensure_ascii=False)
+    raw = _ask(text)
     for m in reversed(re.findall(r"\{[^{}]*\}", raw)):
         try:
             data = json.loads(m)

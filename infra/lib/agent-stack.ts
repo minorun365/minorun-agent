@@ -126,6 +126,13 @@ export class AgentStack extends cdk.Stack {
       actions: ['secretsmanager:GetSecretValue'],
       resources: [`arn:${this.partition}:secretsmanager:${this.region}:${this.account}:secret:bedrock-agentcore-identity!default/apikey/brave-*`],
     }));
+    // 入口の Gateway 経由の呼び出しには workload token が付かないので、Brave のキーを読むための名前付きワークロード ID を持つ
+    const braveWorkload = new agentcore.CfnWorkloadIdentity(this, 'BraveWorkload', { name: 'minorun-agent-brave' });
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ['bedrock-agentcore:GetWorkloadAccessToken'],
+      resources: [`arn:${this.partition}:bedrock-agentcore:${this.region}:${this.account}:workload-identity-directory/default`,
+        `arn:${this.partition}:bedrock-agentcore:${this.region}:${this.account}:workload-identity-directory/default/workload-identity/${braveWorkload.name}`],
+    }));
 
     // 回答は Claude API を先に使う（agent/fallback.py。使えなければ Bedrock）。Claude API へは ID 連携で入り、
     // 実行ロールの身元を示す証明書を STS からもらう。アカウントの Outbound web identity federation を有効にしてある
@@ -198,6 +205,7 @@ export class AgentStack extends cdk.Stack {
         SLIDES_TOTAL_DAILY: '50',
         // 回数を数えない利用者（ログインした人のハッシュのカンマ区切り。運営者のテスト用）
         SLIDES_UNLIMITED: process.env.SLIDES_UNLIMITED ?? '',
+        BRAVE_WORKLOAD: braveWorkload.name,
       },
     };
     // V1 は切り戻し用に現行イメージを固定し、V2 と保存先・実行権限を共有する。

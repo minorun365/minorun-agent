@@ -78,10 +78,16 @@ def _identity_token():
                                       DurationSeconds=900)["WebIdentityToken"]
 
 
+_CREDS = {}
+
+
 def credentials():
-    return anthropic.WorkloadIdentityCredentials(
-        identity_token_provider=_identity_token, federation_rule_id=RULE_ID,
-        organization_id=ORGANIZATION_ID, service_account_id=SERVICE_ACCOUNT_ID)
+    """回答と補助で1つの通行証を使い回す（入れ物ごとの交換を1回で済ませ、補助の初回を遅らせない）。"""
+    if "creds" not in _CREDS:
+        _CREDS["creds"] = anthropic.WorkloadIdentityCredentials(
+            identity_token_provider=_identity_token, federation_rule_id=RULE_ID,
+            organization_id=ORGANIZATION_ID, service_account_id=SERVICE_ACCOUNT_ID)
+    return _CREDS["creds"]
 
 
 class FallbackModel(Model):
@@ -144,6 +150,53 @@ class FallbackModel(Model):
                     _log("unexpected", reason=type(e).__name__, detail=str(e)[:300])
         async for event in self.fallback.stream(messages, tool_specs, system_prompt, **kwargs):
             yield event
+
+
+class _Aux:
+    """補助の1往復（話題の判定・要約）の Claude API の状態。混雑の待ちは回答と分けて持つ。"""
+
+    client = None
+    busy_until = 0.0
+
+
+def warm_up(model_id):
+    """最初の質問の前に Claude API の通行証を取っておく。会話ごとに入れ物が新しく立つので、
+    これが無いと補助の初回（次の質問の候補など）が交換を待って、回答の後の1秒の待ちに間に合わない。
+    トークン数を数える窓口は費用がかからない。失敗しても Claude API は止めない（本番の呼び出しで判断する）。"""
+    if _State.disabled_reason:
+        return
+    if _Aux.client is None:
+        _Aux.client = anthropic.Anthropic(credentials=credentials(), max_retries=0, timeout=TIMEOUT)
+    _Aux.client.messages.count_tokens(model=model_id, messages=[{"role": "user", "content": "ping"}])
+
+
+def ask_text(model_id, system, text, max_tokens, effort):
+    """補助の1往復を Claude API で聞く。使えないときは None を返し、呼び出し側が Bedrock で聞く。
+
+    返すのは (本文, Bedrock と同じ形の使用量)。クレジット切れなど待っても直らない失敗は回答と同じく
+    この入れ物で以後 Claude API を止め、混雑や想定外の失敗は補助の側だけ60秒 Bedrock へ回す。
+    """
+    if _State.disabled_reason or time.monotonic() < _Aux.busy_until:
+        return None
+    try:
+        if _Aux.client is None:
+            _Aux.client = anthropic.Anthropic(credentials=credentials(), max_retries=0, timeout=TIMEOUT)
+        msg = _Aux.client.messages.create(
+            model=model_id, system=system, max_tokens=max_tokens,
+            messages=[{"role": "user", "content": text}], output_config={"effort": effort})
+    except Exception as e:
+        if _is_permanent(e):
+            _State.disabled_reason = type(e).__name__
+            _log("disabled", reason=type(e).__name__, detail=str(e)[:300], part="aux")
+        else:
+            _Aux.busy_until = time.monotonic() + RETRY_AFTER_BUSY
+            _log("busy" if _is_transient(e) else "unexpected", reason=type(e).__name__, detail=str(e)[:300], part="aux")
+        return None
+    u = msg.usage
+    tokens = {"inputTokens": u.input_tokens, "outputTokens": u.output_tokens,
+              "cacheReadInputTokens": u.cache_read_input_tokens or 0,
+              "cacheWriteInputTokens": u.cache_creation_input_tokens or 0}
+    return "".join(b.text for b in msg.content if b.type == "text"), tokens
 
 
 def anthropic_model(model_class, model_id, max_tokens, effort, cache_config):

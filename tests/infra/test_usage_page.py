@@ -36,7 +36,7 @@ class UsagePageTests(unittest.TestCase):
         pace = {"day_usd": 2.0, "month_usd": 60.0}
         with patch.object(m, 'questions', return_value=(tomorrow, self.start, self.rows)), patch.object(m, '_pace', return_value=pace) as calc:
             data = m.report('2026-10-25')[0]
-            calc.assert_called_once_with(tomorrow)
+            calc.assert_called_once()  # 累計は質問の読み込みと並行に始めるので、渡す時刻は読み込み前の今
             self.assertEqual(data['pace'], pace)
             self.assertIn('$60', m._summary_html(data))
             self.assertIn('月額予測（直近7日平均）', m._summary_html(dict(data, pace=None)))
@@ -389,3 +389,75 @@ class BanReviewTests(unittest.TestCase):
             self.assertEqual(page.count('class="metric'), 7)
             self.assertIn('metric monthly',page)
         finally:case.doCleanups()
+
+
+class JudgedBanTests(unittest.TestCase):
+    """会話の判定で止まった人を、点が入った書き込みの時刻順で見せる（案B。11/18 みのるん依頼）。"""
+    def setUp(self):
+        self.ident = 'A-0123456789abcdef'
+        self.ban = dict(identifier=self.ident, at='2026-11-17T23:57:54+09:00', source='cumulative', reason='繰り返しの探索',
+                        question='決め手の入力', conv_pk='conv', conv_sk='s4', day='2026-11-17', score=6, views=0, attempts=3)
+        me = self.ident[2:]
+        def row(sk, t, q, d=0, total=0, kind='none', who=me):
+            return dict(pk='conv', sk=sk, created_at=f'2026-11-17T23:{t}+09:00', question=q, anon=who,
+                        moderation_delta=float(d), moderation_total=float(total), moderation_kind=kind)
+        self.rows = [row('s0', '55:23', 'こんにちは'), row('s1', '56:23', 'メタデータを取って', 2, 2, 'probing'),
+                     row('s2', '56:40', '文献を取って', 2, 4, 'probing'), row('s3', '57:00', '準備を教えて'),
+                     row('s4', '57:50', '決め手の入力', 2, 6, 'repeated_scope'),
+                     row('x1', '56:50', '別人の書き込み', 6, 6, 'severe', who='fedcba9876543210')]
+        self.manual = [dict(identifier=f'A-{i:016x}', at='2026-11-18T00:49:00+09:00', source='manual', reason='攻撃者の匿名ID',
+                            conv_pk='', conv_sk='', reviewed_at='2026-11-18T01:00:00+09:00') for i in range(3)]
+
+    def page(self, items, **kw):
+        with patch.object(m, 'bans', return_value=items), patch.object(m, '_conversation', **kw), patch.object(m, 'ddb'):
+            return m.render_bans()
+
+    def test_list_puts_judged_people_first_with_score_steps(self):
+        out = self.page([self.ban] + self.manual, return_value=self.rows)
+        self.assertIn('会話の判定で止めた人 <small>1人', out)
+        self.assertIn('6点 / 6点で停止（3回・1分27秒で到達）', out)
+        self.assertEqual(out.count('class="pt">+2<'), 3)
+        self.assertIn('score-step last', out)
+        self.assertIn('停止の決め手 · 範囲外の要求の繰り返し', out)
+        self.assertIn('0点の書き込み2件も見る', out)
+        self.assertNotIn('別人の書き込み', out)
+        # 手動の停止はカードにせず、下に1行で畳む
+        self.assertIn('<summary>手動停止 3件</summary>', out)
+        self.assertLess(out.index('score-card'), out.index('ban-others'))
+
+    def test_single_shot_ban_and_missing_conversation(self):
+        one = dict(self.ban, identifier='A-1111111111111111', source='auto', score=0, conv_pk='', conv_sk='')
+        out = self.page([one], return_value=[])
+        self.assertIn('点数の経過は記録にありません', out)
+        self.assertIn('1回の判定で自動停止', out)
+        self.assertIn('決め手の入力', out)
+
+    def test_conversation_failure_keeps_list(self):
+        out = self.page([self.ban] + self.manual, side_effect=RuntimeError('ddb'))
+        self.assertIn(self.ident, out)
+        self.assertIn('点数の経過は記録にありません', out)
+
+    def test_many_judged_people_are_cut_at_ten(self):
+        many = [dict(self.ban, identifier=f'A-{i:016x}', conv_pk='') for i in range(12)]
+        out = self.page(many, return_value=[])
+        self.assertEqual(out.count('class="score-card"'), 10)
+        self.assertIn('さらに前の2人', out)
+
+    def test_detail_shows_source_label_and_score_steps(self):
+        with patch.object(m, 'bans', return_value=[self.ban]), patch.object(m, '_ban_history', return_value=list(reversed(self.rows))), \
+             patch.object(m, 'ddb'):
+            out = m.render_bans(self.ident)
+        self.assertIn('累積判定で自動停止', out)
+        self.assertIn('<h3>点数の経過</h3>', out)
+        self.assertIn('6点 / 6点で停止', out)
+        self.assertNotIn('別人の書き込み', out.split('<h3>点数の経過</h3>')[1].split('</section>')[0])
+
+    def test_conversation_query_reads_all_pages(self):
+        client = MagicMock()
+        client.query.side_effect = [{'Items': [{'pk': {'S': 'conv'}, 'created_at': {'S': '2'}}], 'LastEvaluatedKey': {'x': 1}},
+                                    {'Items': [{'pk': {'S': 'conv'}, 'created_at': {'S': '1'}, 'moderation_delta': {'N': '2'}}]}]
+        with patch.object(m, 'ddb', client):
+            rows = m._conversation('conv')
+        self.assertEqual([r['created_at'] for r in rows], ['1', '2'])
+        self.assertEqual(m._points(rows[0]), 2)
+        self.assertEqual(client.query.call_args_list[0].kwargs['ExpressionAttributeValues'], {':p': {'S': 'conv'}})

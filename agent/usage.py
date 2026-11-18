@@ -14,6 +14,7 @@ RATES = {
     "global.anthropic.claude-sonnet-5-5": (2, 10, .10, 2.50),
     "global.anthropic.claude-haiku-5-5": (.10, .50, .01, .125),
     "claude-sonnet-5-5": (2, 10, .10, 2.50),
+    "claude-haiku-5-5": (.10, .50, .01, .125),
 }
 KEYS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheWriteInputTokens")
 REVISION = hashlib.sha256(b"".join(p.name.encode() + p.read_bytes()
