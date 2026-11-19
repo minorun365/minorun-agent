@@ -235,6 +235,46 @@ class UsagePageTests(unittest.TestCase):
             event['body']=json.dumps({'actors':['0123456789abcdef'],'csrf':'bad'})
             self.assertEqual(m.handler(event,None)['statusCode'],400)
 
+    def test_passkey_registration_requires_session_and_goes_to_passkeys_add(self):
+        event = {'rawPath':'/admin/passkey', 'requestContext':{'http':{'method':'GET'}}, 'headers':{}}
+        self.assertTrue(m.handler(event,None)['headers']['Location'].endswith('login'))
+        event['cookies']=['up_session='+m._sign({'email':m.ADMIN_EMAIL,'exp':m.time.time()+60})]
+        res = m.handler(event,None)
+        self.assertIn('/passkeys/add?', res['headers']['Location'])
+        self.assertIn('code_challenge=', res['headers']['Location'])
+        self.assertTrue(any(c.startswith('up_login=') for c in res['cookies']))
+        back = {'rawPath':'/admin/callback', 'requestContext':{'http':{'method':'GET'}}, 'headers':{}, 'cookies':event['cookies']}
+        self.assertEqual(m.handler(back,None)['statusCode'],302)
+        self.assertEqual(m.handler({**back,'cookies':[]},None)['statusCode'],400)
+        expired = m.handler({**back,'queryStringParameters':{'result':'invalid_session'}},None)
+        self.assertIn('/oauth2/authorize?', expired['headers']['Location'])
+        pending = m._verify([c for c in expired['cookies'] if c.startswith('up_login=')][0].split(';')[0][len('up_login='):])
+        self.assertEqual(pending['then'],'passkey')
+
+    def test_code_login_offers_passkey_once_until_later(self):
+        import json
+        claims = {'iss': f"https://cognito-idp.us-west-2.amazonaws.com/{m.USER_POOL_ID}", 'aud': m._client(),
+                  'email_verified': True, 'email': m.ADMIN_EMAIL}
+        id_token = 'x.' + m._b64(json.dumps(claims).encode()) + '.y'
+        def callback(then=None, count=0, later=False):
+            pending = m._sign({'state': 's', 'verifier': 'v', 'exp': m.time.time() + 60, **({'then': then} if then else {})})
+            cookies = ['up_login=' + pending] + (['up_pk_later=1'] if later else [])
+            event = {'rawPath': '/admin/callback', 'requestContext': {'http': {'method': 'GET'}}, 'headers': {},
+                     'queryStringParameters': {'code': 'c', 'state': 's'}, 'cookies': cookies}
+            res = MagicMock(); res.__enter__.return_value.read.return_value = json.dumps({'id_token': id_token, 'access_token': 'a'}).encode()
+            with patch.dict(os.environ, {'AWS_REGION': 'us-west-2'}), patch.object(m, 'AUTH_DOMAIN', 'https://auth.example'), patch.object(m.urllib.request, 'urlopen', return_value=res), \
+                 patch.object(m, '_passkey_count', return_value=count):
+                return m.handler(event, None)['headers']['Location']
+        self.assertTrue(callback().endswith('passkey-offer'))
+        self.assertFalse(callback(count=1).endswith('passkey-offer'))
+        self.assertFalse(callback(later=True).endswith('passkey-offer'))
+        self.assertFalse(callback(then='registered').endswith('passkey-offer'))
+        self.assertTrue(callback(then='passkey').endswith('/passkey'))
+        self.assertFalse(callback(count=None).endswith('passkey-offer'))
+        later = m.handler({'rawPath': '/admin/passkey-later', 'requestContext': {'http': {'method': 'GET'}}, 'headers': {},
+                           'cookies': ['up_session=' + m._sign({'email': m.ADMIN_EMAIL, 'exp': m.time.time() + 60})]}, None)
+        self.assertTrue(any(c.startswith('up_pk_later=1') and 'Max-Age=2592000' in c for c in later['cookies']))
+
     def test_owner_lookup_failure_does_not_silently_count_owner_as_public(self):
         with patch.object(m,'_owner_actors',side_effect=RuntimeError('unavailable')):
             with self.assertRaises(RuntimeError):

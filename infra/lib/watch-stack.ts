@@ -233,7 +233,7 @@ export class WatchStack extends cdk.Stack {
       supportedIdentityProviders: [cognito.UserPoolClientIdentityProvider.COGNITO],
       oAuth: {
         flows: { authorizationCodeGrant: true },
-        scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL],
+        scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.COGNITO_ADMIN],  // COGNITO_ADMIN はパスキーの有無を本人のトークンで数えるため
         callbackUrls: [`${props.adminBaseUrl}callback`],
         logoutUrls: [props.adminBaseUrl],
       },
