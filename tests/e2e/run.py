@@ -6,6 +6,7 @@ NG は「直すべきもの」、WARN は「見ておくもの」。終了コー
 """
 import argparse
 import concurrent.futures as cf
+import importlib.util
 import json
 import os
 import os
@@ -25,6 +26,11 @@ ASKING = re.compile(r"(調べ|取得し|確認し|検索し)ましょうか")
 LINK = re.compile(r"\[([^\]\n]{1,30})\]\((https?://[^\s)]+)\)")
 SYSTEM_LEAK = re.compile(r"# 人柄|# 答える範囲|# ツールの使い方|あなたは「みのるんエージェント」です")
 
+
+# 本番と同じ照合（質問の完全一致）で、事前回答で答える問いかを見分ける。手元の agent/prebaked.json を読む
+_spec = importlib.util.spec_from_file_location("agent_prebaked", HERE.parents[1] / "agent" / "prebaked.py")
+_PREBAKED = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_PREBAKED)
 
 # 道具が中で失敗しても、モデルは別の道具で答えを作るので本文だけでは気づけない（Brave の失敗を3週間見逃した）。
 # 問いのあと、トレース（us-west-2 の aws/spans）で会話ID ごとに execute_tool の成否を読み、ERROR が1件でもあれば NG にする
@@ -56,8 +62,9 @@ def tool_spans(sessions, start, end):
 
 
 def check_tool_spans(rows, start):
-    """rows に道具の失敗を NG として書き足す。スパンが届くまで最大 SPAN_WAIT_S 秒待つ。"""
-    used = {r["session"] for r in rows if r.get("tools")}
+    """rows に道具の失敗を NG として書き足す。スパンが届くまで最大 SPAN_WAIT_S 秒待つ。
+    事前回答は道具の札を流すだけで本物の道具を呼ばずスパンも出ないので、成否の有無を問わない。"""
+    used = {r["session"] for r in rows if r.get("tools") and not r.get("prebaked")}
     sessions = sorted({r["session"] for r in rows})
     deadline = time.time() + SPAN_WAIT_S
     while True:
@@ -161,7 +168,10 @@ def run_case(url, i, case):
     anon, session = str(uuid.uuid4()), "e2e-" + uuid.uuid4().hex
     turns = case.get("turns") or [case["q"]]
     out = []
+    parent = None
     for n, q in enumerate(turns):
+        pb = _PREBAKED.lookup(q, parent)
+        parent = q if pb and pb["kind"] == "first" else None
         c = {**case, "q": q} if n == len(turns) - 1 else {"q": q}
         try:
             status, events, first, total = ask(url, q, anon, session)
@@ -170,7 +180,8 @@ def run_case(url, i, case):
             ng, warn, info, first, total = [f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:500]}"], [], {}, None, None
         except Exception as e:
             ng, warn, info, first, total = [f"例外: {type(e).__name__}: {e}"], [], {}, None, None
-        out.append({"i": i, "session": session, "q": q, "ng": ng, "warn": warn, "first_s": first, "total_s": total, **info})
+        out.append({"i": i, "session": session, "q": q, "ng": ng, "warn": warn, "first_s": first, "total_s": total,
+                    "prebaked": bool(pb), **info})
         time.sleep(1)
     return out
 

@@ -62,6 +62,7 @@ AUDIENCES = {"general": "一般利用", "owner": "本人", "test": "動作テス
 PUBLIC_BASE = os.environ.get("PUBLIC_BASE", "https://agent.minoruonda.com/admin/")
 COOKIE_PATH = urllib.parse.urlparse(PUBLIC_BASE).path.rstrip("/") or "/"
 SESSION_DAYS = 7
+PASSKEY_LATER_DAYS = 30  # 「あとで」を押したら、この日数は登録を案内しない
 # 累計コストの起点（公開前の検証を含む、会話の表の最初の行がある日の日本時間0時）
 COST_SINCE = datetime.datetime.fromisoformat(os.environ.get("COST_SINCE", "2026-10-25T00:00:00+09:00"))
 _SESSION_KEY = hashlib.sha256(f"usage-page-session:{TOKEN}".encode()).digest()
@@ -1648,20 +1649,28 @@ def _redirect(location, cookies=()):
     return {"statusCode": 302, "headers": {"Location": location, "Cache-Control": "no-store"}, "cookies": list(cookies)}
 
 
-def _login(event):
-    """マネージドログインへ送る。state と PKCE の検証値は署名つきの cookie で持つ（10分）"""
+def _login(event, page="oauth2/authorize", then=None):
+    """マネージドログインへ送る。state と PKCE の検証値は署名つきの cookie で持つ（10分）。
+    page="passkeys/add" はパスキーの登録画面。管理者が作ったアカウントには Cognito が登録を勧めないので、
+    ログイン済みの人をここへ送って登録してもらう（登録後は authorize と同じくコードつきで /callback へ戻る）"""
     state, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(48)
     challenge = _b64(hashlib.sha256(verifier.encode()).digest())
     q = urllib.parse.urlencode({"response_type": "code", "client_id": _client(), "redirect_uri": _base(event) + "callback",
-                                "scope": "openid email", "state": state, "code_challenge": challenge,
+                                "scope": "openid email aws.cognito.signin.user.admin", "state": state, "code_challenge": challenge,
                                 "code_challenge_method": "S256", "lang": "ja"})
-    pending = _sign({"state": state, "verifier": verifier, "exp": time.time() + 600})
-    return _redirect(f"{AUTH_DOMAIN}/oauth2/authorize?{q}", [_cookie("up_login", pending, 600)])
+    pending = _sign({"state": state, "verifier": verifier, "exp": time.time() + 600, **({"then": then} if then else {})})
+    return _redirect(f"{AUTH_DOMAIN}/{page}?{q}", [_cookie("up_login", pending, 600)])
 
 
 def _callback(event):
     q = event.get("queryStringParameters") or {}
     pending = _verify(_cookies(event).get("up_login", ""))
+    session = _verify(_cookies(event).get("up_session", ""))
+    if q.get("result") == "invalid_session":
+        # Cognito 側のログイン（1時間）が切れていると登録画面に入れない。ログインし直してから登録画面へ進む
+        return _login(event, then="passkey")
+    if not q.get("code") and not q.get("error") and session and session.get("email") == ADMIN_EMAIL:
+        return _redirect(_base(event), [_cookie("up_login", "", 0)])  # パスキー登録からコードなしで戻ったとき
     if not pending or not q.get("code") or not hmac.compare_digest(q.get("state", ""), pending["state"]):
         return _html(_message("ログインをやり直してください。", "login"), 400)
     body = urllib.parse.urlencode({"grant_type": "authorization_code", "client_id": _client(), "code": q["code"],
@@ -1682,7 +1691,37 @@ def _callback(event):
         return _html(_message("このページを見られるのは管理者だけです。", "logout"), 403)
     session = _sign({"email": ADMIN_EMAIL, "exp": time.time() + SESSION_DAYS * 86400})
     print(json.dumps({"login": "ok"}))
-    return _redirect(_base(event), [_cookie("up_session", session, SESSION_DAYS * 86400), _cookie("up_login", "", 0)])
+    then = pending.get("then")
+    if not then and not _cookies(event).get("up_pk_later") and _passkey_count(tokens.get("access_token", "")) == 0:
+        then = "passkey-offer"  # メールのコードで入った（パスキーが1つも無い）ときだけ、一度登録を案内する
+    after = _base(event) + (then if then in ("passkey", "passkey-offer") else "")
+    return _redirect(after, [_cookie("up_session", session, SESSION_DAYS * 86400), _cookie("up_login", "", 0)])
+
+
+def _passkey_count(access_token):
+    """登録済みのパスキーの数。本人のアクセストークンで ListWebAuthnCredentials を呼ぶ（IAM の権限は要らない）。
+    数えられなかったときは None を返し、案内を出さない（ログインを止めない）"""
+    if not access_token:
+        return None
+    req = urllib.request.Request(f"https://cognito-idp.{os.environ.get('AWS_REGION', 'us-west-2')}.amazonaws.com/",
+                                 data=json.dumps({"AccessToken": access_token}).encode(),
+                                 headers={"Content-Type": "application/x-amz-json-1.1",
+                                          "X-Amz-Target": "AWSCognitoIdentityProviderService.ListWebAuthnCredentials"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as res:
+            return len(json.loads(res.read()).get("Credentials") or [])
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"passkey_count": "unavailable", "error": type(e).__name__}))
+        return None
+
+
+def _passkey_offer():
+    return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>監視ダッシュボード</title><style>{CSS}</style></head><body><div class="wrap">
+<header class="top"><h1><span>みのるんエージェント</span> <span>監視ダッシュボード</span></h1></header><div class="card stat">
+<p style="margin:0 0 6px"><b>パスキーを登録しますか？</b></p>
+<p style="margin:0 0 14px">登録すると、次から Touch ID や Face ID でログインでき、メールのコードを待たずに済みます。</p>
+<a class="btn" href="passkey">パスキーを登録</a> <a class="btn" href="passkey-later">あとで</a></div></div></body></html>"""
 
 
 def _logout(event):
@@ -1755,6 +1794,12 @@ def handler(event, _context):
     session = _verify(_cookies(event).get("up_session", ""))
     if not session or session.get("email") != ADMIN_EMAIL:
         return _redirect(_base(event) + "login")
+    if path == "/passkey-offer":
+        return _html(_passkey_offer())
+    if path == "/passkey-later":
+        return _redirect(_base(event), [_cookie("up_pk_later", "1", PASSKEY_LATER_DAYS * 86400)])
+    if path == "/passkey":
+        return _login(event, "passkeys/add", then="registered")
     if path == "/ban-reviewed":
         if event.get("requestContext", {}).get("http", {}).get("method") != "POST":
             return _html("method not allowed", 405)
