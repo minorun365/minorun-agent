@@ -198,7 +198,7 @@ export class KnowledgeStack extends cdk.Stack {
     const xSearch = new lambda.Function(this, 'XSearch', {
       functionName: 'minorun-agent-x-search', runtime: lambda.Runtime.PYTHON_3_14,
       architecture: lambda.Architecture.ARM_64, handler: 'x_search.handler',
-      code: lambda.Code.fromAsset(path.join(currentDir, '../lambda/x-search')),
+      code: lambda.Code.fromAsset(path.join(currentDir, '../lambda/x-search'), { exclude: ['**/__pycache__', '**/*.pyc'] }),
       timeout: cdk.Duration.seconds(20), memorySize: 128,
       environment: { X_SECRET_ID: xSecret.secretName, X_BUDGET_TABLE: xBudget.tableName, X_DAILY_CENTS: '500' },
       logGroup: new logs.LogGroup(this, 'XSearchLogs', {

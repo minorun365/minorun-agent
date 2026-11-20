@@ -8,6 +8,7 @@ User Pool minorun-agent-admin は自分で登録できない設定なので、�
 """
 
 import os
+import os
 import secrets
 
 import boto3
