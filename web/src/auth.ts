@@ -53,15 +53,18 @@ async function token(body: Record<string, string>): Promise<Tokens | null> {
 }
 
 // Google から戻ってきたとき（?code=…&state=…）に、コードをトークンに替えて URL を元に戻す
-export async function handleRedirect() {
+// ログインが済んだら true を返す（画面はログイン前のやり取りを描き直す）
+export async function handleRedirect(): Promise<boolean> {
   const p = new URLSearchParams(location.search);
   const code = p.get('code'), state = p.get('state');
-  if (!code) return;
+  if (!code) return false;
   const saved = JSON.parse(sessionStorage.getItem('minorun-pkce') || '{}');
   sessionStorage.removeItem('minorun-pkce');
   history.replaceState(null, '', location.pathname);
-  if (!state || state !== saved.state) return;
-  save(await token({ grant_type: 'authorization_code', code, redirect_uri: redirectUri(), code_verifier: saved.verifier }));
+  if (!state || state !== saved.state) return false;
+  const t = await token({ grant_type: 'authorization_code', code, redirect_uri: redirectUri(), code_verifier: saved.verifier });
+  save(t);
+  return !!t;
 }
 
 // 質問のたびに呼ぶ。期限が近ければ取り直し、取り直せなければログアウト扱いにする
