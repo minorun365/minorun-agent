@@ -11,8 +11,8 @@ https://<DOMAIN>.auth.us-west-2.amazoncognito.com/oauth2/idpresponse を1行足�
   uv run --with boto3 python infra/scripts/auth.py
 """
 
-import json
 import os
+import json
 from pathlib import Path
 
 import boto3

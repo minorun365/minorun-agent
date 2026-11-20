@@ -6,6 +6,7 @@
 S3 への書き出しは CDK（MinorunKnowledge の BucketDeployment）が行う。先に `python3 knowledge/tools/build_kb.py` と deploy を済ませる。
 """
 
+import os
 import json
 import sys
 import time

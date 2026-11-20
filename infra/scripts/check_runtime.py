@@ -68,7 +68,8 @@ async def verify(call, expected):
         permission = await api('iam', 'SimulatePrincipalPolicy', PolicySourceArn=fn['Role'], ActionNames=[action], ResourceArns=[table['TableArn']])
         assert permission['EvaluationResults'] and all(x['EvalDecision'] == 'allowed' for x in permission['EvaluationResults']), 'エラー記録の権限不足'
     assert env['RUNTIME_ARN']==active['agentRuntimeArn'], '監視先が不一致'
-    assert set(env['RUNTIME_ARNS'].split(','))=={r['agentRuntimeArn'] for r in runtimes}, '移行日の費用集計が欠落'
+    # 費用集計は回答の Runtime 2本＋スライド工房（watch-stack.ts の RUNTIME_ARNS）。回答の2本が入っていることを見る
+    assert {r['agentRuntimeArn'] for r in runtimes} <= set(env['RUNTIME_ARNS'].split(',')), '移行日の費用集計が欠落'
     return {'active':expected,'runtimes':[{'id':r['agentRuntimeId'],'version':r['agentRuntimeVersion'],'platform':r['platformVersion'],'status':r['status']} for r in runtimes], 'gateway':gateway_id,'checks':'routing, shared storage, request interceptor, invoke policy, retention, errors, cost'}
 
 # CLI

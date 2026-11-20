@@ -9,6 +9,7 @@
 同じ人の匿名IDとログインは確認役がつなげて両方を止めるので、解除するときは関連する停止も消し、累積点数をリセットする。
 """
 
+import os
 import datetime
 import re
 import sys

@@ -5,6 +5,7 @@
   uv run --with boto3 python knowledge/tools/announce.py remove <番号>
 置き場は S3 の announcements/latest.json。ナレッジベースの取り込みは要らず、1分以内にエージェントへ届く。
 """
+import os
 import argparse
 import datetime
 import json

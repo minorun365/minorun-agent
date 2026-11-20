@@ -10,8 +10,8 @@
 .edge.json には WAF の ARN（MinorunEdge が SSM に置く）も写す。MinorunWeb はこのファイルを読んで付ける。
 """
 
-import json
 import os
+import json
 import sys
 import time
 from pathlib import Path
