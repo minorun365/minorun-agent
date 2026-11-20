@@ -184,15 +184,23 @@ def _warm_up():
 # V2 は最初の正常な ping の状態を複製する。接続・スレッドは要求が届いてから作る。
 
 
-def _conversation(actor, session):
+def _conversation(actor, session, anon=None):
+    """会話を取り出す。途中でログインした人は、同じ会話のまま持ち主をログイン後の名前へ付け替える。
+    （付け替えないと、控えと長期記憶がログイン前の匿名の名前の下に入り、入れ物が替わったときや次に来たときに戻せない）"""
     conv = CONVERSATIONS.get(session)
     if conv is None:
-        try:
-            snap = store.load_snapshot(actor, session)
-        except Exception as e:
-            print(json.dumps({"restore_error": type(e).__name__}))
-            snap = None
+        snap = None
+        # ログイン後の名前で控えが無ければ、ログイン前の匿名の名前で積んだ控えを探す
+        for who in dict.fromkeys(a for a in (actor, anon) if a):
+            try:
+                snap = store.load_snapshot(who, session)
+            except Exception as e:
+                print(json.dumps({"restore_error": type(e).__name__}))
+            if snap is not None:
+                break
         conv = CONVERSATIONS[session] = Conversation(actor, session, snap)
+    elif conv.actor != actor:
+        conv.actor = actor
     return conv
 
 
@@ -371,13 +379,14 @@ async def invoke(payload, context):
     session = getattr(context, "session_id", None) or "local"
     # ログインした人は利用者のハッシュで覚え、端末をまたいでも同じ人として扱う（長期記憶もこの名前の下に残る）
     user = str(payload.get("user") or "")[:32]
-    actor = f"user-{user}" if user else str(payload.get("anon") or "anonymous")[:64]
+    anon = str(payload.get("anon") or "anonymous")[:64]
+    actor = f"user-{user}" if user else anon
     question = str(payload.get("prompt", "")).strip()[:1000]
     tid = str(payload.get("tid") or "")[:40]  # 画面が質問ごとに作る番号（回答の評価を、この行へ結び付ける）
     via = str(payload.get("via") or "")[:10]  # 質問の出どころ（typed・ai・starter・link）
     if payload.get("warmup"):
         # ページを開いたときの先読み。入れ物が起き、会話の控えも戻しておく
-        await asyncio.gather(asyncio.to_thread(_warm_up), asyncio.to_thread(_conversation, actor, session))
+        await asyncio.gather(asyncio.to_thread(_warm_up), asyncio.to_thread(_conversation, actor, session, anon))
         if user:
             # ログインした人には「作ったスライド」を返す（画面を閉じたあとでも、開き直せばたどり着ける）
             try:
@@ -402,7 +411,7 @@ async def invoke(payload, context):
             yield {"type": "done"}
             return
 
-    conv = _conversation(actor, session)
+    conv = _conversation(actor, session, anon)
     await asyncio.to_thread(conv.lock.acquire)
     handed_off = False
     ledger = usage.Ledger()

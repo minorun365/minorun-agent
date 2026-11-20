@@ -11,5 +11,5 @@ class RuntimeWarmupTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(app, '_warm_up') as warmup, patch.object(app, '_conversation') as conversation:
             events = [e async for e in app.invoke({'warmup': True, 'anon': 'test'}, SimpleNamespace(session_id='test-session'))]
         warmup.assert_called_once_with()
-        conversation.assert_called_once_with('test', 'test-session')
+        conversation.assert_called_once_with('test', 'test-session', 'test')
         self.assertEqual(events, [{'type': 'done'}])

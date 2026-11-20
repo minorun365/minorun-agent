@@ -14,6 +14,7 @@ import { esc, md } from './markdown';
 import { pickStarters } from './starters';
 import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
+import { saveCarryover, takeCarryover, type LastTurn, type Pending } from './carryover';
 import { AttachError, shrink, upload } from './attach';
 import { parseSlidesList, slidesCard, slidesList, SlidesTracker } from './slides-card';
 import { OFFER_CHIP, OFFER_REQUEST, PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withOfferChip, withSlidesStarter } from './slides-hint';
@@ -375,7 +376,7 @@ function renderSuggest(list: string[], retry = false, via: Via = 'starter') {
   };
   if (retry) add('もう一度送る', '', (b) => send(lastText, b, lastVia, lastImage));
   list.forEach((t) => (t === SLIDES_STARTER ? add(t, '', openSlidesCompose)
-    : t === OFFER_CHIP ? add(t, '', (b) => (profile() ? send(OFFER_REQUEST, b, via) : askLoginForSlides()))
+    : t === OFFER_CHIP ? add(t, '', (b) => (profile() ? send(OFFER_REQUEST, b, via) : askLoginForSlides({ kind: 'offer' })))
     : add(t, '', (b) => send(t, b, via))));
   // 一度答えたあとは、続けて聞けることが分かるように「追加で質問」にする
   add(has('started') ? '追加で質問' : '質問する', 'ask', openCompose);
@@ -439,7 +440,10 @@ function openSlidesCompose() {
 }
 // ログイン前の人がスライドの入口（札・質問候補）を押したら、送らずにみのるんの返事として吹き出しで案内し、右上のアイコンを脈打たせる
 const SLIDES_LOGIN_REPLY = 'スライド作成は、ログインした人だけの機能です。右上のアイコンからGoogleでログインすると、記事のURLや、調べてもらった回答からスライドを作れるようになります（1日2本まで）。';
-function askLoginForSlides() {
+// ログイン前に最後に答えた質問と回答、スライドの入口で頼もうとしていたこと（ログインの往復のあとに描き直して続ける）
+let lastTurn: LastTurn | null = null, pendingLogin: Pending | null = null;
+function askLoginForSlides(pending: Pending = { kind: 'compose' }) {
+  pendingLogin = pending;
   if (has('composing')) closeCompose();
   closeGift(); cancelIdle(); turnVersion++;
   stage.classList.add('started', 'answering');
@@ -454,7 +458,7 @@ function renderSlideChip() {
 }
 slideChip.addEventListener('pointerdown', (e) => e.preventDefault());
 slideChip.addEventListener('click', () => {
-  if (!profile()) { askLoginForSlides(); return; }
+  if (!profile()) { askLoginForSlides({ kind: 'url', text: q.value.trim() }); return; }
   send(slidesRequest(q.value), q, 'typed');
 });
 q.addEventListener('input', renderSlideChip);
@@ -733,6 +737,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   // 調べた説明の回答のあとは、候補の先頭に「この回答をスライドに！」を1つ置く
   const list = next.length ? next : starters([text]);
   if (!has('limited')) renderSuggest(offer && !failed ? withOfferChip(list) : list, failed && refused?.reason !== 'too_long', next.length ? 'ai' : 'starter');
+  if (!failed && raw.trim()) { lastTurn = { q: text, a: raw, next: list, offer, via: next.length ? 'ai' : 'starter' }; pendingLogin = null; }
   if (!failed && raw) {
     giftState.turns++; saveGifts();
     const isExpo = /expo|展示|ブース/i.test(topic + ' ' + text);
@@ -809,7 +814,7 @@ function renderMe() {
     ? `<p class="lead">ログイン中です。</p>${PERKS}<div id="myslides"></div><button class="out" id="logout" type="button">ログアウト</button>`
     : `<p class="lead">ログインすると、こんなことができます。</p>${PERKS}
        <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>Google でログイン</span></button>`;
-  $('#glogin')?.addEventListener('click', () => login());
+  $('#glogin')?.addEventListener('click', () => { saveCarryover(sessionStorage, lastTurn, pendingLogin); void login(); });
   $('#logout')?.addEventListener('click', () => logout());
   if (p) renderList();
 }
@@ -831,7 +836,33 @@ renderSuggest(starters());
 fitViewport();
 layout(); requestAnimationFrame(() => requestAnimationFrame(() => stage.classList.add('ready')));
 // Google から戻ってきたときは、先にトークンを受け取ってから先読みする（ログインした人として数えるため）
-const startup = handleRedirect().catch(() => {}).then(() => { renderMe(); return warmUp(); });
+const startup = handleRedirect().catch(() => false).then(async (signedIn) => {
+  renderMe();
+  const carried = signedIn && profile() ? takeCarryover(sessionStorage) : null;
+  if (carried) restoreCarryover(carried.turn);
+  await warmUp();
+  if (carried) continueAfterLogin(carried.pending);
+});
+// ログイン前のやり取りを吹き出しへ描き直す（エージェントは同じ会話IDで前の話を覚えている）
+function restoreCarryover(turn: LastTurn | null) {
+  if (!turn) return;
+  lastTurn = turn;
+  closeGift(); cancelIdle(); turnVersion++;
+  stage.classList.add('started', 'answering');
+  greet.classList.remove('on'); thought.classList.remove('on'); doing.classList.remove('on');
+  $('#thoughtText').textContent = turn.q;
+  answer.classList.remove('oops'); answer.innerHTML = md(turn.a); answer.scrollTop = 0;
+  bubble.classList.add('on'); director.answer(turn.a, false);
+  renderSuggest(turn.offer ? withOfferChip(turn.next) : turn.next, false, turn.via);
+  layout();
+}
+// スライドの入口からログインした人は、頼もうとしていたことをそのまま続ける（押し直させない）
+function continueAfterLogin(pending: Pending | null) {
+  if (!pending || busy) return;
+  if (pending.kind === 'offer') void send(OFFER_REQUEST, undefined, lastTurn?.via ?? 'ai');
+  else if (pending.kind === 'url') void send(slidesRequest(pending.text), undefined, 'typed');
+  else openSlidesCompose();
+}
 // 開いて少ししてから、左上にさりげなくあいさつ。最初の質問を送ったら消す
 setTimeout(() => { if (!has('started')) greet.classList.add('on'); }, 1500);
 
