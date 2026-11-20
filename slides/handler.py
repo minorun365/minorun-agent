@@ -281,6 +281,7 @@ VIEWER = """<!DOCTYPE html>
 :root{{--bg:#eef7fa;--ink:#16323f;--mute:#5b707c;--btn:#ffffff;--line:#d6e6ed;--accent:#0891b2}}
 @media (prefers-color-scheme:dark){{:root{{--bg:#0d1b24;--ink:#e6f1f5;--mute:#9db0bb;--btn:#16303d;--line:#24414f}}}}
 *{{box-sizing:border-box}}
+html,body{{touch-action:manipulation}}
 body{{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Hiragino Sans","Noto Sans JP",sans-serif;display:flex;flex-direction:column;align-items:center}}
 header{{width:100%;max-width:1100px;padding:18px 16px 10px;display:flex;align-items:center;gap:12px}}
 header h1{{flex:1;margin:0;font-size:17px;line-height:1.4;font-weight:700}}
@@ -288,9 +289,9 @@ header h1{{flex:1;margin:0;font-size:17px;line-height:1.4;font-weight:700}}
 .save{{background:var(--btn);color:var(--ink);border:1px solid var(--line)}}
 @media (max-width:520px){{header{{flex-wrap:wrap}}header h1{{flex-basis:100%}}}}
 .stage{{position:relative;width:100%;max-width:1100px;padding:0 16px}}
-.stage img{{display:block;width:100%;height:auto;aspect-ratio:16/9;border-radius:12px;box-shadow:0 14px 40px rgba(8,100,130,.18);background:#f1fafc;user-select:none;-webkit-user-drag:none}}
+.stage img{{display:block;width:100%;height:auto;aspect-ratio:16/9;border-radius:12px;box-shadow:0 14px 40px rgba(8,100,130,.18);background:#f1fafc;user-select:none;-webkit-user-drag:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent}}
 .nav{{display:flex;align-items:center;justify-content:center;gap:18px;padding:16px}}
-.nav button{{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);background:var(--btn);color:var(--ink);font-size:22px;cursor:pointer}}
+.nav button{{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);background:var(--btn);color:var(--ink);font-size:22px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}}
 .nav button:disabled{{opacity:.35;cursor:default}}
 .count{{min-width:70px;text-align:center;font-variant-numeric:tabular-nums;color:var(--mute)}}
 footer{{padding:6px 16px 28px;font-size:13px;color:var(--mute);text-align:center;line-height:1.7}}
