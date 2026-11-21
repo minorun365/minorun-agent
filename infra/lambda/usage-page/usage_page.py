@@ -378,7 +378,8 @@ def hours(day):
 # 要約と日ごとに要る項目。回答本文や使用量の記録は全項目の9割以上を占めるので、一覧を開くまで読まない。
 REPORT_FIELDS = ["created_at", "tools", "first_ms", "anon", "user", "pk", "sk", "feedback", "via", "x_search", "usage.calls", "question", "flag"]
 RECENT = 8  # 要約の下段に出す、直近の質問と時台（日）の数
-DETAIL_FIELDS = REPORT_FIELDS + ["question", "answer", "topic", "flag", "flag_reason", "prebaked", "usage.complete", "usage.usd"]
+# 同じ項目を2回書くと DynamoDB が読み取りを断る（ProjectionExpression の重なり）ので、足すときは重複を除く
+DETAIL_FIELDS = list(dict.fromkeys(REPORT_FIELDS + ["question", "answer", "topic", "flag", "flag_reason", "prebaked", "usage.complete", "usage.usd"]))
 
 
 def questions(day, detail=True):
