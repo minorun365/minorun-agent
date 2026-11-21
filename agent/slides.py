@@ -1,6 +1,6 @@
 """スライドの依頼を受け付ける（ツール make_slides の中身）。記事のURLから作るものと、調べた要点と出典から作るものの2種類。
 
-回数を表で数え（1人1日・全体で1日）、進み具合の最初の1行を公開用 S3 に置き、スライド工房（AgentCore Runtime）をジョブごとのセッションで起こす。
+回数を表で数え（1人1日・全体で1日）、進み具合の最初の1行を公開用 S3 に置き、スライド作成機能（AgentCore Runtime）をジョブごとのセッションで起こす。
 ログインしていない人も頼める（2026-11-21 みのるん決定）。匿名IDで1日1本・同じIPから1日3本まで、ログインした人は1日2本。
 匿名で作った分は匿名IDの一覧に残し、ログインしたら claim でその人の一覧へ移す。
 """
@@ -89,8 +89,8 @@ def _spawn(fn, *args):
 
 
 def _launch(runtime, body, table, bucket):
-    """工房の Runtime を起こす。セッション ID はジョブごとに変える（1本＝1つの入れ物。33字以上が決まり）。
-    工房は受け取ってすぐ返し、裏で作る。起こせなかったら、画面へ失敗を出し、数えた回数を戻す。"""
+    """スライド作成の Runtime を起こす。セッション ID はジョブごとに変える（1本＝1つの入れ物。33字以上が決まり）。
+    スライド作成機能は受け取ってすぐ返し、裏で作る。起こせなかったら、画面へ失敗を出し、数えた回数を戻す。"""
     job = body["job"]
     try:
         _client("bedrock-agentcore").invoke_agent_runtime(
@@ -103,7 +103,7 @@ def _launch(runtime, body, table, bucket):
             _client("s3").put_object(Bucket=bucket, Key=f"s/{job}/status.json", ContentType="application/json",
                                      CacheControl="no-cache, max-age=0",
                                      Body=json.dumps({"stage": "error", "at": int(time.time()),
-                                                      "message": "スライド工房を起こせませんでした。今日の回数には数えないので、少し時間をおいて、もう一度頼んでください。"},
+                                                      "message": "スライドの作成を始められませんでした。今日の回数には数えないので、少し時間をおいて、もう一度頼んでください。"},
                                                      ensure_ascii=False).encode())
             for pk in body.get("counted") or []:
                 _client("dynamodb").update_item(TableName=table, Key={"pk": {"S": pk}}, UpdateExpression="ADD n :minus",
@@ -160,16 +160,16 @@ def start(material, request, user, *, runtime, table, bucket, user_daily, total_
                              Body=json.dumps({"stage": "queued", "kind": kind, "at": int(time.time())}).encode())
     who = owner(user, anon)
     body = {"job": job, **payload, "ask": str(request)[:300], "user": who,
-            # 数えた回数の鍵。工房が作れなかったときに、これを1つずつ戻す
+            # 数えた回数の鍵。スライド作成機能が作れなかったときに、これを1つずつ戻す
             **({"counted": [pk for pk, _ in limits]} if counting else {})}
-    # 工房の入れ物の立ち上げに20秒ほどかかるので、呼び出しは裏で行い、回答を待たせない
+    # スライド作成機能の入れ物の立ち上げに20秒ほどかかるので、呼び出しは裏で行い、回答を待たせない
     _spawn(_launch, runtime, body, table, bucket)
     _remember(table, who, job)
     print(json.dumps({"slides_job": job, "kind": kind, "user": who, **({"unlimited": True} if not counting else {})}))
     if user:
-        return {"status": "accepted", "job": job, "note": "数分ででき上がります。画面を離れても、右上のアイコンの「作ったスライド」から開けます"}
+        return {"status": "accepted", "job": job, "note": "5〜10分ほどででき上がります。画面を離れても、右上のアイコンの「作ったスライド」から開けます"}
     return {"status": "accepted", "job": job,
-            "note": "数分ででき上がります。この画面で待つか、あとで同じブラウザで開き直すと右上のアイコンの「作ったスライド」から開けます。"
+            "note": "5〜10分ほどででき上がります。この画面で待つか、あとで同じブラウザで開き直すと右上のアイコンの「作ったスライド」から開けます。"
                     "待つ間にGoogleでログインしておくと、どの端末からでも開けます"}
 
 

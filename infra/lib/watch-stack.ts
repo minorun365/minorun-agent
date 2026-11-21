@@ -32,7 +32,7 @@ export interface WatchStackProps extends cdk.StackProps {
   readonly agent: AgentStack;
   readonly entry: EntryStack;
   readonly knowledge: KnowledgeStack;
-  // スライド工房の Runtime（費用の集計に足す）と、そのログ（「スライド」タブが読む）
+  // スライド作成機能の Runtime（費用の集計に足す）と、そのログ（「スライド」タブが読む）
   readonly slides: { runtimeArn: string; logGroup: string };
   readonly budgetEmail: string;
   // 1日の予算（ドル）。クレジットを除いた額で見る
@@ -112,7 +112,7 @@ export class WatchStack extends cdk.Stack {
         '{ $.name = "execute_tool*" && $.status.code = "ERROR" && $.resource.attributes.[\'service.name\'] = "minorun_agent*" }'),
       metricNamespace: NS, metricName: 'ToolErrors', metricValue: '1',
     });
-    // Runtime とスライド工房が握りつぶして続けた失敗（{"after_answer_error": ...} のような「〜_error」の行）
+    // Runtime とスライド作成機能が握りつぶして続けた失敗（{"after_answer_error": ...} のような「〜_error」の行）
     for (const [id, group] of [
       ['LogErrorV1Filter', `/aws/bedrock-agentcore/runtimes/${props.agent.legacyRuntime.attrAgentRuntimeId}-DEFAULT`],
       ['LogErrorV2Filter', `/aws/bedrock-agentcore/runtimes/${props.agent.runtimeV2.attrAgentRuntimeId}-DEFAULT`],
@@ -266,7 +266,7 @@ export class WatchStack extends cdk.Stack {
         AUTH_DOMAIN: adminDomain.baseUrl(),
         CLIENT_ID: adminClient.userPoolClientId,
         PUBLIC_BASE: props.adminBaseUrl,
-        // 「スライド」タブ。表とバケットは名前で指す。ログは工房の Runtime が作るロググループ（名前に Runtime の ID が入る）
+        // 「スライド」タブ。表とバケットは名前で指す。ログはスライド作成の Runtime が作るロググループ（名前に Runtime の ID が入る）
         SLIDES_TABLE: 'minorun-agent-slides',
         SLIDES_BUCKET: `minorun-agent-slides-${this.account}`,
         SLIDES_LOG_GROUP: `${props.slides.logGroup},/aws/lambda/minorun-agent-slides`,

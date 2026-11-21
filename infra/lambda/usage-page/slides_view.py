@@ -3,7 +3,7 @@
 正本は3か所に分かれている。
   - 表 minorun-agent-slides の list#<利用者> … 番号と受け付けた時刻（記事のURLは残さない作り）
   - 公開用 S3 の s/<番号>/status.json … 進み具合・題・枚数（画面のサムネイルと同じもの）
-  - スライド工房のログ … 1本ごとの費用（Opus のトークン）・かかった秒数・直した回数・失敗の理由
+  - スライド作成機能のログ … 1本ごとの費用（Opus のトークン）・かかった秒数・直した回数・失敗の理由
 頼んだ質問の文（記事のURLを含む）は1問1行の表から、同じ利用者で make_slides を使った一番近い質問を探して添える。
 """
 import concurrent.futures
@@ -18,12 +18,12 @@ import boto3
 
 TABLE = os.environ.get("SLIDES_TABLE", "")
 BUCKET = os.environ.get("SLIDES_BUCKET", "")
-# 工房の最後の1行を読むロググループ。いまは Runtime のもの、2026-11-15 分は Lambda のころのもの（カンマ区切り）
+# スライド作成機能の最後の1行を読むロググループ。いまは Runtime のもの、2026-11-15 分は Lambda のころのもの（カンマ区切り）
 LOG_GROUPS = [g.strip() for g in os.environ.get("SLIDES_LOG_GROUP", "").split(",") if g.strip()]
 JST = datetime.timezone(datetime.timedelta(hours=9))
 STAGES = {"queued": "順番待ち", "reading": "記事を読んでいる", "writing": "書いている", "rendering": "焼いている",
           "checking": "余白を測っている", "fixing": "崩れを直している"}
-# 工房の Runtime は1本20分で打ち切る。それより長く途中のままなのは、落ちて status を書けなかったもの
+# スライド作成の Runtime は1本20分で打ち切る。それより長く途中のままなのは、落ちて status を書けなかったもの
 STALE = 20 * 60
 MATCH = datetime.timedelta(minutes=15)
 URL = re.compile(r"https?://[^\s<>\"'）」]+")
@@ -100,7 +100,7 @@ def _group(group, start_ms, end_ms, now_ms):
 
 
 def _finals(start, end):
-    """工房が1本ごとに最後に出す1行（job と ok を持つ JSON）を、(時刻ミリ秒, 中身) で順に返す。"""
+    """スライド作成機能が1本ごとに最後に出す1行（job と ok を持つ JSON）を、(時刻ミリ秒, 中身) で順に返す。"""
     start_ms, end_ms = int(start.timestamp() * 1000), int(end.timestamp() * 1000)
     now_ms = int(datetime.datetime.now(JST).timestamp() * 1000)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(LOG_GROUPS))) as pool:
@@ -113,13 +113,13 @@ def _logs(start, end):
     return {rec.get("job"): rec for _, rec in _finals(start, end + datetime.timedelta(minutes=20))}
 
 
-# 工房が Claude API で書いた分の単価（100万トークンあたりのドル。Bedrock の Opus 5.5 と同じ）
+# スライド作成機能が Claude API で書いた分の単価（100万トークンあたりのドル。Bedrock の Opus 5.5 と同じ）
 API_MODEL = "claude-opus-5-5"
 API_PRICE = {"input": 4.00, "output": 20.00}
 
 
 def api_usd_by_hour(start, end):
-    """工房が Claude API（Anthropic のクレジット）で払った Opus の費用を、日本時間の時台ごとに返す。
+    """スライド作成機能が Claude API（Anthropic のクレジット）で払った Opus の費用を、日本時間の時台ごとに返す。
     AWS/Bedrock のメトリクスには載らないので、1本ごとの最後のログ行の usage（呼び出しごとのモデル）から足す。"""
     out = {}
     for ts, rec in _finals(start, end):
@@ -256,7 +256,7 @@ def panel(jobs, now, multi, mask, url, period_label):
         j["day"] = datetime.datetime.fromtimestamp(j["at"], JST).strftime("%Y-%m-%d")
     body = "".join(card(j, now, multi, mask, url) for j in jobs) or f'<p class="note inline">{period_label}に作ったスライドはありません。</p>'
     return (f'<div class="card"><h2>作ったスライド<small>{sub}</small></h2>'
-            f'<p class="legend">新しい順。サムネイルを押すとビューアが開きます。作成費はスライド工房の Opus のトークンだけの概算です。</p>'
+            f'<p class="legend">新しい順。サムネイルを押すとビューアが開きます。作成費はスライド作成機能の Opus のトークンだけの概算です。</p>'
             f'<div class="slide-grid">{body}</div></div>')
 
 

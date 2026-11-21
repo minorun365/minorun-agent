@@ -1,4 +1,4 @@
-"""スライドの受付：ログインした人は1日2本、していない人は匿名IDで1日1本・同じIPから3本・全体の上限・公開URLだけ・受け付けたら工房を非同期で起こす。"""
+"""スライドの受付：ログインした人は1日2本、していない人は匿名IDで1日1本・同じIPから3本・全体の上限・公開URLだけ・受け付けたらスライド作成機能を非同期で起こす。"""
 import json
 import unittest
 from unittest.mock import MagicMock, patch
@@ -65,7 +65,7 @@ class StartTests(unittest.TestCase):
         self.assertGreaterEqual(len(inv["runtimeSessionId"]), 33)  # Runtime のセッション ID は33字以上
         self.assertEqual(json.loads(inv["payload"])["url"], "https://example.com/post")
         self.assertRegex(r["job"], r"^[A-Za-z0-9]{16}$")
-        # 工房が作れなかったときに戻せるよう、数えた回数の鍵を渡す
+        # スライド作成機能が作れなかったときに戻せるよう、数えた回数の鍵を渡す
         self.assertEqual(json.loads(inv["payload"])["counted"], [i["Update"]["Key"]["pk"]["S"] for i in items])
 
     def test_unlimited_user_skips_counting(self):

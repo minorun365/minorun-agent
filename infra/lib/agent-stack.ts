@@ -64,7 +64,7 @@ export class AgentStack extends cdk.Stack {
       resources: ['*'],
     }));
 
-    // 会話中の文脈（やり取りと話題の棚の控え）。7日で消える（2026-10-25 決定）
+    // 会話中の文脈（やり取りとこれまでの話題の要約の控え）。7日で消える（2026-10-25 決定）
     const memory = new agentcore.CfnMemory(this, 'Memory', {
       name: 'minorun_agent_memory',
       description: 'みのるんエージェントの会話の文脈（7日）と、ログインした人の長期記憶',
@@ -159,7 +159,7 @@ export class AgentStack extends cdk.Stack {
       resources: [this.uploadBucket.arnForObjects('up/*')],
     }));
 
-    // スライドの依頼：回数の表で数え、進み具合の最初の1行を書き、スライド工房を非同期で起動する
+    // スライドの依頼：回数の表で数え、進み具合の最初の1行を書き、スライド作成機能を非同期で起動する
     role.addToPolicy(new iam.PolicyStatement({ actions: ['dynamodb:UpdateItem', 'dynamodb:TransactWriteItems', 'dynamodb:GetItem'], resources: [props.slides.tableArn] }));
     role.addToPolicy(new iam.PolicyStatement({ actions: ['bedrock-agentcore:InvokeAgentRuntime'], resources: [props.slides.runtimeArn, `${props.slides.runtimeArn}/*`] }));
     role.addToPolicy(new iam.PolicyStatement({ actions: ['s3:PutObject'], resources: [`arn:${this.partition}:s3:::${props.slides.bucketName}/s/*`] }));

@@ -1,4 +1,4 @@
-"""スライド工房の入口（AgentCore Runtime。2026-11-16 に Lambda から移した）。
+"""スライド作成機能の入口（AgentCore Runtime。2026-11-16 に Lambda から移した）。
 
 エージェントのツール make_slides が、ジョブごとに別のセッション ID で invoke_agent_runtime を呼ぶ。
 ここはジョブを受け取ったらすぐ「受け付けた」と返し、作るのは裏のスレッドで行う（呼び出し側を待たせない）。

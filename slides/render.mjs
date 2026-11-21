@@ -54,6 +54,23 @@ try {
       return tops.size > e.querySelectorAll('br').length + 1;
     });
     if (cardWrap) bad.push('カードの文が書いた改行のほかに折り返している（字数を減らす）');
+    // 箇条書きが1項目だけのスライドは、中身が薄く、画面の中ほどに1行だけ浮いて見える（2026-11-21 の通しテストで見つけた）
+    if (plain && [...sec.querySelectorAll(':scope > ul')].some((u) => u.children.length === 1)) bad.push('箇条書きが1項目だけ（2〜4項目にするか、リード文に入れる）');
+    // 右下の挿絵（img.ill）が本文の文字・表・カードに重なっていないか（8px の遊びを見る）
+    const ills = [...sec.querySelectorAll('img.ill')].map((e) => e.getBoundingClientRect());
+    if (ills.length) {
+      // 段落や箇条書きの枠は文字の長さに関係なく横いっぱいに広がるので、枠ではなく文字そのものの範囲で測る
+      // （枠で測ると短い行でも必ず重なり判定になり、挿絵を1枚も置けなくなっていた。2026-11-21 の通しテストで見つけた）
+      const blocks = [];
+      for (const e of sec.querySelectorAll('h1, li, td, th, .steps > div, .flow > div, .prompt, p')) {
+        if (e.querySelector('img.ill') || !e.textContent.trim()) continue;
+        if (e.matches('.steps > div, .flow > div, .prompt, td, th')) { blocks.push(e.getBoundingClientRect()); continue; }
+        const range = document.createRange(); range.selectNodeContents(e);
+        blocks.push(...[...range.getClientRects()].filter((q) => q.width > 0 && q.height > 0));
+      }
+      const hit = ills.some((a) => blocks.some((b) => a.left < b.right - 8 && b.left < a.right - 8 && a.top < b.bottom - 8 && b.top < a.bottom - 8));
+      if (hit) bad.push('挿絵が本文に重なっている（文字を減らすか、挿絵を外す）');
+    }
     // 表紙の題は2行まで、右の丸い飾り（左から900pxより右）に文字を重ねない
     if (sec.classList.contains('top') && h1) {
       const range = document.createRange(); range.selectNodeContents(h1);

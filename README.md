@@ -27,9 +27,9 @@ Gateway には Lambda のインターセプターを付けていて、利用者�
 
 エージェントは、ナレッジベースと Web 検索を、もう1つの AgentCore Gateway 越しに呼びます。ナレッジベースを2026年の情報で引くか、過去の情報で引くかは Gateway 側で固定してあり、エージェントから渡せるのは質問文だけです。
 
-ログインした人は、記事の URL や調べたテーマからスライドを作れます。エージェントのツールが回数を数えてから、スライド工房を別の AgentCore Runtime としてジョブごとのセッションで起こします。工房は Marp と Chromium で焼いて余白を測り、崩れたスライドを1回だけ直させてから S3 に置きます。できたスライドは CloudFront の /s/* から開けます。
+記事の URL や調べたテーマからスライドを作れます（ログインなしは1日1本、Google でログインすると1日2本）。エージェントのツールが回数を数えてから、スライド作成機能を別の AgentCore Runtime としてジョブごとのセッションで起こします。スライド作成機能は書くところを AgentCore Harness のエージェントに任せ、エージェントが Marp と Chromium で焼いて余白を測り、焼いた画像を見て直します。アーキテクチャ図は diagrams で描き、挿絵は同梱の挿絵の画像一式から選びます。スライド作成機能は受け取ったものをもう一度検査してから S3 に置きます。できたスライドは CloudFront の /s/* から開けます。
 
-モデルは Claude API を先に呼び、使えないときだけ Amazon Bedrock に切り替えます。
+モデルは Claude API を先に呼び、使えないときだけ Amazon Bedrock に切り替えます。スライド作成機能は、今月の Claude API の使用額が線に近づいたら、使い切る前に Bedrock へ切り替えます。
 
 作りの要点は [docs/design.md](docs/design.md) にまとめてあります。
 
@@ -39,8 +39,8 @@ Gateway には Lambda のインターセプターを付けていて、利用者�
 |---|---|
 | エージェント | Strands Agents（Python） |
 | モデル | Claude Sonnet 5.5（回答）、Claude Opus 5.5（スライド）、Claude Haiku 5.5（補助） |
-| 実行基盤 | Amazon Bedrock AgentCore（回答とスライド工房の2つの Runtime） |
-| スライド | Marp CLI、Chromium |
+| 実行基盤 | Amazon Bedrock AgentCore（回答とスライド作成機能の2つの Runtime、スライドを書く Harness） |
+| スライド | Marp CLI、Chromium、diagrams（Graphviz） |
 | 知識 | Amazon Bedrock Managed Knowledge Base |
 | 画面 | TypeScript、Vite |
 | インフラ | AWS CDK、[cdkd](https://github.com/go-to-k/cdkd) |
@@ -99,7 +99,7 @@ Google ログインを使わなければ、ログインなしで動きます。
    uv run --with boto3 python infra/scripts/knowledge.py sessions
    ```
 
-4. スライド工房を作り、続けてエージェント、入口の Gateway、WAF を作る
+4. スライド作成機能を作り、続けてエージェント、入口の Gateway、WAF を作る
 
    ```sh
    npx cdkd deploy MinorunSlides

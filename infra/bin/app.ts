@@ -17,7 +17,7 @@ const app = new cdk.App();
 cdk.Tags.of(app).add('Project', 'minorun-agent');
 
 const knowledge = new KnowledgeStack(app, 'MinorunKnowledge', { env });
-// URL からスライドを作る機能の保存先・回数の表・スライド工房（2026-11-15）
+// URL からスライドを作る機能の保存先・回数の表・スライド作成機能（2026-11-15）
 const slides = new SlidesStack(app, 'MinorunSlides', { env, siteUrl: 'https://agent.minoruonda.com' });
 const agent = new AgentStack(app, 'MinorunAgent', {
   env,

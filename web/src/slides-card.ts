@@ -1,15 +1,27 @@
-// スライドのカード（記事のURLから作るものと、調べてまとめるもの）。受け付けた直後に置き、工房が書く status.json を数秒おきに見て、
-// 「記事を読む → 構成を考える → スライドを焼く → 仕上げ」の段階を進め、できたら表紙のサムネイルに差し替える。
+// スライドのカード（記事のURLから作るものと、調べてまとめるもの）。受け付けた直後に置き、スライド作成機能が書く status.json を数秒おきに見て、
+// 「記事を読む → 構成を考える → スライドを書き出す → 仕上げ」の段階を進め、できたら表紙のサムネイルに差し替える。
 
-export interface SlidesStatus { stage: string; kind?: 'article' | 'topic'; message?: string; title?: string; pages?: number; viewer?: string; thumb?: string }
+export interface SlidesStatus { stage: string; kind?: 'article' | 'topic'; detail?: string; message?: string; title?: string; pages?: number; viewer?: string; thumb?: string }
 
-export const STEPS = ['記事を読む', '構成を考える', 'スライドを焼く', '仕上げ'] as const;
-const WAIT_LINES = ['記事を読んでいます', '構成を考えています', 'スライドを焼いています', '余白を測って仕上げています'];
+export const STEPS = ['記事を読む', '構成を考える', 'スライドを書き出す', '仕上げ'] as const;
+const WAIT_LINES = ['記事を読んでいます', '構成を考えています', 'スライドを書き出しています', '余白を測って仕上げています'];
 /** 調べてまとめるときは、最初の段階を「出典を読む」と言い分ける */
 export const stepLabel = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? '出典を読む' : STEPS[i]);
 export const waitLine = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? '出典を読んでいます' : WAIT_LINES[i]);
+/** できるまでの目安。エージェントが焼いて見直すので5〜10分かかる（2026-11-21 の本番で約6.5分） */
+export const ETA_LINE = 'できるまで5〜10分ほど。閉じても続きます';
+/** 作成中の一言。スライド作成機能が書く detail（「書き出して余白を測っています（2回目）」など）があればそれを、無ければ段階の言葉を出す。
+ *  detail は status.json から来るので、短い日本語の文だけを通す（タグや記号の多い文は捨てる） */
+export function progressLine(s: SlidesStatus): string {
+  const d = typeof s.detail === 'string' ? s.detail.trim() : '';
+  if (d && d.length <= 40 && !/[<>{}\[\]`$]/.test(d)) return d;
+  const n = stepOf(s.stage);
+  return n >= 0 && n < 4 ? waitLine(n, s.kind) : '順番を待っています';
+}
+/** 作成中として見張る長さ。スライド作成機能の1本の上限（60分）より短く、ふだんの所要（5〜10分）より十分長く */
+export const WORKING_MINUTES = 40;
 
-/** 工房の段階を、画面の4段階のどこまで来たかへ直す（-1 は受付待ち） */
+/** スライド作成機能の段階を、画面の4段階のどこまで来たかへ直す（-1 は受付待ち） */
 export function stepOf(stage: string): number {
   return ({ queued: -1, reading: 0, writing: 1, rendering: 2, checking: 3, fixing: 3, done: 4 } as Record<string, number>)[stage] ?? -1;
 }
@@ -21,8 +33,8 @@ export function safeViewer(base: string, s: SlidesStatus): { viewer: string; thu
   return { viewer: base, thumb: base + 'og.jpg' + (s.pages ? `?v=${s.pages}` : '') };
 }
 
-/** 作成中のカードを諦めるまでの時間（工房の打ち切り20分＋余裕） */
-export const GIVE_UP_MS = 25 * 60_000;
+/** 作成中のカードを諦めるまでの時間（WORKING_MINUTES と同じ） */
+export const GIVE_UP_MS = WORKING_MINUTES * 60_000;
 
 /** ログインしていない人へ、作成中のカードの中で待つ間のログインを勧める（11/21 みのるん選定のA案） */
 export interface LoginNudge { icon: string; onClick: () => void }
@@ -32,7 +44,7 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
   const fig = document.createElement('figure');
   fig.className = 'slides-card working';
   fig.innerHTML = `<div class="slides-steps">${STEPS.map((s, i) => `<span class="step" data-i="${i}"><i></i>${s}</span>`).join('')}</div>`
-    + `<div class="slides-bar"><span></span></div><figcaption class="slides-line">受け付けました。閉じても続きます</figcaption>`
+    + `<div class="slides-bar"><span></span></div><figcaption class="slides-line">受け付けました。${ETA_LINE}</figcaption>`
     + (nudge ? `<div class="slides-login"><p>${LOGIN_NUDGE_TEXT}</p><button type="button">${nudge.icon}<span>ログイン</span></button></div>` : '');
   fig.querySelector('.slides-login button')?.addEventListener('click', () => nudge!.onClick());
   const line = fig.querySelector('.slides-line') as HTMLElement;
@@ -44,7 +56,7 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
       el.classList.toggle('done', i < n); el.classList.toggle('now', i === n);
       if (i === 0) el.lastChild!.textContent = stepLabel(0, s.kind);
     });
-    if (n >= 0 && n < 4) line.textContent = waitLine(n, s.kind) + '…';
+    if (n >= 0 && n < 4) line.textContent = progressLine(s) + '…';
   };
   const finish = (s: SlidesStatus) => {
     stopped = true;
@@ -75,7 +87,7 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
         show(s);
       }
     } catch { /* 通信の揺れは次の回に任せる */ } finally { reading = false; }
-    // 工房は1本20分で打ち切って失敗を書くので、それより長く待っても進まないときだけ止める
+    // スライド作成機能は1本60分で打ち切って失敗を書く。ふだんの所要（5〜10分）より十分長く待っても進まないときだけ止める
     if (Date.now() - started > GIVE_UP_MS) return fail('時間がかかりすぎたため止めました。少し時間をおいて、もう一度頼んでください。');
     timer = window.setTimeout(tick, 3000);
   };
@@ -104,7 +116,7 @@ export function parseSlidesList(sse: string): SlidesItem[] {
   return [];
 }
 
-/** 作り始めて15分以内なら、まだ作っている途中の可能性がある */
+/** 作り始めて WORKING_MINUTES 分以内なら、まだ作っている途中の可能性がある */
 export const maybeWorking = (item: SlidesItem, now = Date.now()) => now / 1000 - item.at < GIVE_UP_MS / 1000;
 
 const when = (at: number) => {
@@ -148,8 +160,7 @@ export function slidesList(items: SlidesItem[], status: (job: string) => SlidesS
     } else if (kind === 'error') {
       rows.push(`<li><span class="t mut">作れませんでした</span>${d}</li>`);
     } else if (kind === 'working') {
-      const n = stepOf(s!.stage);
-      const step = n >= 0 && n < 4 ? waitLine(n, s!.kind) : '順番を待っています';
+      const step = esc(progressLine(s!));
       rows.push(`<li class="working"><span class="ph"><i></i></span><span class="t"><b>作成中…</b><small>${step}</small></span>${d}</li>`);
     } else if (kind === 'checking') {
       rows.push(`<li><span class="t mut">確かめています…</span>${d}</li>`);
@@ -210,6 +221,6 @@ export class SlidesTracker {
       await new Promise((r) => setTimeout(r, 3000));
     }
     this.polling.delete(it.job);
-    this.onChange(); // 15分を過ぎて作成中から外れたときも印を引き直す
+    this.onChange(); // WORKING_MINUTES 分を過ぎて作成中から外れたときも印を引き直す
   }
 }

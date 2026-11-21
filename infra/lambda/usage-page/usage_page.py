@@ -72,7 +72,7 @@ _SESSION_KEY = hashlib.sha256(f"usage-page-session:{TOKEN}".encode()).digest()
 PRICE = {
     "sonnet": {"in": 2.00, "out": 10.00, "cache_read": 0.10, "cache_write": 2.50},   # 100万トークンあたり
     "haiku": {"in": 0.10, "out": 0.50, "cache_read": 0.01, "cache_write": 0.125},
-    # スライド工房。global の単価（料金 API pricing:GetProducts、2026-11-15 に確かめた値）
+    # スライド作成機能。global の単価（料金 API pricing:GetProducts、2026-11-15 に確かめた値）
     "opus": {"in": 4.00, "out": 20.00, "cache_read": 0.20, "cache_write": 5.00},
     "vcpu_hour": 0.1276,
     "gb_hour": 0.0169,
@@ -276,7 +276,7 @@ def _cost(m, when, brave, kb, since=None, x=0, api=0, opus_api=None):
     cost["x"] = x
     cost["kb"] = kb
     cost["claude_api"] = api
-    # スライド工房が Claude API で書いた Opus（時台→ドル。slides_view.api_usd_by_hour）
+    # スライド作成機能が Claude API で書いた Opus（時台→ドル。slides_view.api_usd_by_hour）
     series = opus_api or {}
     cost["opus_api"] = (series.get(when, 0.0) if when is not None
                         else sum(v for h, v in series.items() if since is None or h >= since))
@@ -289,7 +289,7 @@ PACE_FRESH = 30 * 60  # 定期実行（15分ごと）が作った値を、この
 
 
 def _pace(now):
-    """公開からの累計と月額予測。公開からの全行と工房のログを読み直すので、冷えた実行環境だと7秒以上かかる。
+    """公開からの累計と月額予測。公開からの全行とスライド作成機能のログを読み直すので、冷えた実行環境だと7秒以上かかる。
     画面を開くたびに計算せず、定期実行が表へ置いた値を読む。古い・無いときだけその場で計算する。"""
     cached = _pace_cache.get("v")
     if cached and time.time() - cached[0] < 60:
@@ -338,7 +338,7 @@ def _compute_pace(now):
 
 
 def summary(day=None, pace=True):
-    """pace=False は定期実行用。公開からの累計（全行と工房のログを読み直す重い処理）を省く。"""
+    """pace=False は定期実行用。公開からの累計（全行とスライド作成機能のログを読み直す重い処理）を省く。"""
     now, start, end = _day(day)
     fp, fj = (TASKS.submit(_pace, now) if pace else None), TASKS.submit(_rejected, start, end)
     fm, fo = TASKS.submit(_metrics, start, end, 86400), TASKS.submit(slides_view.api_usd_by_hour, start, end)
@@ -869,7 +869,7 @@ def report(day=None, u="general", detail=True):
     # 公開からの累計（_pace）・登録者・持ち主は期間によらないので、質問の読み込みと並行に始める
     fp = TASKS.submit(_pace, _day(day)[0])
     fr, fw = TASKS.submit(_registered_users), TASKS.submit(_owner_actors)
-    # 期間は質問を読む前に決まるので、メトリクス・工房のログ・断った数も質問の読み込みと同時に始める
+    # 期間は質問を読む前に決まるので、メトリクス・スライド作成機能のログ・断った数も質問の読み込みと同時に始める
     _, start, end = _range(day)
     fm = TASKS.submit(_metrics, start, end, 3600)
     fo = TASKS.submit(slides_view.api_usd_by_hour, start, end)
