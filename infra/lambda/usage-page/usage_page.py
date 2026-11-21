@@ -376,7 +376,8 @@ def hours(day):
 
 
 # 要約と日ごとに要る項目。回答本文や使用量の記録は全項目の9割以上を占めるので、一覧を開くまで読まない。
-REPORT_FIELDS = ["created_at", "tools", "first_ms", "anon", "user", "pk", "feedback", "via", "x_search", "usage.calls"]
+REPORT_FIELDS = ["created_at", "tools", "first_ms", "anon", "user", "pk", "sk", "feedback", "via", "x_search", "usage.calls", "question", "flag"]
+RECENT = 8  # 要約の下段に出す、直近の質問と時台（日）の数
 DETAIL_FIELDS = REPORT_FIELDS + ["question", "answer", "topic", "flag", "flag_reason", "prebaked", "usage.complete", "usage.usd"]
 
 
@@ -385,6 +386,22 @@ def questions(day, detail=True):
     rows = _rows(start, end, DETAIL_FIELDS if detail else REPORT_FIELDS)
     rows.sort(key=lambda r: r["created_at"], reverse=True)
     return now, start, rows
+
+
+def _answers(rows):
+    """要約の下段に出す数件だけ、回答の本文を会話の表から引く（全行の回答は読まない）。"""
+    def one(r):
+        if not (r.get("pk") and r.get("sk")):
+            return None
+        try:
+            items = ddb.query(TableName=TABLE, KeyConditionExpression="pk = :p AND sk = :s",
+                              ExpressionAttributeValues={":p": {"S": r["pk"]}, ":s": {"S": r["sk"]}},
+                              ProjectionExpression="answer").get("Items") or []
+            return _plain(items[0]).get("answer") if items else None
+        except Exception as e:
+            print(json.dumps({"recent_answer": "unavailable", "error": type(e).__name__}))
+            return None
+    return list(TASKS.map(one, rows))
 
 
 def _registered_users():
@@ -1241,6 +1258,7 @@ REFRESH_SCRIPT = """<script id="dashboard-refresh">
       const list = document.querySelector('.list');
       // 開いている回答と、一覧内・ページ全体の読んでいる位置を保つ。
       const opened = new Set(changedDay ? [] : [...document.querySelectorAll('.list details[open]')].map(e => e.dataset.row));
+      const recentOpened = new Set(changedDay ? [] : [...document.querySelectorAll('.recent-list details[open]')].map(e => e.dataset.row));
       const datesLeft = document.querySelector('.date-tabs')?.scrollLeft || 0;
       const anchor = [...document.querySelectorAll('.list details')].find(e => e.getBoundingClientRect().bottom > Math.max(0, list.getBoundingClientRect().top));
       const anchorKey = anchor?.dataset.row, anchorTop = anchor?.getBoundingClientRect().top;
@@ -1258,6 +1276,7 @@ REFRESH_SCRIPT = """<script id="dashboard-refresh">
       if (changedDay) history.replaceState(null, '', url);
       if (!changedDay && document.querySelector('.date-tabs')) document.querySelector('.date-tabs').scrollLeft = datesLeft;
       document.querySelectorAll('.list details').forEach(e => { e.open = opened.has(e.dataset.row); });
+      document.querySelectorAll('.recent-list details').forEach(e => { e.open = recentOpened.has(e.dataset.row); });
       const newList = document.querySelector('.list');
       newList.scrollTop = changedDay ? 0 : listTop;
       window.scrollTo(0, pageY);
@@ -1374,19 +1393,63 @@ def _summary_html(d, ban=None):
 <div class="card breakdown"><h2>この日の費用内訳</h2>{cost_rows}</div>"""
 
 
+def _daily(rows):
+    """1時間ごとの行を日ごとにまとめる（新しい順のまま）。"""
+    daily = {}
+    for r in rows:
+        bucket = daily.setdefault(r["hour"].date(), {"hour": r["hour"], "questions": 0, "usd": 0, "users_set": set(), "sessions_set": set()})
+        bucket["questions"] += r["questions"]
+        bucket["usd"] += r["usd"]
+        bucket["users_set"].update(r.get("user_ids", []))
+        bucket["sessions_set"].update(r.get("session_ids", []))
+    return [dict(r, users=len(r["users_set"]), sessions=len(r["sessions_set"])) for r in daily.values()]
+
+
+def _recent_html(d, hrs, rows, banned=frozenset(), multi=False):
+    """要約の一番下。左に直近の質問（タップで回答）、右に直近の時台（期間なら日）を質問数の棒つきで並べる。"""
+    ds, u = d.get("selection", ""), d.get("u")
+    items = []
+    for r in rows:
+        t = datetime.datetime.fromisoformat(r["created_at"])
+        when = (periods.date_label(t) + " " if multi else "") + t.strftime("%H:%M")
+        identifier = r.get("identifier") or _identifier(_actor(r))
+        tags = []
+        if identifier in banned:
+            tags.append('<span class="alert">利用停止中</span>')
+        if r.get("flag") and r["flag"] != "normal":
+            tags.append(f'<span class="alert">{html.escape(FLAG_LABELS.get(r["flag"], r["flag"]))}</span>')
+        meta = '<span class="dot">·</span>'.join(tags + [html.escape(when), html.escape(identifier)])
+        fb = r.get("feedback")
+        mark = (f'<span class="fb {fb}" title="{"良い" if fb == "good" else "良くない"}">{_thumb(fb)}</span>'
+                if fb in ("good", "bad") else "")
+        answer = r.get("answer")
+        body = _md(_mask(answer)) if answer else '<p class="note inline">回答を読み込めませんでした。質問の一覧から開いてください。</p>'
+        row_key = html.escape(str(r.get("pk", "")) + "|" + str(r.get("sk", r["created_at"])), quote=True)
+        items.append(f'<details data-row="{row_key}"{" class=bad" if fb == "bad" else ""}><summary><div class="qbody">'
+                     f'<div class="q">{html.escape(_mask(r.get("question")))}</div><div class="meta">{meta}</div></div>{mark}</summary>'
+                     f'<div class="ans">{body}</div></details>')
+    unit = "日" if multi else "時台"
+    lines = (_daily(hrs) if multi else hrs)[:RECENT]
+    top = max([x["questions"] for x in lines] + [1])
+    trs = "".join(
+        f'<tr{" class=zero" if not x["questions"] else ""}><td>{periods.date_label(x["hour"]) if multi else str(x["hour"].hour) + "時台"}</td>'
+        f'<td>{x["sessions"]}</td><td class="qcount">{x["questions"]}<span class="qbar"><i style="width:{x["questions"] / top * 100:.0f}%"></i></span></td>'
+        f'<td>{_yen(x["usd"])}</td></tr>' for x in lines)
+    empty = f'<p class="note inline">{"この期間" if multi else "この日"}の質問はまだありません。</p>'
+    return (f'<div class="recent"><div class="card recent-q"><div class="recent-h"><h2>直近の質問<small>新しい順・タップで回答</small></h2>'
+            f'<a href="{html.escape(_url(v="list", d=ds, u=u))}">質問の一覧へ ›</a></div>'
+            f'<div class="recent-list">{"".join(items) or empty}</div></div>'
+            f'<div class="card recent-h-card"><div class="recent-h"><h2>直近{len(lines)}{"日" if multi else "時間"}</h2>'
+            f'<a href="{html.escape(_url(v="hours", d=ds, u=u))}">{"日ごと" if multi else "1時間ごと"}へ ›</a></div>'
+            f'<table class="recent-t"><tr><th>{unit}</th><th>セッション</th><th>質問</th><th>費用</th></tr>{trs}</table></div></div>')
+
+
 def _hours_html(rows, total, date_tabs="", multi=False):
     def cell(usd):
         return f"{_yen(usd)} <small>${usd:,.2f}</small>"
     lines = [f'<tr class="sum"><td>合計</td><td>{total["users"]}</td><td>{total["sessions"]}</td><td>{total["questions"]}</td><td>{cell(total["usd"])}</td></tr>']
     if multi:
-        daily = {}
-        for r in rows:
-            bucket = daily.setdefault(r["hour"].date(), {"hour": r["hour"], "questions": 0, "usd": 0, "users_set": set(), "sessions_set": set()})
-            bucket["questions"] += r["questions"]
-            bucket["usd"] += r["usd"]
-            bucket["users_set"].update(r.get("user_ids", []))
-            bucket["sessions_set"].update(r.get("session_ids", []))
-        rows = [dict(r, users=len(r["users_set"]), sessions=len(r["sessions_set"])) for r in daily.values()]
+        rows = _daily(rows)
     for r in rows:
         zero = ' class="zero"' if not r["questions"] else ""
         lines.append(f'<tr{zero}><td>{periods.date_label(r["hour"]) if multi else str(r["hour"].hour) + "時台"}</td><td>{r["users"]}</td><td>{r["sessions"]}</td><td>{r["questions"]}</td><td>{cell(r["usd"])}</td></tr>')
@@ -1587,11 +1650,18 @@ def render(view, day, page, f=None, u=None, qid=None, group="registered"):
     keep = None if view == "sum" else view
     controls = _period_controls(d, view, u, f, group)
     summary_html = _summary_html(d, ban)
+    recent_html = ""
+    if view == "sum":
+        recent = rows[:RECENT]
+        for r, a in zip(recent, _answers(recent)):
+            r["answer"] = a
+        recent_html = _recent_html(d, hrs, recent, ban["ids"], multi)
     # タブの移動はページの読み込み直しなので、ほかのタブでは一覧の中身を作らない。
     list_html = _list_html(start, rows, page, f, u, qid, ban["ids"], follow_today, ds, multi) if view == "list" else '<div class="list" hidden></div>'
     if multi:
         summary_html = summary_html.replace("この日の", "この期間の").replace("この日に", "この期間に")
         list_html = list_html.replace("この日の", "この期間の").replace("この日は", "この期間は")
+    summary_html += recent_html  # 質問の本文に「この日の」があっても書き換えないよう、置き換えの後に足す
     error_summary = error_card(errors, ds).replace("この日の", "この期間の" if multi else "この日の")
     error_list = error_details(errors).replace("この日の", "この期間の" if multi else "この日の")
     return f"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
@@ -1920,3 +1990,19 @@ header.dashboard-top .day{display:grid;grid-template-columns:auto minmax(0,1fr);
 """
 
 CSS += slides_view.CSS
+
+CSS += """
+.recent{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:24px;margin-top:24px;align-items:start}
+.recent .card{border:0;border-top:1px solid var(--line);border-radius:0;background:transparent}
+.recent-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px}.recent-h h2{padding-left:0}
+.recent-h a{font-size:13px;white-space:nowrap}
+.recent-list details{border-top:1px solid var(--line)}.recent-list details:first-child{border-top:0}
+.recent-list .ans{margin:0 0 12px}
+.recent-t{width:100%}.recent-t th,.recent-t td{text-align:right;white-space:nowrap}.recent-t th:first-child,.recent-t td:first-child{text-align:left}
+.recent-t tr.zero td{color:#b0b7c3}
+.qbar{display:inline-block;width:56px;height:6px;margin-left:8px;background:#eef1f5;border-radius:3px;vertical-align:middle;overflow:hidden}
+.qbar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.recent-list summary{padding-left:0;padding-right:0}
+.recent-t th:first-child,.recent-t td:first-child{padding-left:0}.recent-t th:last-child,.recent-t td:last-child{padding-right:0}
+@media(max-width:899px){.recent{grid-template-columns:1fr;gap:8px}.recent-h,.recent-list{padding:0 16px}.recent-t{margin:0 16px;width:calc(100% - 32px)}.qbar{width:36px}}
+"""
