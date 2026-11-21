@@ -16,7 +16,7 @@ import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { saveCarryover, takeCarryover, type LastTurn, type Pending } from './carryover';
 import { AttachError, shrink, upload } from './attach';
-import { parseSlidesList, slidesCard, slidesList, SlidesTracker } from './slides-card';
+import { parseSlidesList, seenBefore, slidesCard, slidesList, SlidesTracker } from './slides-card';
 import { OFFER_CHIP, OFFER_REQUEST, PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withOfferChip, withSlidesStarter } from './slides-hint';
 
 interface MapShown { src: string; alt: string; caption: string; width: number; height: number; source_url: string }
@@ -248,8 +248,12 @@ chara.querySelectorAll<HTMLImageElement>('img').forEach(i => {
 });
 const director = new PoseDirector(pose, new PosePicker(), missing);
 function cancelIdle() { clearTimeout(restTimer); clearTimeout(settleTimer); }
+// スライドを作っている間の待機は、休憩（コーヒー）ではなくパソコンで作業中の姿にする
+const slidesWorking = () => !!profile() && slides.badge() === 'working';
 function idle() {
-  cancelIdle(); director.phase('idle');
+  cancelIdle();
+  if (slidesWorking()) { director.phase('making'); return; }
+  director.phase('idle');
   restTimer = window.setTimeout(() => {
     if (!busy && !activeGift && !has('composing') && !has('limited')) director.phase('resting');
   }, 30_000);
@@ -376,7 +380,7 @@ function renderSuggest(list: string[], retry = false, via: Via = 'starter') {
   };
   if (retry) add('もう一度送る', '', (b) => send(lastText, b, lastVia, lastImage));
   list.forEach((t) => (t === SLIDES_STARTER ? add(t, '', openSlidesCompose)
-    : t === OFFER_CHIP ? add(t, '', (b) => (profile() ? send(OFFER_REQUEST, b, via) : askLoginForSlides({ kind: 'offer' })))
+    : t === OFFER_CHIP ? add(t, '', (b) => send(OFFER_REQUEST, b, via))
     : add(t, '', (b) => send(t, b, via))));
   // 一度答えたあとは、続けて聞けることが分かるように「追加で質問」にする
   add(has('started') ? '追加で質問' : '質問する', 'ask', openCompose);
@@ -434,31 +438,18 @@ function closeCompose() { stage.classList.remove('composing'); q.blur(); setSlid
 const slideChip = $<HTMLButtonElement>('#slideChip');
 let slidesMode = false;
 function setSlidesMode(on: boolean) { slidesMode = on; q.placeholder = on ? SLIDES_PLACEHOLDER : PLACEHOLDER; }
-function openSlidesCompose() {
-  if (!profile()) { askLoginForSlides(); return; }
-  setSlidesMode(true); openCompose();
-}
-// ログイン前の人がスライドの入口（札・質問候補）を押したら、送らずにみのるんの返事として吹き出しで案内し、右上のアイコンを脈打たせる
-const SLIDES_LOGIN_REPLY = 'スライド作成は、ログインした人だけの機能です。右上のアイコンからGoogleでログインすると、記事のURLや、調べてもらった回答からスライドを作れるようになります（1日2本まで）。';
-// ログイン前に最後に答えた質問と回答、スライドの入口で頼もうとしていたこと（ログインの往復のあとに描き直して続ける）
-let lastTurn: LastTurn | null = null, pendingLogin: Pending | null = null;
-function askLoginForSlides(pending: Pending = { kind: 'compose' }) {
-  pendingLogin = pending;
-  if (has('composing')) closeCompose();
-  closeGift(); cancelIdle(); turnVersion++;
-  stage.classList.add('started', 'answering');
-  greet.classList.remove('on'); thought.classList.remove('on'); doing.classList.remove('on');
-  answer.classList.remove('oops'); answer.innerHTML = md(SLIDES_LOGIN_REPLY); answer.scrollTop = 0;
-  bubble.classList.add('on'); director.answer(SLIDES_LOGIN_REPLY, false); layout();
-  meBtn.classList.remove('nudge'); void meBtn.offsetWidth; meBtn.classList.add('nudge');
-}
+// スライド作成はログインしていなくても頼める（2026-11-21〜。ログインなしは1日1本、ログインすると1日2本）
+function openSlidesCompose() { setSlidesMode(true); openCompose(); }
+// ログイン前に最後に答えた質問と回答（作成中のスライドを含む）。ログインの往復のあとに描き直して続ける。
+// pendingLogin は 11/21 より前の、ログインしてから頼む流れの名残り（古い控えを読んだときだけ使う）
+let lastTurn: LastTurn | null = null;
+const pendingLogin: Pending | null = null;
 function renderSlideChip() {
   const show = has('composing') && !attached && wantsSlidesHint(q.value);
   if (slideChip.hidden !== !show) { slideChip.hidden = !show; relayout(); }
 }
 slideChip.addEventListener('pointerdown', (e) => e.preventDefault());
 slideChip.addEventListener('click', () => {
-  if (!profile()) { askLoginForSlides({ kind: 'url', text: q.value.trim() }); return; }
   send(slidesRequest(q.value), q, 'typed');
 });
 q.addEventListener('input', renderSlideChip);
@@ -593,6 +584,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   let raw = '', seeking = '', opened = false, failed = false, refused: Refused | null = null, next: string[] = [], limitShare = '', topic = '', offer = false;
   // 地図は本文より先に届くので吹き出しの先頭に、照合の結果は末尾に置く
   const figures: HTMLElement[] = [], extras: HTMLElement[] = [];
+  const turnSlides: { job: string; base: string }[] = []; // この回答で受け付けたスライド（ログインの往復のあとにカードを描き直す）
   let followingUp = false, showingMap = false;
   let linkPreview: LinkPreview | undefined;
   const render = (caret: boolean) => {
@@ -670,7 +662,8 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
         if (/^\/s\/[A-Za-z0-9]{8,32}\/$/.test(ev.base)) {
           // 吹き出しのカードで完成を見たら、アイコンの「できた」の印は出さない
           const job = ev.job;
-          figures.push(slidesCard(ev.base, () => { relayout(); if (slides.get(job)?.stage === 'done' || document.querySelector(`.slides-card.ready a[href="${ev.base}"]`)) slides.seen(job); }));
+          turnSlides.push({ job, base: ev.base });
+          figures.push(slidesCard(ev.base, () => { relayout(); if (slides.get(job)?.stage === 'done' || document.querySelector(`.slides-card.ready a[href="${ev.base}"]`)) slides.seen(job); }, undefined, loginNudge()));
           if (opened) render(true);
           slides.add({ job, base: ev.base, at: Math.floor(Date.now() / 1000) });
         }
@@ -737,7 +730,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   // 調べた説明の回答のあとは、候補の先頭に「この回答をスライドに！」を1つ置く
   const list = next.length ? next : starters([text]);
   if (!has('limited')) renderSuggest(offer && !failed ? withOfferChip(list) : list, failed && refused?.reason !== 'too_long', next.length ? 'ai' : 'starter');
-  if (!failed && raw.trim()) { lastTurn = { q: text, a: raw, next: list, offer, via: next.length ? 'ai' : 'starter' }; pendingLogin = null; }
+  if (!failed && raw.trim()) lastTurn = { q: text, a: raw, next: list, offer, via: next.length ? 'ai' : 'starter', slides: turnSlides };
   if (!failed && raw) {
     giftState.turns++; saveGifts();
     const isExpo = /expo|展示|ブース/i.test(topic + ' ' + text);
@@ -762,8 +755,9 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
 // 会話ごとに新しい入れ物（microVM）が立ち上がるのに数秒かかるので、ページを開いた時点で先に起こしておく
 async function warmUp() {
   const res = await transport.warmup();
-  // ログインした人には、先読みの返事に「作ったスライド」が載ってくる。作成中ならアイコンに印を付け、メニューの一覧で進み具合を見せる
-  if (res?.ok && profile()) slides.set(parseSlidesList(await res.text().catch(() => '')));
+  // 先読みの返事に「作ったスライド」が載ってくる（ログインしていない人は、このブラウザで作った分）。
+  // 作成中ならアイコンに印を付け、メニューの一覧で進み具合を見せる
+  if (res?.ok) slides.set(parseSlidesList(await res.text().catch(() => '')));
 }
 function showBanned(message: string) {
   closeGift(); cancelIdle(); turnVersion++;
@@ -778,9 +772,9 @@ function showBanned(message: string) {
 const meBtn = $('#me'), mePop = $('#mepop');
 const PERSON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="8.5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4.8 19.5c1.3-3.3 4-5 7.2-5s5.9 1.7 7.2 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 const GOOGLE = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
-// ログインした人の特典。スライド作成は自由入力で頼む機能で目に付きにくいので、頼み方まで書いて先頭に置く
+// ログインした人の特典。スライドはログインなしでも作れるので、ログインで増える本数とどの端末からでも開けることを先頭に置く
 const PERKS = `<ul class="perks">
-  <li class="slides"><b>記事のURLからスライドを作れます</b><span>URLを貼って「スライドにして」と送るだけ。<i>1日2本まで</i></span></li>
+  <li class="slides"><b>スライドを1日2本まで作れます</b><span>作ったスライドを、どの端末からでも開けます。<i>ログインなしは1日1本</i></span></li>
   <li>1日に話せる回数が増えます</li>
   <li>話した内容を覚えて答えます</li>
 </ul>`;
@@ -790,20 +784,28 @@ async function authHeader(): Promise<Record<string, string>> {
 }
 // メニューを開いている間は、開いた時点で見ていなかった完成品に NEW を付けたままにする（閉じたら消す）
 let freshNew = new Set<string>();
+let wasWorking = false;
 const slides = new SlidesTracker(() => {
   renderBadge();
+  // 作り始め・作り終わりで、待機中の姿を切り替える（回答中・入力中はそのまま）
+  const working = slidesWorking();
+  if (working !== wasWorking) { wasWorking = working; if (!busy && ['idle', 'resting', 'making'].includes(director.state)) idle(); }
   if (mePop.classList.contains('on')) { slides.unseen.forEach((j) => freshNew.add(j)); renderList(); slides.seen(); }
 });
 const BADGE_LABEL = { '': '', working: '（スライドを作成中）', ready: '（スライドができました）' };
 function renderBadge() {
   const p = profile();
-  const b = p ? slides.badge() : '';
+  const b = slides.badge();
   meBtn.dataset.badge = b;
-  meBtn.setAttribute('aria-label', p ? `ログイン中${BADGE_LABEL[b]}` : 'ログイン');
+  meBtn.setAttribute('aria-label', (p ? 'ログイン中' : 'ログイン') + BADGE_LABEL[b]);
 }
 function renderList() {
   const box = $('#myslides');
   if (box) box.replaceChildren(slidesList(slides.items, slides.get, new Set([...slides.unseen, ...freshNew])));
+}
+// ログインしていない人の作成中のカードに出すログインの案内。Google から戻ったら、同じカードを描き直して続ける
+function loginNudge() {
+  return profile() ? undefined : { icon: GOOGLE, onClick: () => { saveCarryover(sessionStorage, lastTurn, pendingLogin); void login(); } };
 }
 function renderMe() {
   const p = profile();
@@ -813,10 +815,10 @@ function renderMe() {
   mePop.innerHTML = p
     ? `<p class="lead">ログイン中です。</p>${PERKS}<div id="myslides"></div><button class="out" id="logout" type="button">ログアウト</button>`
     : `<p class="lead">ログインすると、こんなことができます。</p>${PERKS}
-       <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>Google でログイン</span></button>`;
+       <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>Google でログイン</span></button><div id="myslides"></div>`;
   $('#glogin')?.addEventListener('click', () => { saveCarryover(sessionStorage, lastTurn, pendingLogin); void login(); });
   $('#logout')?.addEventListener('click', () => logout());
-  if (p) renderList();
+  renderList();
 }
 const toggleMe = (on: boolean) => { mePop.classList.toggle('on', on); meBtn.setAttribute('aria-expanded', String(on)); };
 meBtn.addEventListener('click', (e) => {
@@ -831,7 +833,7 @@ meBtn.addEventListener('click', (e) => {
 document.addEventListener('pointerdown', (e) => { if (!mePop.contains(e.target as Node) && e.target !== meBtn && !meBtn.contains(e.target as Node)) toggleMe(false); });
 
 director.phase('greeting');
-restTimer = window.setTimeout(() => { if (!busy && !has('composing')) director.phase('resting'); }, 30_000);
+restTimer = window.setTimeout(() => { if (!busy && !has('composing')) { if (slidesWorking()) director.phase('making'); else director.phase('resting'); } }, 30_000);
 renderSuggest(starters());
 fitViewport();
 layout(); requestAnimationFrame(() => requestAnimationFrame(() => stage.classList.add('ready')));
@@ -842,6 +844,7 @@ const startup = handleRedirect().catch(() => false).then(async (signedIn) => {
   if (carried) restoreCarryover(carried.turn);
   await warmUp();
   if (carried) continueAfterLogin(carried.pending);
+  else resumeSlides();
 });
 // ログイン前のやり取りを吹き出しへ描き直す（エージェントは同じ会話IDで前の話を覚えている）
 function restoreCarryover(turn: LastTurn | null) {
@@ -852,8 +855,25 @@ function restoreCarryover(turn: LastTurn | null) {
   greet.classList.remove('on'); thought.classList.remove('on'); doing.classList.remove('on');
   $('#thoughtText').textContent = turn.q;
   answer.classList.remove('oops'); answer.innerHTML = md(turn.a); answer.scrollTop = 0;
+  // 作成中だったスライドのカードも描き直す（Google へ行っている間も工房は作り続けている）
+  for (const s of turn.slides ?? []) answer.appendChild(slidesCard(s.base, relayout));
   bubble.classList.add('on'); director.answer(turn.a, false);
   renderSuggest(turn.offer ? withOfferChip(turn.next) : turn.next, false, turn.via);
+  layout();
+}
+// 画面を読み込み直したとき（Safari がタブを捨てた・開き直した）に、少し前に頼んだスライドがまだ見ていないなら、
+// 吹き出しにカードを出し直す。作成中なら続きから進み具合を見せ、できていれば表紙を出す
+const RESUME_LINE = 'さっき頼んでくれたスライドです！';
+function resumeSlides() {
+  if (has('started') || busy) return;
+  const item = slides.items.find((i) => Date.now() / 1000 - i.at < 30 * 60 && !seenBefore(i.job));
+  if (!item) return;
+  closeGift(); cancelIdle(); turnVersion++;
+  stage.classList.add('started', 'answering');
+  greet.classList.remove('on'); thought.classList.remove('on'); doing.classList.remove('on');
+  answer.classList.remove('oops'); answer.innerHTML = md(RESUME_LINE); answer.scrollTop = 0;
+  answer.appendChild(slidesCard(item.base, () => { relayout(); if (slides.get(item.job)?.stage === 'done') slides.seen(item.job); }, undefined, loginNudge()));
+  bubble.classList.add('on'); director.answer(RESUME_LINE, false);
   layout();
 }
 // スライドの入口からログインした人は、頼もうとしていたことをそのまま続ける（押し直させない）

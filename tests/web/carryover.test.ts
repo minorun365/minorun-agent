@@ -11,13 +11,20 @@ class Mem implements Storage {
   removeItem(k: string) { this.m.delete(k); }
   setItem(k: string, v: string) { this.m.set(k, v); }
 }
-const turn: LastTurn = { q: 'バッジはどこ？', a: '会場の受付です。', next: ['次の質問'], offer: true, via: 'ai' };
+const turn: LastTurn = { q: 'バッジはどこ？', a: '会場の受付です。', next: ['次の質問'], offer: true, via: 'ai', slides: [] };
 
 test('ログイン前の質問と回答を、戻ってきたときに1回だけ取り出せる', () => {
   const s = new Mem();
   saveCarryover(s, turn, { kind: 'offer' }, 1000);
   assert.deepEqual(takeCarryover(s, 2000), { turn, pending: { kind: 'offer' }, at: 1000 });
   assert.equal(takeCarryover(s, 2000), null);
+});
+
+test('作成中のスライドも控え、よそのURLは捨てる', () => {
+  const s = new Mem();
+  const slides = [{ job: 'abcDEF123456', base: '/s/abcDEF123456/' }, { job: 'x', base: 'https://evil.example/' }];
+  saveCarryover(s, { ...turn, slides }, null, 1000);
+  assert.deepEqual(takeCarryover(s, 2000)?.turn?.slides, [{ job: 'abcDEF123456', base: '/s/abcDEF123456/' }]);
 });
 
 test('30分より古い控えは描き直さない', () => {

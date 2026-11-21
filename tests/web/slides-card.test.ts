@@ -26,7 +26,9 @@ test('先読みの返事から作ったスライドの一覧を取り出す（�
   assert.deepEqual(parseSlidesList(sse), [{ job: 'abcDEF123456', base: '/s/abcDEF123456/', at: 100 }]);
   assert.deepEqual(parseSlidesList('data: {"type":"done"}\n\n'), []);
   assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 60_000), true);
-  assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 20 * 60_000), false);
+  // 工房は1本20分で打ち切るので、25分までは作成中として見張る
+  assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 20 * 60_000), true);
+  assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 26 * 60_000), false);
 });
 
 test('アイコンの印：作成中があれば working、無くて見ていない完成品があれば ready', async () => {
