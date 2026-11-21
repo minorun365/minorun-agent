@@ -285,6 +285,12 @@ export class WatchStack extends cdk.Stack {
       resources: [this.formatArn({ service: 'dynamodb', resource: 'table', resourceName: 'minorun-agent-usage' })],
       conditions: { 'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['audience#owner'] } },
     }));
+    // 累計と月額予測は定期実行が計算して置き、画面はそれを読む（開くたびに全期間を読み直さない）
+    usagePage.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem', 'dynamodb:PutItem'],
+      resources: [this.formatArn({ service: 'dynamodb', resource: 'table', resourceName: 'minorun-agent-usage' })],
+      conditions: { 'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['cache#pace'] } },
+    }));
     // 確認した停止記録だけに既読時刻を保存する。
     usagePage.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:UpdateItem'],

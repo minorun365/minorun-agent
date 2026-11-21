@@ -96,9 +96,10 @@ PHONE = re.compile(r"(\+?\d[\d\- ]{8,}\d)")
 cw = boto3.client("cloudwatch")
 ddb = boto3.client("dynamodb")
 # 表の並行読み（区画ごと）と、互いに待たない取得の並行実行。前者の中で後者を待たないので詰まらない
-SCAN_SEGMENTS = 4
-POOL = concurrent.futures.ThreadPoolExecutor(max_workers=12)
-TASKS = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+SCAN_SEGMENTS = 8
+POOL = concurrent.futures.ThreadPoolExecutor(max_workers=24)
+# 画面1枚で十数本を同時に投げ、その中で更に投げるもの（_pace）がある。枯渇して互いを待たないよう多めに持つ
+TASKS = concurrent.futures.ThreadPoolExecutor(max_workers=24)
 
 
 def _day(d):
@@ -283,14 +284,39 @@ def _cost(m, when, brave, kb, since=None, x=0, api=0, opus_api=None):
 
 
 _pace_cache = {}
+PACE_KEY = {"pk": {"S": "cache#pace"}}
+PACE_FRESH = 30 * 60  # 定期実行（15分ごと）が作った値を、この秒数まで使う
 
 
 def _pace(now):
-    """公開からの累計・直近7日の概算コストと、このペースでの月額（直近7日の1日平均×30日）。
-    公開から7日たつまでは、公開からの日数で割って1日平均を出す。15秒ごとの部分更新で毎回引かないよう60秒覚える。"""
+    """公開からの累計と月額予測。公開からの全行と工房のログを読み直すので、冷えた実行環境だと7秒以上かかる。
+    画面を開くたびに計算せず、定期実行が表へ置いた値を読む。古い・無いときだけその場で計算する。"""
     cached = _pace_cache.get("v")
     if cached and time.time() - cached[0] < 60:
         return cached[1]
+    try:
+        item = ddb.get_item(TableName=AUDIENCE_TABLE, Key=PACE_KEY).get("Item") or {}
+        at = float(item.get("at", {}).get("N", "0"))
+        if time.time() - at < PACE_FRESH:
+            out = json.loads(item["v"]["S"])
+            _pace_cache["v"] = (time.time(), out)
+            return out
+    except Exception as e:
+        print(json.dumps({"pace_cache": "unavailable", "error": type(e).__name__}))
+    return _compute_pace(now)
+
+
+def _save_pace(now):
+    """定期実行から呼ぶ。計算した値を表へ置き、画面からはそれを読む。"""
+    out = _compute_pace(now)
+    ddb.put_item(TableName=AUDIENCE_TABLE, Item={**PACE_KEY, "at": {"N": str(time.time())},
+                                                 "v": {"S": json.dumps(out)}})
+    return out
+
+
+def _compute_pace(now):
+    """公開からの累計・直近7日の概算コストと、このペースでの月額（直近7日の1日平均×30日）。
+    公開から7日たつまでは、公開からの日数で割って1日平均を出す。"""
     since = COST_SINCE
     week = max(since, (now - datetime.timedelta(days=7)).replace(minute=0, second=0, microsecond=0))
     fm = TASKS.submit(_metrics, since, now, 3600)
@@ -811,18 +837,28 @@ def _question_id(r):
     return hashlib.sha256((r.get("question") or "").strip().encode()).hexdigest()[:16]
 
 
+def _range(day):
+    """画面が集計する期間（種類, 始まり, 終わり）。1日なら翌0時か今の早いほう"""
+    now, start, _ = _day(day)
+    mode, _, period_end = periods.bounds(day, now, COST_SINCE)
+    end = min(start + datetime.timedelta(days=1), now) if mode == "day" else period_end
+    return mode, start, end
+
+
 def report(day=None, u="general", detail=True):
     """画面と JSON が共有する1回の取得結果。費用は時台ごとの質問数で按分する。"""
     u = u or "general"
     # 公開からの累計（_pace）・登録者・持ち主は期間によらないので、質問の読み込みと並行に始める
     fp = TASKS.submit(_pace, _day(day)[0])
     fr, fw = TASKS.submit(_registered_users), TASKS.submit(_owner_actors)
-    now, start, rows = questions(day, detail)
-    mode, _, period_end = periods.bounds(day, now, COST_SINCE)
-    end = min(start + datetime.timedelta(days=1), now) if mode == "day" else period_end
+    # 期間は質問を読む前に決まるので、メトリクス・工房のログ・断った数も質問の読み込みと同時に始める
+    _, start, end = _range(day)
     fm = TASKS.submit(_metrics, start, end, 3600)
     fo = TASKS.submit(slides_view.api_usd_by_hour, start, end)
     fj = TASKS.submit(_rejected, start, end)
+    now, start, rows = questions(day, detail)
+    mode, _, period_end = periods.bounds(day, now, COST_SINCE)
+    end = min(start + datetime.timedelta(days=1), now) if mode == "day" else period_end
     m, oa, registered, owners = fm.result(), fo.result(), fr.result(), fw.result()
     groups = {}
     for r in rows:
@@ -1499,20 +1535,28 @@ def _period_controls(d, view, u, f, group):
             f'<div class="period-nav">{nav}</div>{quick}')
 
 
-def _slides(d, rows, view, multi):
+def _slide_jobs(day, end, view):
+    """スライドの表（本数だけならこれ）か、開いたときのサムネイルつきの一覧。質問の読み込みと同時に始めるため分けた。"""
+    if view != "slides":
+        try:
+            return slides_view._jobs(day, end) if slides_view.TABLE else []
+        except Exception:
+            return []
+    return slides_view.load(day, end)
+
+
+def _slides(d, rows, view, multi, jobs=None, owners=None):
     """スライドのタブ。本数はどのタブでも出し（表を1回読むだけ）、サムネイルと費用は開いたときだけ集める。"""
-    owners = _owner_actors() if d["u"] in ("general", "owner") else set()
+    if jobs is None:
+        jobs = _slide_jobs(d["day"], d["end"], view)
+    if owners is None:
+        owners = _owner_actors() if d["u"] in ("general", "owner") else set()
     def keep(user):
         r = {"user": user, "pk": ""}
         r["audience"] = _audience(r, owners)
         return _selected(r, d["u"])
     if view != "slides":
-        try:
-            jobs = slides_view._jobs(d["day"], d["end"]) if slides_view.TABLE else []
-        except Exception:
-            jobs = []
-        return '<div class="card" hidden></div>', sum(keep(j["user"]) for j in jobs)
-    jobs = slides_view.load(d["day"], d["end"])
+        return '<div class="card" hidden></div>', sum(keep(j["user"]) for j in jobs or [])
     if jobs is not None:
         jobs = slides_view.attach([j for j in jobs if keep(j["user"])], rows)
     label = "この期間" if multi else "この日"
@@ -1521,18 +1565,22 @@ def _slides(d, rows, view, multi):
 
 def render(view, day, page, f=None, u=None, qid=None, group="registered"):
     view = view if view in ("hours", "list", "errors", "people", "slides") else "sum"
+    # 質問の集計と互いに待たない取得（利用停止・通信エラー・スライド・持ち主）を、同時に始める
+    _, p_start, p_end = _range(day)
+    fb, fe = TASKS.submit(bans), TASKS.submit(_period_errors, p_start, p_end, datetime.datetime.now(JST))
+    fs, fw = TASKS.submit(_slide_jobs, p_start, p_end, view), TASKS.submit(_owner_actors)
     d, hrs, total, rows = report(day, u, detail=view in ("list", "slides"))
     u = d["u"]
     now, start = d["now"], d["day"]
-    ban = _ban_summary(bans(), now)
-    errors = _period_errors(start, d["end"], now)
+    ban = _ban_summary(fb.result(), now)
+    errors = fe.result()
     on = lambda v: " on" if v == view else ""  # noqa: E731
     multi = d["period"] != "day"
     follow_today = not multi and start.date() == now.date()
     d["follow_today"] = follow_today
     ds = d["selection"]
     date_tabs = ""
-    slides_html, slides_count = _slides(d, rows, view, multi)
+    slides_html, slides_count = _slides(d, rows, view, multi, fs.result(), fw.result() if u in ("general", "owner") else set())
     tabs = "".join(f'<a class="{on(v).strip()}" href="{html.escape(_url(v=None if v == "sum" else v, d=ds, u=u, f=f, q=qid))}">{n}</a>'
                    for v, n in (("sum", "要約"), ("hours", "日ごと" if multi else "1時間ごと"), ("list", "質問の一覧"),
                                 ("slides", f'スライド<span class="tab-count">{slides_count}</span>' if slides_count else "スライド")))
@@ -1762,6 +1810,11 @@ def handler(event, _context):
                         {"Name": "UsersToday", "Unit": "Count"}]}]},
             "EstimatedCostUsd": round(d.get("aws_total", d["total"]), 4), "QuestionsToday": d["questions"], "UsersToday": d["users"]}))
         rolling = _rolling_cost(d["now"])
+        try:
+            # 画面が開くたびに7秒以上かけていた累計と月額予測を、ここで計算して表へ置く
+            _save_pace(d["now"])
+        except Exception as e:
+            print(json.dumps({"pace_save": "failed", "error": type(e).__name__}))
         print(json.dumps({"_aws": {"Timestamp": int(d["now"].timestamp() * 1000), "CloudWatchMetrics": [{
             "Namespace": "MinorunAgent", "Dimensions": [[]],
             "Metrics": [{"Name": "Rolling30DayCostUsd", "Unit": "None"}]}]},
