@@ -143,15 +143,29 @@ if(links[0].o.attrs['aria-current']!=='true'||links[1].o.attrs['aria-current']||
         def fetch(_day, detail=True):
             calls.append(detail)
             return self.now, self.start, [dict(r) for r in self.rows]
-        with patch.object(m, 'questions', side_effect=fetch), patch.object(m, 'bans', return_value=[]):
-            for view in (None, 'hours', 'people', 'errors'):
+        with patch.object(m, 'questions', side_effect=fetch), patch.object(m, 'bans', return_value=[]), \
+                patch.object(m, '_answers', side_effect=lambda rows: ['回答'] * len(rows)) as answers:
+            for view in ('hours', 'people', 'errors'):
                 self.assertNotIn('<details data-row', m.render(view, 'all', 1))
+            answers.assert_not_called()
+            # 要約は下段の直近の質問だけ、回答を別に引く（全行の回答は読まない）
+            self.assertIn('<details data-row', m.render(None, 'all', 1))
+            self.assertLessEqual(len(answers.call_args.args[0]), m.RECENT)
             self.assertEqual(calls, [False] * 4)
             self.assertIn('<details data-row', m.render('list', 'all', 1))
             self.assertEqual(calls[-1], True)
 
+    def test_projected_fields_do_not_overlap(self):
+        # DynamoDB は同じ項目・親子の項目を同時に指定すると Scan ごと断る
+        for fields in (m.REPORT_FIELDS, m.DETAIL_FIELDS):
+            for i, a in enumerate(fields):
+                for j, b in enumerate(fields):
+                    if i != j:
+                        self.assertFalse(a == b or b.startswith(a + '.'), (a, b))
+
     def test_summary_fields_exclude_large_values_and_nested_usage_is_projected(self):
-        self.assertFalse({'question', 'answer', 'usage', 'usage.usd'} & set(m.REPORT_FIELDS))
+        # 質問文は要約の下段に出すので読む。回答と使用量の記録は大きいので一覧を開くまで読まない
+        self.assertFalse({'answer', 'usage', 'usage.usd'} & set(m.REPORT_FIELDS))
         with patch.object(m.ddb, 'scan', return_value={'Items': []}) as scan:
             REAL_ROWS(self.start, self.now, ['created_at', 'usage.usd'])
         kwargs = scan.call_args.kwargs
