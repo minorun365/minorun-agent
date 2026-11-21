@@ -12,7 +12,7 @@ import type { Construct } from 'constructs';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
-// URL の記事からスライドを作る機能（2026-11-15 みのるん決定。ログインした人だけ・1人1日2本・全体で1日50本）。
+// URL の記事からスライドを作る機能（2026-11-15 みのるん決定。1人1日2本・全体で1日50本。11/21 からログインなしは1日1本）。
 // エージェントのツール make_slides が回数の表で数えてからスライド工房（AgentCore Runtime）をジョブごとのセッションで起こし、
 // できあがったビューア（s/<ジョブ>/）は CloudFront の /s/* から誰でも開ける（URL を知る人だけ・検索には出さない）。
 export class SlidesStack extends cdk.Stack {

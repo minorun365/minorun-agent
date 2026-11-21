@@ -94,6 +94,13 @@ class RefundTests(unittest.TestCase):
         self.assertEqual(call["ExpressionAttributeValues"][":minus"]["N"], "-1")
         self.assertEqual(call["ConditionExpression"], "n > :zero")  # 0 より下へは戻さない
 
+    def test_refunds_the_counted_keys_of_a_guest(self):
+        ddb = mock.Mock()
+        with mock.patch.object(handler, "QUOTA_TABLE", "tb"), mock.patch.object(handler.boto3, "client", return_value=ddb):
+            handler.refund({"job": "j", "user": "a:a1", "counted": ["guest#a1#2026-11-21", "ip#ip9#2026-11-21", "all#2026-11-21"]})
+        keys = [c.kwargs["Key"]["pk"]["S"] for c in ddb.update_item.call_args_list]
+        self.assertEqual(keys, ["guest#a1#2026-11-21", "ip#ip9#2026-11-21", "all#2026-11-21"])
+
     def test_uncounted_job_is_not_refunded(self):
         ddb = mock.Mock()
         with mock.patch.object(handler, "QUOTA_TABLE", "tb"), mock.patch.object(handler.boto3, "client", return_value=ddb):

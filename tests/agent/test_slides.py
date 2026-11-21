@@ -1,4 +1,4 @@
-"""スライドの受付：ログインした人だけ・1人1日と全体の上限・公開URLだけ・受け付けたら工房を非同期で起こす。"""
+"""スライドの受付：ログインした人は1日2本、していない人は匿名IDで1日1本・同じIPから3本・全体の上限・公開URLだけ・受け付けたら工房を非同期で起こす。"""
 import json
 import unittest
 from unittest.mock import MagicMock, patch
@@ -20,12 +20,12 @@ def clients(codes=None):
     return {"dynamodb": ddb, "s3": MagicMock(), "bedrock-agentcore": MagicMock()}
 
 
-def start(url="https://example.com/post", user="u1", codes=None, unlimited=False):
+def start(url="https://example.com/post", user="u1", codes=None, unlimited=False, anon="", ip=""):
     c = clients(codes)
     # 呼び出しは裏のスレッドで行うが、試験ではその場で走らせる
     with patch.object(slides, "_clients", c), patch.object(slides, "_spawn", lambda fn, *a: fn(*a)):
         r = slides.start(url, "初心者向けに", user, runtime="arn:rt", table="tb", bucket="bk", user_daily=2, total_daily=50,
-                         unlimited=unlimited)
+                         unlimited=unlimited, anon=anon, ip=ip, guest_daily=1, ip_daily=3)
     return r, c
 
 
@@ -34,7 +34,7 @@ class LaunchTests(unittest.TestCase):
         c = clients()
         c["bedrock-agentcore"].invoke_agent_runtime.side_effect = RuntimeError("down")
         with patch.object(slides, "_clients", c):
-            slides._launch("arn:rt", {"job": "j1", "user": "u1", "counted_day": "2026-11-16"}, "tb", "bk")
+            slides._launch("arn:rt", {"job": "j1", "user": "u1", "counted": ["user#u1#2026-11-16", "all#2026-11-16"]}, "tb", "bk")
         status = json.loads(c["s3"].put_object.call_args.kwargs["Body"])
         self.assertEqual(status["stage"], "error")
         keys = [x.kwargs["Key"]["pk"]["S"] for x in c["dynamodb"].update_item.call_args_list]
@@ -65,24 +65,46 @@ class StartTests(unittest.TestCase):
         self.assertGreaterEqual(len(inv["runtimeSessionId"]), 33)  # Runtime のセッション ID は33字以上
         self.assertEqual(json.loads(inv["payload"])["url"], "https://example.com/post")
         self.assertRegex(r["job"], r"^[A-Za-z0-9]{16}$")
-        # 工房が作れなかったときに戻せるよう、数えた日（回数の鍵と同じ日付）を渡す
-        day = json.loads(inv["payload"])["counted_day"]
-        self.assertEqual(items[0]["Update"]["Key"]["pk"]["S"], f"user#u1#{day}")
-        self.assertEqual(items[1]["Update"]["Key"]["pk"]["S"], f"all#{day}")
+        # 工房が作れなかったときに戻せるよう、数えた回数の鍵を渡す
+        self.assertEqual(json.loads(inv["payload"])["counted"], [i["Update"]["Key"]["pk"]["S"] for i in items])
 
     def test_unlimited_user_skips_counting(self):
         r, c = start(codes=["ConditionalCheckFailed", "ConditionalCheckFailed"], unlimited=True)
         self.assertEqual(r["status"], "accepted")
         c["dynamodb"].transact_write_items.assert_not_called()
         c["bedrock-agentcore"].invoke_agent_runtime.assert_called_once()
-        self.assertNotIn("counted_day", json.loads(c["bedrock-agentcore"].invoke_agent_runtime.call_args.kwargs["payload"]))  # 数えていないので戻さない
+        self.assertNotIn("counted", json.loads(c["bedrock-agentcore"].invoke_agent_runtime.call_args.kwargs["payload"]))  # 数えていないので戻さない
 
-    def test_unlimited_still_needs_login(self):
-        self.assertEqual(start(user="", unlimited=True)[0]["status"], "login_required")
+    def test_guest_is_counted_by_anon_ip_and_total(self):
+        r, c = start(user="", anon="a1", ip="ip9")
+        self.assertEqual(r["status"], "accepted")
+        self.assertIn("ログイン", r["note"])
+        items = c["dynamodb"].transact_write_items.call_args.kwargs["TransactItems"]
+        keys = [i["Update"]["Key"]["pk"]["S"].rsplit("#", 1)[0] for i in items]
+        self.assertEqual(keys, ["guest#a1", "ip#ip9", "all"])
+        self.assertEqual([i["Update"]["ExpressionAttributeValues"][":lim"]["N"] for i in items], ["1", "3", "50"])
+        body = json.loads(c["bedrock-agentcore"].invoke_agent_runtime.call_args.kwargs["payload"])
+        self.assertEqual(body["user"], "a:a1")
+        self.assertEqual(len(body["counted"]), 3)
+        # 一覧は匿名IDの持ち主へ積む（ログインしたら claim で移す）
+        self.assertEqual(c["dynamodb"].update_item.call_args.kwargs["Key"]["pk"]["S"], "list#a:a1")
 
-    def test_login_required(self):
-        r, c = start(user="")
-        self.assertEqual(r["status"], "login_required")
+    def test_guest_limits(self):
+        self.assertEqual(start(user="", anon="a1", ip="ip9", codes=["ConditionalCheckFailed", "None", "None"])[0]["status"], "guest_limit")
+        self.assertEqual(start(user="", anon="a1", ip="ip9", codes=["None", "ConditionalCheckFailed", "None"])[0]["status"], "guest_limit")
+        self.assertEqual(start(user="", anon="a1", ip="ip9", codes=["None", "None", "ConditionalCheckFailed"])[0]["status"], "busy")
+        # IP が分からなければ匿名IDと全体だけで数える
+        r, c = start(user="", anon="a1")
+        self.assertEqual(len(c["dynamodb"].transact_write_items.call_args.kwargs["TransactItems"]), 2)
+
+    def test_unlimited_is_only_for_signed_in(self):
+        r, c = start(user="", anon="a1", unlimited=True)
+        self.assertEqual(r["status"], "accepted")
+        c["dynamodb"].transact_write_items.assert_called_once()
+
+    def test_needs_some_identity(self):
+        r, c = start(user="", anon="")
+        self.assertEqual(r["status"], "unavailable")
         c["dynamodb"].transact_write_items.assert_not_called()
 
     def test_user_limit_and_total_limit(self):
@@ -168,3 +190,31 @@ class ListTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClaimTests(unittest.TestCase):
+    def test_moves_guest_jobs_to_user(self):
+        c = clients()
+        jobs = [{"M": {"job": {"S": "j1"}, "at": {"N": "100"}}}]
+        c["dynamodb"].get_item.return_value = {"Item": {"jobs": {"L": jobs}}}
+        with patch.object(slides, "_clients", c):
+            self.assertEqual(slides.claim("tb", "a1", "u1"), 1)
+        calls = c["dynamodb"].update_item.call_args_list
+        self.assertEqual(calls[0].kwargs["Key"]["pk"]["S"], "list#u1")
+        self.assertEqual(calls[0].kwargs["ExpressionAttributeValues"][":new"]["L"], jobs)
+        self.assertEqual(calls[1].kwargs["Key"]["pk"]["S"], "list#a:a1")
+        self.assertEqual(calls[1].kwargs["UpdateExpression"], "REMOVE jobs")
+
+    def test_nothing_to_claim(self):
+        c = clients()
+        c["dynamodb"].get_item.return_value = {}
+        with patch.object(slides, "_clients", c):
+            self.assertEqual(slides.claim("tb", "a1", "u1"), 0)
+        c["dynamodb"].update_item.assert_not_called()
+
+    def test_recent_drops_duplicates(self):
+        c = clients()
+        j = {"M": {"job": {"S": "j1"}, "at": {"N": "100"}}}
+        c["dynamodb"].get_item.return_value = {"Item": {"jobs": {"L": [j, j]}}}
+        with patch.object(slides, "_clients", c):
+            self.assertEqual(slides.recent("tb", "u1"), [{"job": "j1", "at": 100}])

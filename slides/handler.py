@@ -513,11 +513,15 @@ QUOTA_TABLE = os.environ.get("SLIDES_TABLE", "")
 def refund(event):
     """作れなかった1本を、その人と全体の今日の回数から戻す（本文を読めない記事などで枠を失わせない）。
     数えていない依頼（運営者のテスト）と、もう0のときは何もしない。"""
-    day, user = event.get("counted_day"), event.get("user")
-    if not (QUOTA_TABLE and day and user):
+    # counted は数えた回数の鍵の一覧（11/21〜。匿名の人の分も戻せる）。それより前の依頼は counted_day と user から組み立てる
+    keys = event.get("counted")
+    if keys is None:
+        day, user = event.get("counted_day"), event.get("user")
+        keys = [f"user#{user}#{day}", f"all#{day}"] if day and user else []
+    if not (QUOTA_TABLE and keys):
         return
     ddb = boto3.client("dynamodb", region_name=REGION)
-    for pk in (f"user#{user}#{day}", f"all#{day}"):
+    for pk in keys:
         try:
             ddb.update_item(TableName=QUOTA_TABLE, Key={"pk": {"S": pk}}, UpdateExpression="ADD n :minus",
                             ConditionExpression="n > :zero",

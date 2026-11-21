@@ -2,7 +2,8 @@
 // 戻ってきたら吹き出しへ描き直す。スライドの入口からログインした人は、頼もうとしていたことを続けて送る。
 // 控えはタブごとの sessionStorage に置く（会話IDと同じ置き場なので、別のタブや別の会話へは漏れない）。
 
-export type LastTurn = { q: string; a: string; next: string[]; offer: boolean; via: 'ai' | 'starter' };
+// slides＝その回答で受け付けたスライド（作成中でもログインの往復のあとにカードを描き直す）
+export type LastTurn = { q: string; a: string; next: string[]; offer: boolean; via: 'ai' | 'starter'; slides?: { job: string; base: string }[] };
 // offer＝回答をスライドに、url＝入力した URL をスライドに、compose＝URL を入れる入力欄を開く
 export type Pending = { kind: 'offer' } | { kind: 'url'; text: string } | { kind: 'compose' };
 export type Carryover = { turn: LastTurn | null; pending: Pending | null; at: number };
@@ -25,7 +26,11 @@ export function takeCarryover(storage: Storage, now = Date.now()): Carryover | n
     if (typeof c?.at !== 'number' || now - c.at > MAX_AGE || now < c.at) return null;
     const turn = c.turn && typeof c.turn.q === 'string' && typeof c.turn.a === 'string' && c.turn.a.trim()
       ? { q: c.turn.q, a: c.turn.a, next: Array.isArray(c.turn.next) ? c.turn.next.filter((t) => typeof t === 'string').slice(0, 6) : [],
-          offer: !!c.turn.offer, via: c.turn.via === 'ai' ? 'ai' as const : 'starter' as const }
+          offer: !!c.turn.offer, via: c.turn.via === 'ai' ? 'ai' as const : 'starter' as const,
+          // 自分のサイトの /s/<番号>/ だけを通す（控えは書き換えられうる）
+          slides: (Array.isArray(c.turn.slides) ? c.turn.slides : [])
+            .filter((x) => typeof x?.job === 'string' && typeof x?.base === 'string' && /^\/s\/[A-Za-z0-9]{8,32}\/$/.test(x.base))
+            .slice(0, 3).map((x) => ({ job: x.job, base: x.base })) }
       : null;
     const p = c.pending;
     const pending: Pending | null = p?.kind === 'offer' ? { kind: 'offer' }

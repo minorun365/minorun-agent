@@ -380,6 +380,7 @@ async def invoke(payload, context):
     # ログインした人は利用者のハッシュで覚え、端末をまたいでも同じ人として扱う（長期記憶もこの名前の下に残る）
     user = str(payload.get("user") or "")[:32]
     anon = str(payload.get("anon") or "anonymous")[:64]
+    ipk = str(payload.get("ipk") or "")[:16]  # 送信元IPのハッシュ（スライドの回数だけに使う）
     actor = f"user-{user}" if user else anon
     question = str(payload.get("prompt", "")).strip()[:1000]
     tid = str(payload.get("tid") or "")[:40]  # 画面が質問ごとに作る番号（回答の評価を、この行へ結び付ける）
@@ -387,11 +388,16 @@ async def invoke(payload, context):
     if payload.get("warmup"):
         # ページを開いたときの先読み。入れ物が起き、会話の控えも戻しておく
         await asyncio.gather(asyncio.to_thread(_warm_up), asyncio.to_thread(_conversation, actor, session, anon))
-        if user:
-            # ログインした人には「作ったスライド」を返す（画面を閉じたあとでも、開き直せばたどり着ける）
+        # 「作ったスライド」を返す（画面を閉じたあとでも、開き直せばたどり着ける）。ログインしていない人は匿名IDの分だけ。
+        # ログインした直後は、同じブラウザで匿名で作った分をその人の一覧へ移してから返す
+        guest = anon if payload.get("anon") else ""
+        if user or guest:
             try:
-                items = await asyncio.to_thread(slides.recent, SLIDES_TABLE, user)
-                yield {"type": "slides_list", "items": [{"job": j["job"], "base": f"/s/{j['job']}/", "at": j["at"]} for j in items]}
+                if user and guest:
+                    await asyncio.to_thread(slides.claim, SLIDES_TABLE, guest, user)
+                items = await asyncio.to_thread(slides.recent, SLIDES_TABLE, slides.owner(user, guest))
+                if items:
+                    yield {"type": "slides_list", "items": [{"job": j["job"], "base": f"/s/{j['job']}/", "at": j["at"]} for j in items]}
             except Exception as e:
                 print(json.dumps({"slides_list_error": type(e).__name__}))
         yield {"type": "done"}
@@ -420,6 +426,8 @@ async def invoke(payload, context):
         turn = tools.Turn()
         turn.workload_token = BedrockAgentCoreContext.get_workload_access_token()
         turn.user = user
+        turn.anon = anon if payload.get("anon") else ""
+        turn.ip = ipk
         tools.Turn.current = turn
         turn_start = len(conv.agent.messages)
         memories = []

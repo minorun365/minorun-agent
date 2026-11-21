@@ -8,6 +8,8 @@ export const PHASE_POSES = {
   thinking: ['think', 'think2', 'note'], answering: ['explain', 'idea'],
   following: ['note'], thanks: ['clap', 'thumb'], error: ['idle'],
   resting: ['idle', 'listen', 'coffee'], map: ['map', 'compass'],
+  // スライドを裏で作っている間は、休憩に入らずパソコンに向かい続ける
+  making: ['pc'],
 } as const satisfies Record<string, readonly Pose[]>;
 export type Phase = keyof typeof PHASE_POSES;
 export const TOOL_POSES: Record<string, readonly Pose[]> = {
@@ -16,7 +18,7 @@ export const TOOL_POSES: Record<string, readonly Pose[]> = {
   search_web: ['pc', 'phone', 'magnify', 'tablet'], search_recent: ['pc', 'phone', 'magnify', 'tablet'],
   search_whats_new: ['pc', 'phone', 'tablet'], search_aws_blog: ['book', 'page', 'tablet'],
   get_announcements: ['phone', 'tablet'], show_map: ['book', 'tablet', 'note'],
-  make_slides: ['pc', 'note', 'tablet', 'page'],
+  make_slides: ['pc'],
 };
 
 export class PosePicker {
@@ -43,6 +45,7 @@ export class PoseDirector {
   private pendingAnswer: Phase | undefined;
   constructor(private show: (pose: Pose, state: string) => void,
     private picker = new PosePicker(), private unavailable: ReadonlySet<string> = new Set()) {}
+  get state() { return this.key; }
   private cancel() { clearTimeout(this.pending); this.pending = undefined; }
   private apply(key: string, candidates: readonly Pose[]) {
     this.key = key;

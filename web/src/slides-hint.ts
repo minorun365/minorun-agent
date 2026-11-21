@@ -21,7 +21,7 @@ export function slidesRequest(text: string): string {
   return /スライド|資料|パワポ/.test(t) ? t : `${t}\n${SLIDES_REQUEST}`;
 }
 
-/** 質問候補へ、ときどき SLIDES_STARTER を1つ混ぜる（最後の1つと入れ替える）。ログイン前の人にも出し、押したらログインを案内する */
+/** 質問候補へ、ときどき SLIDES_STARTER を1つ混ぜる（最後の1つと入れ替える）。ログインしていない人にも出し、押せばそのまま頼める */
 export function withSlidesStarter(list: string[], rand: () => number = Math.random): string[] {
   if (!list.length || list.includes(SLIDES_STARTER) || rand() >= STARTER_RATE) return list;
   return [...list.slice(0, -1), SLIDES_STARTER];

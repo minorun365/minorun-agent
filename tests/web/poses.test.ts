@@ -98,3 +98,8 @@ test('複数画像の読み込みは全件を待ち、次の質問やエラー�
   const broken = d.prepareImage(); d.answer('回答'); d.phase('error'); broken();
   t.mock.timers.tick(1000); assert.equal(seen.at(-1), 'error');
 });
+test('スライド作成中の待機とツール実行はパソコンの姿だけにする', () => {
+  assert.deepEqual([...PHASE_POSES.making], ['pc']);
+  assert.deepEqual([...TOOL_POSES.make_slides], ['pc']);
+  assert.ok(!PHASE_POSES.making.includes('coffee' as never));
+});

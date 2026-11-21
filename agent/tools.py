@@ -26,7 +26,7 @@ import catalog
 from url_reader import read_url
 from knowledge_context import compact_sources, mark_fragments
 from settings import (ASSET_BASE, CONFERENCE_DAYS, JST, KB_RESULTS, KNOWLEDGE_BUCKET, LAS_VEGAS, REGION,
-                      SLIDES_BUCKET, SLIDES_RUNTIME, SLIDES_TABLE, SLIDES_TOTAL_DAILY, SLIDES_UNLIMITED, SLIDES_USER_DAILY,
+                      SLIDES_BUCKET, SLIDES_RUNTIME, SLIDES_TABLE, SLIDES_TOTAL_DAILY, SLIDES_UNLIMITED, SLIDES_USER_DAILY, SLIDES_GUEST_DAILY, SLIDES_IP_DAILY,
                       TOOLS_GATEWAY_URL, WEB_RESULTS)
 import slides
 
@@ -60,6 +60,8 @@ class Turn:
         self.url_calls = 0
         self.slides = []  # 受け付けたスライドの依頼（画面へ {"type": "slides"} で送る）
         self.user = ""  # ログインした人のハッシュ（していなければ空）
+        self.anon = ""  # 匿名IDのハッシュ（確認役が付ける。ログインしていない人のスライドの回数と一覧に使う）
+        self.ip = ""  # 送信元IPのハッシュ（確認役が付ける。ログインしていない人のスライドの回数に使う）
         # 保管庫の鍵を読むための通行証。Runtime が質問ごとにヘッダーで渡す
         self.workload_token = None
 
@@ -413,7 +415,7 @@ async def fetch_url(url: str) -> dict:
 
 @tool
 def make_slides(url: str = "", request: str = "", topic: str = "", notes: str = "", sources: list[str] | None = None) -> dict:
-    """みのるんのスライドテーマで解説スライドを作り始める。ログインした人だけが使え、記事から作るものと合わせて1人1日2本まで。
+    """みのるんのスライドテーマで解説スライドを作り始める。ログインしていなくても使える（ログインなしは1日1本、ログインした人は記事から作るものと合わせて1日2本まで）。
     でき上がりまで数分かかり、画面にサムネイルとビューアへのリンクが自動で出る（画面を離れても、右上のアイコンの「作ったスライド」から開ける）。呼ぶのは1回の質問で1回まで。
     作り方は2つ。記事から作るときは url だけを渡す。調べてまとめるときは url を空にし、topic・notes・sources を渡す。
     テーマや記事の話題は re:Invent・AWS に限らない（他社の製品・一般の技術・ビジネスなども作る）。断るのはテーマそのものが有害なときだけ。
@@ -433,7 +435,8 @@ def make_slides(url: str = "", request: str = "", topic: str = "", notes: str = 
     material = url if url.strip() else slides.topic_material(topic, notes, sources)
     result = slides.start(material, request, turn.user, runtime=SLIDES_RUNTIME, table=SLIDES_TABLE, bucket=SLIDES_BUCKET,
                           user_daily=SLIDES_USER_DAILY, total_daily=SLIDES_TOTAL_DAILY,
-                          unlimited=turn.user in SLIDES_UNLIMITED)
+                          unlimited=turn.user in SLIDES_UNLIMITED, anon=turn.anon, ip=turn.ip,
+                          guest_daily=SLIDES_GUEST_DAILY, ip_daily=SLIDES_IP_DAILY)
     if result.get("status") == "accepted":
         turn.slides.append({"job": result["job"], "base": f"/s/{result['job']}/"})
     return {k: v for k, v in result.items() if k != "job"}

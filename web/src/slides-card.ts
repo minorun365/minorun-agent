@@ -21,11 +21,20 @@ export function safeViewer(base: string, s: SlidesStatus): { viewer: string; thu
   return { viewer: base, thumb: base + 'og.jpg' + (s.pages ? `?v=${s.pages}` : '') };
 }
 
-export function slidesCard(base: string, onChange: () => void, fetcher: typeof fetch = fetch.bind(window)): HTMLElement {
+/** 作成中のカードを諦めるまでの時間（工房の打ち切り20分＋余裕） */
+export const GIVE_UP_MS = 25 * 60_000;
+
+/** ログインしていない人へ、作成中のカードの中で待つ間のログインを勧める（11/21 みのるん選定のA案） */
+export interface LoginNudge { icon: string; onClick: () => void }
+export const LOGIN_NUDGE_TEXT = 'ログインしておくと、閉じても<br>どの端末からでも開けます';
+
+export function slidesCard(base: string, onChange: () => void, fetcher: typeof fetch = fetch.bind(window), nudge?: LoginNudge): HTMLElement {
   const fig = document.createElement('figure');
   fig.className = 'slides-card working';
   fig.innerHTML = `<div class="slides-steps">${STEPS.map((s, i) => `<span class="step" data-i="${i}"><i></i>${s}</span>`).join('')}</div>`
-    + `<div class="slides-bar"><span></span></div><figcaption class="slides-line">受け付けました。閉じても続きます</figcaption>`;
+    + `<div class="slides-bar"><span></span></div><figcaption class="slides-line">受け付けました。閉じても続きます</figcaption>`
+    + (nudge ? `<div class="slides-login"><p>${LOGIN_NUDGE_TEXT}</p><button type="button">${nudge.icon}<span>ログイン</span></button></div>` : '');
+  fig.querySelector('.slides-login button')?.addEventListener('click', () => nudge!.onClick());
   const line = fig.querySelector('.slides-line') as HTMLElement;
   const started = Date.now();
   let stopped = false;
@@ -52,8 +61,11 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
     fig.innerHTML = `<figcaption>${esc(message)}</figcaption>`;
     onChange();
   };
+  // iPhone で画面が消えた・別のアプリへ行った間はタイマーが止まる。戻ってきたらすぐ読み直す
+  let timer = 0, reading = false;
   const tick = async () => {
-    if (stopped) return;
+    if (stopped || reading) return;
+    reading = true; clearTimeout(timer);
     try {
       const r = await fetcher(base + 'status.json', { cache: 'no-store' });
       if (r.ok) {
@@ -62,11 +74,14 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
         if (s.stage === 'error') return fail(s.message || 'スライドを作れませんでした。');
         show(s);
       }
-    } catch { /* 通信の揺れは次の回に任せる */ }
-    if (Date.now() - started > 12 * 60_000) return fail('時間がかかりすぎたため止めました。少し時間をおいて、もう一度頼んでください。');
-    setTimeout(tick, 3000);
+    } catch { /* 通信の揺れは次の回に任せる */ } finally { reading = false; }
+    // 工房は1本20分で打ち切って失敗を書くので、それより長く待っても進まないときだけ止める
+    if (Date.now() - started > GIVE_UP_MS) return fail('時間がかかりすぎたため止めました。少し時間をおいて、もう一度頼んでください。');
+    timer = window.setTimeout(tick, 3000);
   };
-  setTimeout(tick, 1500);
+  const onVisible = () => { if (stopped) document.removeEventListener('visibilitychange', onVisible); else if (document.visibilityState === 'visible') void tick(); };
+  document.addEventListener('visibilitychange', onVisible);
+  timer = window.setTimeout(tick, 1500);
   return fig;
 }
 
@@ -90,7 +105,7 @@ export function parseSlidesList(sse: string): SlidesItem[] {
 }
 
 /** 作り始めて15分以内なら、まだ作っている途中の可能性がある */
-export const maybeWorking = (item: SlidesItem, now = Date.now()) => now / 1000 - item.at < 15 * 60;
+export const maybeWorking = (item: SlidesItem, now = Date.now()) => now / 1000 - item.at < GIVE_UP_MS / 1000;
 
 const when = (at: number) => {
   const d = new Date(at * 1000);
@@ -146,6 +161,8 @@ export function slidesList(items: SlidesItem[], status: (job: string) => SlidesS
 
 const SEEN_KEY = 'minorun-slides-seen';
 const readSeen = (): string[] => { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '[]'); } catch { return []; } };
+/** 吹き出しかメニューで、もう完成を見たスライドか */
+export const seenBefore = (job: string) => readSeen().includes(job);
 
 /** 作ったスライドの状態を見張る。作成中のものだけ3秒おきに status.json を見て、変わったら onChange を呼ぶ */
 export class SlidesTracker {
