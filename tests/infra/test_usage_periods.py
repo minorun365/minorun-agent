@@ -155,6 +155,14 @@ if(links[0].o.attrs['aria-current']!=='true'||links[1].o.attrs['aria-current']||
             self.assertIn('<details data-row', m.render('list', 'all', 1))
             self.assertEqual(calls[-1], True)
 
+    def test_projected_fields_do_not_overlap(self):
+        # DynamoDB は同じ項目・親子の項目を同時に指定すると Scan ごと断る
+        for fields in (m.REPORT_FIELDS, m.DETAIL_FIELDS):
+            for i, a in enumerate(fields):
+                for j, b in enumerate(fields):
+                    if i != j:
+                        self.assertFalse(a == b or b.startswith(a + '.'), (a, b))
+
     def test_summary_fields_exclude_large_values_and_nested_usage_is_projected(self):
         # 質問文は要約の下段に出すので読む。回答と使用量の記録は大きいので一覧を開くまで読まない
         self.assertFalse({'answer', 'usage', 'usage.usd'} & set(m.REPORT_FIELDS))
