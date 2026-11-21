@@ -71,7 +71,7 @@ def main():
     print()
 
     # ログの「〜_error」
-    print("## ログの「〜_error」（Runtime とスライド工房）\n")
+    print("## ログの「〜_error」（Runtime とスライド作成機能）\n")
     groups = runtime_groups(control)
     rows = insights(logs, groups,
                     'filter @message like /_error": / | parse @message /"(?<key>[a-z_]+_error)": *"?(?<val>[^",}]*)/ '

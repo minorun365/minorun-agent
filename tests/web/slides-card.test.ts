@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { STEPS, safeViewer, stepOf } from '../../web/src/slides-card.ts';
 
-test('工房の段階を画面の4段階へ直す', () => {
+test('スライド作成機能の段階を画面の4段階へ直す', () => {
   assert.equal(STEPS.length, 4);
   assert.equal(stepOf('queued'), -1);
   assert.equal(stepOf('reading'), 0);
@@ -26,9 +26,8 @@ test('先読みの返事から作ったスライドの一覧を取り出す（�
   assert.deepEqual(parseSlidesList(sse), [{ job: 'abcDEF123456', base: '/s/abcDEF123456/', at: 100 }]);
   assert.deepEqual(parseSlidesList('data: {"type":"done"}\n\n'), []);
   assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 60_000), true);
-  // 工房は1本20分で打ち切るので、25分までは作成中として見張る
-  assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 20 * 60_000), true);
-  assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 26 * 60_000), false);
+  assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 20 * 60_000), true);  // Harness で作ると5〜10分かかるので、20分ではまだ作成中
+  assert.equal(maybeWorking({ job: 'a', base: '/s/a/', at: 1000 }, 1000 * 1000 + 45 * 60_000), false);
 });
 
 test('アイコンの印：作成中があれば working、無くて見ていない完成品があれば ready', async () => {
@@ -69,4 +68,13 @@ test('調べてまとめるときは最初の段階を「出典を読む」と�
   assert.equal(stepLabel(0), '記事を読む');
   assert.equal(stepLabel(1, 'topic'), '構成を考える');
   assert.equal(waitLine(0, 'topic'), '出典を読んでいます');
+});
+
+test('作成中の一言：スライド作成機能の detail を出し、怪しい文は段階の言葉に戻す', async () => {
+  const { progressLine } = await import('../../web/src/slides-card.ts');
+  assert.equal(progressLine({ stage: 'rendering', detail: '書き出して余白を測っています（2回目）' }), '書き出して余白を測っています（2回目）');
+  assert.equal(progressLine({ stage: 'writing', detail: '<img src=x onerror=alert(1)>' }), '構成を考えています');
+  assert.equal(progressLine({ stage: 'writing', detail: 'あ'.repeat(41) }), '構成を考えています');
+  assert.equal(progressLine({ stage: 'queued' }), '順番を待っています');
+  assert.equal(progressLine({ stage: 'reading', kind: 'topic' }), '出典を読んでいます');
 });

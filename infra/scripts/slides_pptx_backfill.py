@@ -1,6 +1,6 @@
 """作り済みのスライド（PPTX 保存の機能を入れる前の分）に、deck.pptx とビューアの「PPTXで保存」ボタンを足す。
 
-PNG は工房の /tmp にしか無かったので、公開用 S3 に残っている WebP（2560×1440）から作る。
+PNG はスライド作成機能の /tmp にしか無かったので、公開用 S3 に残っている WebP（2560×1440）から作る。
 作り方とボタンは slides/handler.py の build_pptx・SAVE と同じ。
   AWS_PROFILE=sandbox uv run --no-project --with boto3 --with pillow --with python-pptx python infra/scripts/slides_pptx_backfill.py [--apply]
 既定は対象を出すだけ。--apply で書き込む。

@@ -3,3 +3,4 @@ pillow==11.3.0
 strands-agents[web-fetch,anthropic]==1.62.0
 bedrock-agentcore==1.25.0
 python-pptx==1.0.2
+diagrams==0.25.1

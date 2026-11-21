@@ -1,6 +1,6 @@
 """会話の保存。
 
-- AgentCore Memory：会話中の文脈（やり取りと話題の棚）。1回答えるごとに丸ごとの控えを blob で積み、
+- AgentCore Memory：会話中の文脈（やり取りとこれまでの話題の要約）。1回答えるごとに丸ごとの控えを blob で積み、
   Runtime が入れ替わったら最新の控えから戻す。保持は7日（Memory 側の設定）
 - AgentCore Memory の長期記憶：Google でログインした人だけ、やり取りを会話の形でも積む。Memory が好みと事実を
   抜き出して /users/{actorId}/ の下に残し、次の会話の始めに思い出す（blob は抜き出しの対象にならない）

@@ -1,7 +1,7 @@
 """話題の判定と要約（補助モデル Haiku 5.5）。どちらも利用者を待たせない位置で動かす。
 
 判定：質問が届いたら回答と同時に始め、「同じ・新しい・戻る」と見出しを返す。迷ったら「同じ」。
-要約：回答を返し終えた後、話題が変わっていたら前の話題を200字ほどにまとめて棚へしまう。
+要約：回答を返し終えた後、話題が変わっていたら前の話題を200字ほどにまとめて、これまでの話題の要約に足す。
 """
 from pathlib import Path
 
@@ -61,7 +61,7 @@ JUDGE = (Path(__file__).with_name("judge.local.txt").read_text().strip() if Path
 
 def judge(current, shelf, question):
     listing = "\n".join(f"{i}: {s['heading']}" for i, s in enumerate(shelf)) or "（なし）"
-    text = f"いまの話題: {current or '（なし。会話の最初の質問）'}\n棚の話題:\n{listing}\n新しい質問: {question}"
+    text = f"いまの話題: {current or '（なし。会話の最初の質問）'}\nこれまでの話題:\n{listing}\n新しい質問: {question}"
     try:
         raw = _ask(JUDGE, text, 400)
         data = next(json.loads(m) for m in reversed(re.findall(r"\{[^{}]*\}", raw)) if _json_ok(m))
@@ -117,7 +117,7 @@ def suggest_next(current, shelf, question, answer=""):
         "参加者の交流やコミュニティ",
         "みのるんの技術ナレッジやこのアプリの作り",
     ))
-    text += f"\n今回の別の話題の切り口: {angle}。直前や棚と重なるなら他の話題を選ぶ。"
+    text += f"\n今回の別の話題の切り口: {angle}。直前やこれまでの話題と重なるなら他の話題を選ぶ。"
     if answer:
         text += f"\n直前の回答（この続きを深掘りにする）: {answer[:600]}"
     try:

@@ -1,4 +1,4 @@
-"""スライド工房の Opus を Claude API 優先で呼び、使えないときだけ Bedrock で書く（2026-11-15）。
+"""スライド作成機能の Opus を Claude API 優先で呼び、使えないときだけ Bedrock で書く（2026-11-15）。
 
 実行：cd slides && SLIDES_BUCKET=x uv run -q --with-requirements requirements.txt python -m unittest discover -s ../tests/slides -t ../tests/slides
 """
