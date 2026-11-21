@@ -71,6 +71,20 @@ class UsagePageTests(unittest.TestCase):
         self.assertAlmostEqual(pace['week_usd'], 2.0)
         self.assertAlmostEqual(pace['month_usd'], 30.0)
 
+    def test_pace_reads_value_saved_by_schedule(self):
+        saved = {'total_usd': 1.0, 'month_usd': 2.0}
+        fresh = {'Item': {'at': {'N': str(m.time.time() - 60)}, 'v': {'S': m.json.dumps(saved)}}}
+        stale = {'Item': {'at': {'N': str(m.time.time() - m.PACE_FRESH - 1)}, 'v': {'S': m.json.dumps(saved)}}}
+        m._pace_cache.clear()
+        with patch.object(m.ddb, 'get_item', return_value=fresh), patch.object(m, '_compute_pace') as compute:
+            self.assertEqual(REAL_PACE(self.now), saved)
+            compute.assert_not_called()
+        m._pace_cache.clear()
+        with patch.object(m.ddb, 'get_item', return_value=stale), patch.object(m, '_compute_pace', return_value={'total_usd': 9}) as compute:
+            self.assertEqual(REAL_PACE(self.now), {'total_usd': 9})
+            compute.assert_called_once()
+        m._pace_cache.clear()
+
     def test_login_message_renders_without_report_context(self):
         self.assertIn("ログイン", m._message("ログインしてください", "login"))
 
