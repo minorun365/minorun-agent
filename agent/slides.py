@@ -113,7 +113,9 @@ def _launch(runtime, body, table, bucket):
             print(json.dumps({"slides_launch_cleanup_error": type(e2).__name__, "job": job}))
 
 
-GUEST_NOTE = "Googleでログインすると、1日2本まで作れます"
+# 回答は決めた2文にする。上限の理由とログインで増える本数は回答で、ログインしたら何が起きるかは画面の案内で伝える（同じことを二度言わない）
+GUEST_REPLY = "ログインなしだと、スライドは1日1本までなんです。下のボタンから Google でログインすると、1日2本まで作れますよ！"
+GUEST_NOTE = f"画面にログインのボタンを出しています。回答はこの2文をそのまま使い、ほかの説明は足さないでください：{GUEST_REPLY}"
 
 
 def owner(user, anon):
@@ -153,7 +155,7 @@ def start(material, request, user, *, runtime, table, bucket, user_daily, total_
         if user:
             return {"status": "limit", "note": f"今日の分（1人1日{user_daily}本）を使い切りました。明日（日本時間の0時以降）にまた使えます"}
         return {"status": "guest_limit",
-                "note": f"ログインせずに作れる今日の分（1日{guest_daily}本）を使い切りました。{GUEST_NOTE}"}
+                "note": f"ログインなしで作れる今日の分（1日{guest_daily}本）は使い切りました。{GUEST_NOTE}"}
     job = secrets.token_urlsafe(12).replace("-", "a").replace("_", "b")
     _client("s3").put_object(Bucket=bucket, Key=f"s/{job}/status.json", ContentType="application/json",
                              CacheControl="no-cache, max-age=0",

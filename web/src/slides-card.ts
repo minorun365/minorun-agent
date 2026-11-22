@@ -39,6 +39,15 @@ export const GIVE_UP_MS = WORKING_MINUTES * 60_000;
 /** ログインしていない人へ、作成中のカードの中で待つ間のログインを勧める（11/21 みのるん選定のA案） */
 export interface LoginNudge { icon: string; onClick: () => void }
 export const LOGIN_NUDGE_TEXT = 'ログインしておくと、閉じても<br>どの端末からでも開けます';
+/** ログインなしの上限に当たったときの案内（同じA案の形。押すとログインし、戻ったら同じ頼みを送り直す） */
+export const LOGIN_CONTINUE_TEXT = 'ログインして戻ると、<br>このスライドを作り始めます';
+export function loginContinueBox(nudge: LoginNudge): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'slides-login';
+  box.innerHTML = `<p>${LOGIN_CONTINUE_TEXT}</p><button type="button">${nudge.icon}<span>ログイン</span></button>`;
+  box.querySelector('button')!.addEventListener('click', () => nudge.onClick());
+  return box;
+}
 
 export function slidesCard(base: string, onChange: () => void, fetcher: typeof fetch = fetch.bind(window), nudge?: LoginNudge): HTMLElement {
   const fig = document.createElement('figure');

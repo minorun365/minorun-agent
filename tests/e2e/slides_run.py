@@ -132,11 +132,13 @@ def main():
     ap.add_argument("--runtime", required=True)
     ap.add_argument("--case", default="all")
     ap.add_argument("--timeout", type=int, default=2700)
+    ap.add_argument("--url", help="article の記事を差し替える（公開元の表記を確かめるときなど）")
     a = ap.parse_args()
     names = list(CASES) if a.case == "all" else [a.case]
     bad = 0
     for name in names:
-        job, ng, info = run(a.runtime, name, CASES[name], a.timeout)
+        case = dict(CASES[name], url=a.url, ask="") if a.url and name == "article" else CASES[name]
+        job, ng, info = run(a.runtime, name, case, a.timeout)
         print(json.dumps({"case": name, "job": job, "ng": ng, **info}, ensure_ascii=False, indent=1))
         bad += bool(ng)
     sys.exit(1 if bad else 0)

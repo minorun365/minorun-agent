@@ -16,7 +16,7 @@ import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { saveCarryover, takeCarryover, type LastTurn, type Pending } from './carryover';
 import { AttachError, shrink, upload } from './attach';
-import { parseSlidesList, seenBefore, slidesCard, slidesList, SlidesTracker } from './slides-card';
+import { parseSlidesList, seenBefore, loginContinueBox, slidesCard, slidesList, SlidesTracker } from './slides-card';
 import { OFFER_CHIP, OFFER_REQUEST, PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withOfferChip, withSlidesStarter } from './slides-hint';
 
 interface MapShown { src: string; alt: string; caption: string; width: number; height: number; source_url: string }
@@ -30,6 +30,7 @@ type AgentEvent =
   | ({ type: 'map' } & MapShown)
   | { type: 'slides'; job: string; base: string }
   | { type: 'slides_offer' }
+  | { type: 'slides_login' }
   | { type: 'catalog_update'; at: string; lines: string[] }
   | { type: 'suggest'; items: string[] }
   | { type: 'error'; message: string }
@@ -249,7 +250,8 @@ chara.querySelectorAll<HTMLImageElement>('img').forEach(i => {
 const director = new PoseDirector(pose, new PosePicker(), missing);
 function cancelIdle() { clearTimeout(restTimer); clearTimeout(settleTimer); }
 // スライドを作っている間の待機は、休憩（コーヒー）ではなくパソコンで作業中の姿にする
-const slidesWorking = () => !!profile() && slides.badge() === 'working';
+// ログインしていない人は一覧のバッジが無いので、画面にある作成中のカードでも見る
+const slidesWorking = () => (!!profile() && slides.badge() === 'working') || !!document.querySelector('.slides-card.working');
 function idle() {
   cancelIdle();
   if (slidesWorking()) { director.phase('making'); return; }
@@ -663,7 +665,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
           // 吹き出しのカードで完成を見たら、アイコンの「できた」の印は出さない
           const job = ev.job;
           turnSlides.push({ job, base: ev.base });
-          figures.push(slidesCard(ev.base, () => { relayout(); if (slides.get(job)?.stage === 'done' || document.querySelector(`.slides-card.ready a[href="${ev.base}"]`)) slides.seen(job); }, undefined, loginNudge()));
+          figures.push(slidesCard(ev.base, () => { relayout(); syncMaking(); if (slides.get(job)?.stage === 'done' || document.querySelector(`.slides-card.ready a[href="${ev.base}"]`)) slides.seen(job); }, undefined, loginNudge()));
           if (opened) render(true);
           slides.add({ job, base: ev.base, at: Math.floor(Date.now() / 1000) });
         }
@@ -677,6 +679,9 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
         next = ev.items;
       } else if (ev.type === 'slides_offer') {
         offer = true;
+      } else if (ev.type === 'slides_login') {
+        // ログインなしの上限：吹き出しの中にログインのボタンを出し、戻ったら同じ頼みを送り直す
+        if (!profile()) { extras.push(loginContinueBox({ icon: GOOGLE, onClick: () => { saveCarryover(sessionStorage, lastTurn, { kind: 'ask', text }); void login(); } })); render(false); }
       } else if (ev.type === 'error') {
         failed = true; director.phase('error'); await open(); raw += (raw ? '\n\n' : '') + ev.message; render(false);
       }
@@ -785,11 +790,14 @@ async function authHeader(): Promise<Record<string, string>> {
 // メニューを開いている間は、開いた時点で見ていなかった完成品に NEW を付けたままにする（閉じたら消す）
 let freshNew = new Set<string>();
 let wasWorking = false;
+function syncMaking() {
+  const working = slidesWorking();
+  if (working !== wasWorking) { wasWorking = working; if (!busy && ['idle', 'resting', 'making'].includes(director.state)) idle(); }
+}
 const slides = new SlidesTracker(() => {
   renderBadge();
   // 作り始め・作り終わりで、待機中の姿を切り替える（回答中・入力中はそのまま）
-  const working = slidesWorking();
-  if (working !== wasWorking) { wasWorking = working; if (!busy && ['idle', 'resting', 'making'].includes(director.state)) idle(); }
+  syncMaking();
   if (mePop.classList.contains('on')) { slides.unseen.forEach((j) => freshNew.add(j)); renderList(); slides.seen(); }
 });
 const BADGE_LABEL = { '': '', working: '（スライドを作成中）', ready: '（スライドができました）' };
@@ -872,7 +880,7 @@ function resumeSlides() {
   stage.classList.add('started', 'answering');
   greet.classList.remove('on'); thought.classList.remove('on'); doing.classList.remove('on');
   answer.classList.remove('oops'); answer.innerHTML = md(RESUME_LINE); answer.scrollTop = 0;
-  answer.appendChild(slidesCard(item.base, () => { relayout(); if (slides.get(item.job)?.stage === 'done') slides.seen(item.job); }, undefined, loginNudge()));
+  answer.appendChild(slidesCard(item.base, () => { relayout(); syncMaking(); if (slides.get(item.job)?.stage === 'done') slides.seen(item.job); }, undefined, loginNudge()));
   bubble.classList.add('on'); director.answer(RESUME_LINE, false);
   layout();
 }
@@ -881,6 +889,7 @@ function continueAfterLogin(pending: Pending | null) {
   if (!pending || busy) return;
   if (pending.kind === 'offer') void send(OFFER_REQUEST, undefined, lastTurn?.via ?? 'ai');
   else if (pending.kind === 'url') void send(slidesRequest(pending.text), undefined, 'typed');
+  else if (pending.kind === 'ask') void send(pending.text, undefined, 'typed');
   else openSlidesCompose();
 }
 // 開いて少ししてから、左上にさりげなくあいさつ。最初の質問を送ったら消す

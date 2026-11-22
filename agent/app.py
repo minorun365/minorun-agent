@@ -8,6 +8,7 @@
   {"type": "replace", "text": "..."}                     追加調査後の要約で吹き出しの本文全体を置き換える
   {"type": "map", "src": "...", "alt": "...", ...}        回答に添える地図
   {"type": "slides", "job": "...", "base": "/s/<job>/"}   受け付けたスライド作成（画面が base の status.json を見に行く）
+  {"type": "slides_login"}   ログインなしの上限に当たった（画面がログインのボタンを出し、ログイン後に同じ頼みを送り直す）
   {"type": "slides_offer"}                               回答のあとに「この回答をスライドに」の札を出してよい（調べた説明の回答だけ）
   {"type": "slides_list", "items": [{"job", "base", "at"}]}  先読みの返事で、ログインした人が作ったスライド（新しい順）
   {"type": "preview", "url": "...", "image": "...", "title": "...", "label": "..."}  紹介した本人のページの貼り紙
@@ -538,6 +539,8 @@ async def invoke(payload, context):
             yield {"type": "map", **m}
         for d in turn.slides[slides_sent:]:
             yield {"type": "slides", **d}
+        if turn.slides_login and not failed:
+            yield {"type": "slides_login"}
 
         catalog_state = None
         preview_task = asyncio.create_task(link_preview.for_answer(''.join(answer))) if not failed and not turn.maps and not turn.slides else None

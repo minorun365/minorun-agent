@@ -59,6 +59,7 @@ class Turn:
         self.x_usage = []
         self.url_calls = 0
         self.slides = []  # 受け付けたスライドの依頼（画面へ {"type": "slides"} で送る）
+        self.slides_login = False  # ログインなしの上限に当たった（画面へ {"type": "slides_login"} を送り、ログイン後に同じ頼みを送り直させる）
         self.user = ""  # ログインした人のハッシュ（していなければ空）
         self.anon = ""  # 匿名IDのハッシュ（確認役が付ける。ログインしていない人のスライドの回数と一覧に使う）
         self.ip = ""  # 送信元IPのハッシュ（確認役が付ける。ログインしていない人のスライドの回数に使う）
@@ -437,6 +438,8 @@ def make_slides(url: str = "", request: str = "", topic: str = "", notes: str = 
                           user_daily=SLIDES_USER_DAILY, total_daily=SLIDES_TOTAL_DAILY,
                           unlimited=turn.user in SLIDES_UNLIMITED, anon=turn.anon, ip=turn.ip,
                           guest_daily=SLIDES_GUEST_DAILY, ip_daily=SLIDES_IP_DAILY)
+    if result.get("status") == "guest_limit":
+        turn.slides_login = True
     if result.get("status") == "accepted":
         turn.slides.append({"job": result["job"], "base": f"/s/{result['job']}/"})
     return {k: v for k, v in result.items() if k != "job"}

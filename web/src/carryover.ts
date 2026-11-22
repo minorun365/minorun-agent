@@ -5,7 +5,8 @@
 // slides＝その回答で受け付けたスライド（作成中でもログインの往復のあとにカードを描き直す）
 export type LastTurn = { q: string; a: string; next: string[]; offer: boolean; via: 'ai' | 'starter'; slides?: { job: string; base: string }[] };
 // offer＝回答をスライドに、url＝入力した URL をスライドに、compose＝URL を入れる入力欄を開く
-export type Pending = { kind: 'offer' } | { kind: 'url'; text: string } | { kind: 'compose' };
+// ask＝ログインなしの上限で断られた質問を、ログイン後に送り直す
+export type Pending = { kind: 'offer' } | { kind: 'url'; text: string } | { kind: 'compose' } | { kind: 'ask'; text: string };
 export type Carryover = { turn: LastTurn | null; pending: Pending | null; at: number };
 
 const KEY = 'minorun-login-carryover';
@@ -36,6 +37,7 @@ export function takeCarryover(storage: Storage, now = Date.now()): Carryover | n
     const pending: Pending | null = p?.kind === 'offer' ? { kind: 'offer' }
       : p?.kind === 'compose' ? { kind: 'compose' }
       : p?.kind === 'url' && typeof p.text === 'string' && p.text.trim() ? { kind: 'url', text: p.text.slice(0, 1000) }
+      : p?.kind === 'ask' && typeof p.text === 'string' && p.text.trim() ? { kind: 'ask', text: p.text.slice(0, 1000) }
       : null;
     // 回答をスライドにする頼みは、元の回答が無いと続けられない
     if (pending?.kind === 'offer' && !turn) return null;

@@ -39,6 +39,14 @@ test('URL のスライド依頼は回答が無くても続けられる', () => {
   assert.deepEqual(takeCarryover(s, 1000)?.pending, { kind: 'url', text: 'https://example.com をスライドに' });
 });
 
+test('ログインなしの上限で断られた頼みは、ログイン後にそのまま送り直す', () => {
+  const s = new Mem();
+  saveCarryover(s, null, { kind: 'ask', text: 'Strands Agents の新機能をスライドにまとめて' }, 1000);
+  assert.deepEqual(takeCarryover(s, 1000)?.pending, { kind: 'ask', text: 'Strands Agents の新機能をスライドにまとめて' });
+  saveCarryover(s, null, { kind: 'ask', text: '  ' } as never, 1000);
+  assert.equal(takeCarryover(s, 1000), null);
+});
+
 test('回答の無い「この回答をスライドに」は続けない', () => {
   const s = new Mem();
   saveCarryover(s, null, { kind: 'offer' }, 1000);
