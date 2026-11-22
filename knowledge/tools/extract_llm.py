@@ -9,12 +9,16 @@
 - kag：KAG の公開情報（sources/kag/index.jsonl。tools/fetch_kag.py が作る）→ sources/kag/<id>.json
   記事の年と違う年を扱う事実（2026年の準備資料にある「去年はこうだった」など）は year_overrides.json へ足す
 本文は <id>.ocr.txt（画像の書き起こし）があればそれを、無ければ <id>.txt を使う。作り直すときは --force。
-使い方: AWS_PROFILE=sandbox uv run --with boto3 python tools/extract_llm.py own|decks [id...] [--since 2024-01-01] [--force]
+書き起こすのは Claude Code（2026-11-22 から）。1回目は頼みごとを knowledge/work/extract/ に書き出し、答えを書いてから同じコマンドを
+もう一度流すと取り込む（tools/handoff.py）。--bedrock を付けると、これまでどおり Bedrock の Sonnet 5.5 に聞く。
+使い方: uv run --with boto3 python tools/extract_llm.py own|decks|articles|kag [id...] [--since 2024-01-01] [--force] [--bedrock（AWS_PROFILE=sandbox で）]
 """
 import concurrent.futures as cf, datetime, json, re, sys
 from pathlib import Path
 
 import boto3
+
+import handoff
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "sources" / "cache"
@@ -74,7 +78,10 @@ KAGP = """あなたは「みのるんエージェント」のナレッジベー�
 """ + COMMON
 
 
-def ask(system, text):
+def ask(system, text, key):
+    if not handoff.bedrock_mode():
+        out = handoff.ask("extract", key, system, text)
+        return json.loads(out[out.find("{"): out.rfind("}") + 1])
     r = bedrock.converse(modelId=MODEL, system=[{"text": system}], messages=[{"role": "user", "content": [{"text": text}]}],
                          inferenceConfig={"maxTokens": 12000},
                          additionalModelRequestFields={"output_config": {"effort": "medium"}})
@@ -111,7 +118,7 @@ def do_own(r, force):
         return r["id"], "本文なし"
     kind = {"article": "Qiita の技術記事", "slides": "登壇資料（スライド画像の書き起こし）", "repo": "GitHub の公開リポジトリの README"}[r["kind"]]
     sysp = OWN.format(kind=kind, published=r["published"], topics=topics_list(TOPICS))
-    d = ask(sysp, text)
+    d = ask(sysp, text, f"own-{r['id']}")
     py = int(r["published"][:4])
     facts = clean(d.get("facts", []), TOPICS)
     for f in facts:  # 年は公開年が基本。先の年は付けない
@@ -121,6 +128,7 @@ def do_own(r, force):
            "kind": r["kind"], "event_year": py, "usefulness": d.get("usefulness", 0), "summary": d.get("summary", ""),
            "facts": facts}
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=1))
+    handoff.done("extract", f"own-{r['id']}")
     return r["id"], f"{len(facts)}件"
 
 
@@ -141,7 +149,7 @@ def do_deck(c, force):
                 + "\n".join(f"- {f['text']}" for f in old["facts"]) + "\n")
     what = ("AWS re:Invent の参加者が公開した登壇資料（Speaker Deck）を、スライド画像から書き起こしたもの" if is_deck
             else "日本語の記事（ブログ・旅行情報・解説）。re:Invent の参加者に役立つ一般的な知識（海外旅行・機内・ラスベガスの店など）を含む")
-    d = ask(DECKS.format(what=what, published=c.get("published") or "不明", previous=prev, topics=topics_list(allowed)), body(c["id"]))
+    d = ask(DECKS.format(what=what, published=c.get("published") or "不明", previous=prev, topics=topics_list(allowed)), body(c["id"]), f"deck-{c['id']}")
     facts = clean(d.get("facts", []), allowed)
     ey = d.get("event_year") or 0
     py = int((c.get("published") or "0")[:4] or 0)
@@ -152,6 +160,7 @@ def do_deck(c, force):
            "usefulness": d.get("usefulness", 0), "summary": d.get("summary", ""), ("ocr" if is_deck else "llm"): True,
            "facts": [{**f, "year": ey} for f in facts]}
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=1))
+    handoff.done("extract", f"deck-{c['id']}")
     # 記事の年と違う年の事実は、check_extracted.py が使う付け替え表へ（事実の書き出し30字で引く）
     other = [(f["text"][:30], f["year"]) for f in facts if f["year"] and f["year"] != ey]
     return c["id"], f"{len(facts)}件（前回 {len(old['facts']) if old else 0}件）", other
@@ -167,7 +176,7 @@ def do_kag(r, force):
     kind = {"note": "公式 note の記事", "qiita": "Qiita Organization の技術記事", "video": "YouTube 動画の題名と説明文",
             "site": "公式サイトのページ"}[r["kind"]]
     keys = ["about-minorun-kag", "kag-activities", "kag-tech"]
-    d = ask(KAGP.format(kind=kind, published=r.get("published") or "なし", topics=topics_list(keys)), text)
+    d = ask(KAGP.format(kind=kind, published=r.get("published") or "なし", topics=topics_list(keys)), text, f"kag-{r['id']}")
     py = int((r.get("published") or "2026")[:4])
     facts = clean(d.get("facts", []), keys)
     for f in facts:
@@ -177,6 +186,7 @@ def do_kag(r, force):
            "kind": r["kind"], "event_year": py, "usefulness": d.get("usefulness", 0), "summary": d.get("summary", ""),
            "facts": facts}
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=1))
+    handoff.done("extract", f"kag-{r['id']}")
     return r["id"], f"{len(facts)}件"
 
 
@@ -188,16 +198,12 @@ def main():
     if mode == "own":
         rows = [json.loads(l) for l in (ROOT / "sources/own/index.jsonl").read_text().splitlines() if l.strip()]
         rows = [r for r in rows if not ids or r["id"] in ids]
-        with cf.ThreadPoolExecutor(6) as ex:
-            for i, msg in ex.map(lambda r: _safe(do_own, r, force), rows):
-                print(i, msg, flush=True)
+        _run(do_own, rows, force)
         return
     if mode == "kag":
         rows = [json.loads(l) for l in (ROOT / "sources/kag/index.jsonl").read_text().splitlines() if l.strip()]
         rows = [r for r in rows if not ids or r["id"] in ids]
-        with cf.ThreadPoolExecutor(6) as ex:
-            for i, msg in ex.map(lambda r: _safe(do_kag, r, force), rows):
-                print(i, msg, flush=True)
+        _run(do_kag, rows, force)
         return
     cand = [json.loads(l) for l in (ROOT / "sources/candidates.jsonl").read_text().splitlines() if l.strip()]
     if mode == "articles":
@@ -205,23 +211,38 @@ def main():
     else:
         rows = [c for c in cand if "speakerdeck.com" in c["url"] and (c["id"] in ids if ids else (c.get("published") or "") >= since)]
     ov = json.loads(OVERRIDES.read_text())
-    done = []
+    done, pending = [], []
     with cf.ThreadPoolExecutor(6) as ex:
         for res in ex.map(lambda c: _safe(do_deck, c, force), rows):
             i, msg, other = res if len(res) == 3 else (*res, [])
             print(i, msg, flush=True)
             if msg[0].isdigit():
                 done.append(i)
+            if msg.startswith("頼みごと"):
+                pending.append(msg.split(" ", 1)[1])
             for k, y in other:
                 ov[k] = y
+    handoff.report("extract", pending)
     OVERRIDES.write_text(json.dumps(ov, ensure_ascii=False, indent=1) + "\n")
     listed = set(BATCH.read_text().split()) if BATCH.exists() else set()
     BATCH.write_text("\n".join(sorted(listed | set(done))) + "\n")
 
 
+def _run(fn, rows, force):
+    pending = []
+    with cf.ThreadPoolExecutor(6) as ex:
+        for i, msg in ex.map(lambda r: _safe(fn, r, force), rows):
+            print(i, msg, flush=True)
+            if msg.startswith("頼みごと"):
+                pending.append(msg.split(" ", 1)[1])
+    handoff.report("extract", pending)
+
+
 def _safe(fn, r, force):
     try:
         return fn(r, force)
+    except handoff.Pending as p:
+        return r["id"], f"頼みごと {p.task}"
     except Exception as e:
         return r["id"], f"失敗 {type(e).__name__}: {str(e)[:200]}"
 

@@ -22,7 +22,8 @@ COPY theme/ ./theme/
 # Harness のエージェントが使う道具（焼いて測る・図を描く・できたものを渡す）とスキル。Harness も同じイメージで動く（2026-11-21）。
 # 挿絵（いらすとやの画像一式）は規約上リポジトリに入れず、使うときに bin/illust.py が非公開の S3 から /tmp/ill へ取り込む
 COPY bin/ ./bin/
-COPY skills/ ./skills/
+COPY core/ ./core/
+COPY core/skills/ ./skills/
 
 # AgentCore Runtime の決まり：8080 番で /invocations と /ping を受ける
 EXPOSE 8080

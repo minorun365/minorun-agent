@@ -5,13 +5,16 @@
 拡充した分がそのまま質問の例に出る。変わっていない話題は Bedrock を呼ばない。
 ナレッジベースに入る事実は build_kb.py と同じものを使う（load() を共有）。
 画面（web/src/starters.ts）はこのファイルをビルド時に読み込み、毎回別々の話題から3つ選ぶ。
-使い方: AWS_PROFILE=sandbox uv run --with boto3 python knowledge/tools/build_starters.py [--force] [話題...]
+質問を作るのは Claude Code（2026-11-22 から）。1回目は話題ごとの頼みごとを knowledge/work/starters/ に書き出し、答えを書いてから
+同じコマンドをもう一度流すと取り込む（tools/handoff.py）。--bedrock を付けると、これまでどおり Bedrock の Haiku 5.5 に聞く。
+使い方: uv run --with boto3 python knowledge/tools/build_starters.py [--force] [話題...] [--bedrock（AWS_PROFILE=sandbox で）]
 """
 import collections, hashlib, json, random, re, sys
 from pathlib import Path
 
 import boto3
 
+import handoff
 from build_kb import ROOT, TOPICS, load
 
 OUT = ROOT / "starters.json"
@@ -59,7 +62,9 @@ def ask(topic, rows, taken):
     pick = rows[:30] + random.sample(rows[30:], min(10, len(rows[30:])))
     text = PROMPT.format(label=TOPICS[topic], n=PER_TOPIC + 2, taken="、".join(sorted(taken)[:80]) or "なし",
                          facts="\n".join(f"- {t}" for _, t in pick))
-    for _ in range(2):  # 考える分で上限を使い切り、本文が空になることがある（2,000では13話題/37で起きた）
+    if not handoff.bedrock_mode():
+        out = handoff.ask("starters", topic, "下の依頼文どおりに質問の例を作る。", text)
+    for _ in range(2 if handoff.bedrock_mode() else 0):  # 考える分で上限を使い切り、本文が空になることがある（2,000では13話題/37で起きた）
         r = bedrock.converse(modelId=MODEL, messages=[{"role": "user", "content": [{"text": text}]}],
                              inferenceConfig={"maxTokens": 8000},
                              additionalModelRequestFields={"output_config": {"effort": "low"}})
@@ -79,7 +84,7 @@ def main():
     force = "--force" in sys.argv
     only = [a for a in sys.argv[1:] if not a.startswith("--")]
     old = json.loads(OUT.read_text()) if OUT.exists() else {}
-    new, changed = {}, []
+    new, changed, pending = {}, [], []
     for topic, rows in sorted(groups().items()):
         h = hashlib.sha256((PROMPT + "\n" + "\n".join(sorted(t for _, t in rows))).encode()).hexdigest()[:16]
         prev = old.get(topic)
@@ -93,6 +98,12 @@ def main():
         taken = {q for k, v in {**old, **new}.items() if k != topic for q in v["questions"]}
         try:
             qs = ask(topic, rows, taken)
+            handoff.done("starters", topic)
+        except handoff.Pending as p:  # 答えを待つ間は前の質問を残す
+            pending.append(str(p.task))
+            if prev:
+                new[topic] = prev
+            continue
         except Exception as e:  # 作り直しに失敗しても前の質問を残す
             print(f"{topic}: 失敗 {type(e).__name__}: {str(e)[:200]}（前の質問を残す）")
             if prev:
@@ -105,6 +116,7 @@ def main():
     print(f"作り直した話題 {len(changed)} ／ 全 {len(new)} 話題・{sum(len(v['questions']) for v in new.values())} 問")
     for c in changed:
         print(" ", c)
+    handoff.report("starters", pending)
 
 
 if __name__ == "__main__":

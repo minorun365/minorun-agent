@@ -28,6 +28,7 @@ from pptx.util import Emu
 
 import credit
 import harness
+from core.prompts import HARNESS_RULES, RULES, TOPIC_RULES
 from url_reader import read_url
 
 REGION = os.environ.get("AWS_REGION", "us-west-2")
@@ -55,13 +56,6 @@ API = {"client": None,
        and WIF["organization_id"] else "switched_off",
        "busy_until": 0.0}
 
-RULES = """（公開版では省略しています。スライドの書き方の指示は各自で用意してください。slides/core/README.md）
-"""
-
-
-# 調べてまとめるとき（記事ではなく、エージェントが検索で確かめた要点と出典から作る）。RULES の「記事」は「材料」と読み替えさせ、構成だけを差し替える
-TOPIC_RULES = RULES.split("# 構成")[0] + """（公開版では省略しています。スライドの書き方の指示は各自で用意してください。slides/core/README.md）
-"""
 
 
 KIND = {"value": "article"}  # 1回の起動の間だけ持つ。画面が「記事を読む」と「出典を読む」を言い分ける
@@ -515,8 +509,6 @@ def refund(event):
     print(json.dumps({"job": event.get("job"), "refund": "done"}))
 
 
-HARNESS_RULES = """（公開版では省略しています。スライドの書き方の指示は各自で用意してください。slides/core/README.md）
-"""
 FIG_MAX = 8
 
 

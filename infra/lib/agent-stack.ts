@@ -160,7 +160,10 @@ export class AgentStack extends cdk.Stack {
     }));
 
     // スライドの依頼：回数の表で数え、進み具合の最初の1行を書き、スライド作成機能を非同期で起動する
-    role.addToPolicy(new iam.PolicyStatement({ actions: ['dynamodb:UpdateItem', 'dynamodb:TransactWriteItems', 'dynamodb:GetItem'], resources: [props.slides.tableArn] }));
+    // クレジットの台帳（credit#…）も同じ表。回答の額の控えと、クレジット切れの印を書く（PutItem）
+    role.addToPolicy(new iam.PolicyStatement({ actions: ['dynamodb:UpdateItem', 'dynamodb:TransactWriteItems', 'dynamodb:GetItem', 'dynamodb:PutItem'], resources: [props.slides.tableArn] }));
+    // 今の期に回答が Claude API で払った額を足し上げる（5分の控えが切れたときだけ）
+    role.addToPolicy(new iam.PolicyStatement({ actions: ['dynamodb:Scan'], resources: [log.tableArn] }));
     role.addToPolicy(new iam.PolicyStatement({ actions: ['bedrock-agentcore:InvokeAgentRuntime'], resources: [props.slides.runtimeArn, `${props.slides.runtimeArn}/*`] }));
     role.addToPolicy(new iam.PolicyStatement({ actions: ['s3:PutObject'], resources: [`arn:${this.partition}:s3:::${props.slides.bucketName}/s/*`] }));
 
@@ -190,6 +193,9 @@ export class AgentStack extends cdk.Stack {
         CLAUDE_WIF_RULE_ID: process.env.CLAUDE_WIF_RULE_ID ?? '',
         CLAUDE_WIF_ORGANIZATION_ID: process.env.CLAUDE_WIF_ORGANIZATION_ID ?? '',
         CLAUDE_WIF_SERVICE_ACCOUNT_ID: process.env.CLAUDE_WIF_SERVICE_ACCOUNT_ID ?? '',
+        // クレジットの線（回答＋スライド作成の今の期の使用額）。超えたら回答も Bedrock だけ。値はスライド作成機能と揃える
+        CREDIT_LIMIT_USD: '90',
+        CREDIT_RESET_DAY: process.env.CREDIT_RESET_DAY ?? '3',
         MODEL_AUX: 'global.anthropic.claude-haiku-5-5',
         MAIN_EFFORT: 'low',
         TOOLS_GATEWAY_URL: props.toolsGateway.mcpUrl,

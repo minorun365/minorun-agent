@@ -214,7 +214,7 @@ export class SlidesStack extends cdk.Stack {
       CONVERSATION_TABLE: 'minorun-agent-conversations',
       // クレジット（月 $100）のうち、ここまで使ったら Bedrock へ回す線（2026-11-21 みのるん承認の $90）。クレジットが戻る日も合わせる
       CREDIT_LIMIT_USD: '90',
-      CREDIT_RESET_DAY: process.env.CREDIT_RESET_DAY ?? '1',
+      CREDIT_RESET_DAY: process.env.CREDIT_RESET_DAY ?? '3',  // Max の API クレジットは毎月3日 9:00 JST に切り替わる（Console の有効期限で確認。2026-11-22）
       SLIDES_JOB_ESTIMATE_USD: '3',
     };
     // 本番のスライド作成機能を切り替える前に、新しいイメージを試験用の Runtime で通しテストする（SLIDES_STAGING=1 のときだけ作る）。

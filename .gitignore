@@ -18,6 +18,8 @@ knowledge/entries/
 knowledge/assets/
 knowledge/dist/
 knowledge/tools/year_overrides.json
+# ナレッジの道具が Claude Code へ書き出す頼みごとと答え（knowledge/tools/handoff.py）
+knowledge/work/
 
 # 環境ごとに違う値（infra/scripts/*.py が書く）
 infra/.auth.json

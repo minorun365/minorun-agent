@@ -16,6 +16,8 @@ import time
 
 import anthropic
 import httpx
+
+import credit
 from strands.models.model import Model
 from strands.types.exceptions import ContextWindowOverflowException, ModelThrottledException
 
@@ -56,6 +58,22 @@ def _is_permanent(error):
         if error.status_code == 400 and "credit balance" in str(error).lower():
             return True
     return False
+
+
+def _is_out_of_credit(error):
+    """クレジット切れ（402・残高不足）か。スライド作成機能と共有の台帳へ止めた印を立てる"""
+    if not isinstance(error, anthropic.APIStatusError):
+        return False
+    return (error.status_code == 402 or getattr(error, "type", None) == "billing_error"
+            or (error.status_code == 400 and "credit balance" in str(error).lower()))
+
+
+def _disable(error, **fields):
+    """待っても直らない失敗。この入れ物では以後 Claude API を呼ばない（クレジット切れなら台帳にも残す）"""
+    _State.disabled_reason = type(error).__name__
+    _log("disabled", reason=type(error).__name__, detail=str(error)[:300], **fields)
+    if _is_out_of_credit(error):
+        credit.switch_off(f"answers:{type(error).__name__}")
 
 
 def _is_transient(error):
@@ -116,6 +134,8 @@ class FallbackModel(Model):
             return False
         if time.monotonic() < _State.busy_until:
             return False
+        if credit.blocked():  # 今の期の使用額が線を超えた（スライド作成機能と同じ台帳）
+            return False
         if self._primary is None:
             try:
                 self._primary = self._make_primary(credentials())
@@ -139,8 +159,7 @@ class FallbackModel(Model):
                 if started:
                     raise
                 if _is_permanent(e):
-                    _State.disabled_reason = type(e).__name__
-                    _log("disabled", reason=type(e).__name__, detail=str(e)[:300])
+                    _disable(e)
                 elif _is_transient(e):
                     _State.busy_until = time.monotonic() + RETRY_AFTER_BUSY
                     _log("busy", reason=type(e).__name__, detail=str(e)[:300])
@@ -163,7 +182,7 @@ def warm_up(model_id):
     """最初の質問の前に Claude API の通行証を取っておく。会話ごとに入れ物が新しく立つので、
     これが無いと補助の初回（次の質問の候補など）が交換を待って、回答の後の1秒の待ちに間に合わない。
     トークン数を数える窓口は費用がかからない。失敗しても Claude API は止めない（本番の呼び出しで判断する）。"""
-    if _State.disabled_reason:
+    if _State.disabled_reason or credit.blocked():
         return
     if _Aux.client is None:
         _Aux.client = anthropic.Anthropic(credentials=credentials(), max_retries=0, timeout=TIMEOUT)
@@ -176,7 +195,7 @@ def ask_text(model_id, system, text, max_tokens, effort):
     返すのは (本文, Bedrock と同じ形の使用量)。クレジット切れなど待っても直らない失敗は回答と同じく
     この入れ物で以後 Claude API を止め、混雑や想定外の失敗は補助の側だけ60秒 Bedrock へ回す。
     """
-    if _State.disabled_reason or time.monotonic() < _Aux.busy_until:
+    if _State.disabled_reason or time.monotonic() < _Aux.busy_until or credit.blocked():
         return None
     try:
         if _Aux.client is None:
@@ -186,8 +205,7 @@ def ask_text(model_id, system, text, max_tokens, effort):
             messages=[{"role": "user", "content": text}], output_config={"effort": effort})
     except Exception as e:
         if _is_permanent(e):
-            _State.disabled_reason = type(e).__name__
-            _log("disabled", reason=type(e).__name__, detail=str(e)[:300], part="aux")
+            _disable(e, part="aux")
         else:
             _Aux.busy_until = time.monotonic() + RETRY_AFTER_BUSY
             _log("busy" if _is_transient(e) else "unexpected", reason=type(e).__name__, detail=str(e)[:300], part="aux")
