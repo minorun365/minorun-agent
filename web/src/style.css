@@ -80,6 +80,16 @@ body{position:absolute;inset:0;overflow:hidden;font-family:-apple-system,BlinkMa
 .bubble .share{display:block;flex:none;white-space:nowrap;word-break:normal;text-align:right;font-size:12.5px;color:var(--accent);text-decoration:none;font-weight:600;margin-top:6px}
 .bubble .foot{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:8px}
 .bubble .foot .share{margin:0}
+.bubble .reply{flex:none;display:inline-flex;align-items:center;gap:4px;font:inherit;font-size:12.5px;font-weight:700;line-height:1.4;color:var(--accent);background:transparent;border:1.5px solid var(--accent);border-radius:999px;padding:4px 11px 4px 9px;cursor:pointer}
+.bubble .reply:hover{background:var(--mark)}
+.bubble .reply:active{transform:scale(.96)}
+.replyto{position:absolute;left:16px;right:16px;max-width:520px;margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 84px + var(--grow,0px));
+  display:flex;flex-direction:column;gap:1px;padding:8px 14px;border-radius:14px;background:var(--soft);box-shadow:0 0 0 1px var(--line);font-size:12px;line-height:1.5;color:var(--mut);
+  opacity:0;transform:translateY(6px);pointer-events:none;transition:opacity .4s ease .2s,transform .4s ease .2s}
+.replyto b{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.replyto .mark{color:var(--accent);margin-right:5px;vertical-align:-1px}
+.replyto.on{opacity:1;transform:none}
+.stage.kbd .replyto{bottom:calc(94px + var(--grow,0px))}
 .bubble .seeking{margin:.4em 0 0;font-size:13px;color:var(--mut)}
 .caret{display:inline-block;width:.45em;height:1em;vertical-align:-2px;margin-left:2px;background:currentColor;opacity:.4;animation:blink 1s steps(2) infinite}
 @keyframes blink{50%{opacity:0}}

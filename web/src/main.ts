@@ -47,6 +47,7 @@ const stage = $('#stage'), bubble = $('#bubble'), answer = $('#answer'), thought
 const chara = $('#chara'), doing = $('#doing'), suggest = $('#suggest'), sendBtn = $('#send');
 const q = $<HTMLTextAreaElement>('#q');
 const header = $('.top'), dock = $('.dock'), write = $('.write'), notice = $('.notice');
+const replyTo = $('#replyTo'), REPLY_PLACEHOLDER = 'この回答に返信';
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const has = (c: string) => stage.classList.contains(c);
@@ -110,9 +111,12 @@ function layout() {
   // 添付した画像の見本が出ているときは、その高さもキャラクターの下に空ける
   const shot = $('#attach');
   const chip = $('#slideChip');
+  // 返信先の帯：答えたあとに入力を開いたときだけ出す。スライドのURL待ち・画像の見本・スライドの札が出ている間は、場所を譲って隠す
+  const reply = comp && !replyTo.hidden && !slidesMode && shot.hidden && chip.hidden;
+  replyTo.classList.toggle('on', reply);
   // 長いURLなどで入力欄が2行以上に伸びたら、その分だけ注意書き・札・添付の見本を上へずらす（1行のときの高さは左の添付ボタンと同じ）
   dock.style.setProperty('--grow', Math.max(0, write.offsetHeight - $('#clip').offsetHeight) + 'px');
-  const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 + (shot.hidden ? 0 : shot.offsetHeight + 14) + (chip.hidden ? 0 : chip.offsetHeight + 14) : has('limited') ? 0 : suggest.offsetHeight;
+  const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 + (shot.hidden ? 0 : shot.offsetHeight + 14) + (chip.hidden ? 0 : chip.offsetHeight + 14) + (reply ? replyTo.offsetHeight + 14 : 0) : has('limited') ? 0 : suggest.offsetHeight;
   const dockTop = H - pad - inner - (comp ? 10 : 16);
   const avail = dockTop - headB;
   // 通常ブラウザの縦向きは上下、Xのアプリ内と横向きの低い画面は左右に配置する。
@@ -439,7 +443,19 @@ function closeCompose() { stage.classList.remove('composing'); q.blur(); setSlid
 // ---- スライド作成の入口：URLを入れたら札を出し、質問候補「URLをスライドに要約して！」からは URL 待ちで入力欄を開く ----
 const slideChip = $<HTMLButtonElement>('#slideChip');
 let slidesMode = false;
-function setSlidesMode(on: boolean) { slidesMode = on; q.placeholder = on ? SLIDES_PLACEHOLDER : PLACEHOLDER; }
+function setSlidesMode(on: boolean) { slidesMode = on; q.placeholder = on ? SLIDES_PLACEHOLDER : replyTo.hidden ? PLACEHOLDER : REPLY_PLACEHOLDER; }
+// ---- 返信：答えたあとは、吹き出しの「返信する」と入力欄の上の帯で、続けて聞けば前の回答を踏まえて答えると伝える（2026-11-23 みのるん選定のA案）----
+// 会話はタブごとの会話IDでもともとつながっているので、送る中身は自由入力と同じ
+function setReplyTo(question: string | null) {
+  replyTo.hidden = !question; $('#replyQ').textContent = question ?? '';
+  if (!slidesMode) q.placeholder = question ? REPLY_PLACEHOLDER : PLACEHOLDER;
+}
+function replyButton() {
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'reply';
+  b.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 016 6v5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>返信する';
+  b.onclick = openCompose;
+  return b;
+}
 // スライド作成はログインしていなくても頼める（2026-11-21〜。ログインなしは1日1本、ログインすると1日2本）
 function openSlidesCompose() { setSlidesMode(true); openCompose(); }
 // ログイン前に最後に答えた質問と回答（作成中のスライドを含む）。ログインの往復のあとに描き直して続ける。
@@ -727,7 +743,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
     share.textContent = 'Xでシェア';
     // 最後の行：右にシェア
     const row = document.createElement('div'); row.className = 'foot';
-    row.append(share); answer.appendChild(row); layout();
+    row.append(replyButton(), share); answer.appendChild(row); layout();
   }
   if (failed) director.phase('error');
   else settle();
@@ -735,6 +751,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   // 調べた説明の回答のあとは、候補の先頭に「この回答をスライドに！」を1つ置く
   const list = next.length ? next : starters([text]);
   if (!has('limited')) renderSuggest(offer && !failed ? withOfferChip(list) : list, failed && refused?.reason !== 'too_long', next.length ? 'ai' : 'starter');
+  setReplyTo(!failed && raw.trim() ? text : null);
   if (!failed && raw.trim()) lastTurn = { q: text, a: raw, next: list, offer, via: next.length ? 'ai' : 'starter', slides: turnSlides };
   if (!failed && raw) {
     giftState.turns++; saveGifts();
@@ -865,6 +882,8 @@ function restoreCarryover(turn: LastTurn | null) {
   answer.classList.remove('oops'); answer.innerHTML = md(turn.a); answer.scrollTop = 0;
   // 作成中だったスライドのカードも描き直す（Google へ行っている間も工房は作り続けている）
   for (const s of turn.slides ?? []) answer.appendChild(slidesCard(s.base, relayout));
+  const row = document.createElement('div'); row.className = 'foot'; row.append(replyButton()); answer.appendChild(row);
+  setReplyTo(turn.q);
   bubble.classList.add('on'); director.answer(turn.a, false);
   renderSuggest(turn.offer ? withOfferChip(turn.next) : turn.next, false, turn.via);
   layout();

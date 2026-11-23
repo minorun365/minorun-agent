@@ -37,8 +37,10 @@ class CostAlertTests(unittest.TestCase):
     def test_scheduled_run_emits_both_metrics_without_projection(self):
         m=self.m
         data={'now':dt.datetime(2026,10,26,tzinfo=m.JST),'total':10,'questions':1,'users':1,'pace':{'month_usd':9999}}
-        with patch.object(m, 'summary', return_value=data), patch.object(m, '_rolling_cost', return_value=20), patch('builtins.print') as out:
+        with patch.object(m, 'summary', return_value=data), patch.object(m, '_rolling_cost', return_value=20), \
+                patch.object(m, '_save_pace') as save, patch('builtins.print') as out:
             self.assertEqual(m.handler({},None), {'total':10,'aws_total':10,'rolling_30d_usd':20})
+            save.assert_called_once_with(data['now'])  # 画面が読む累計と月額予測も、この定期実行で置く
             self.assertIn('Rolling30DayCostUsd',out.call_args.args[0])
             self.assertNotIn('9999',out.call_args.args[0])
 
