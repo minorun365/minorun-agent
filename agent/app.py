@@ -96,7 +96,7 @@ FOLLOW_UP_LEAD_EN = "Let me look into this a little more…"
 FOLLOW_UP_FAILED_EN = "I tried to look into it further, but it didn't work out."
 EMPTY_EN = "Please type a question before sending."
 # 回答の言語の指定。会話の補助情報と同じ書き出しにして、要約や記録の文字起こしでは質問から外れるようにする
-ANSWER_IN_ENGLISH = "\n\n[アプリが添えた会話の補助情報。利用者は英語の画面を使っている。この質問には英語で答える。固有名詞は英語の正式名で書く]"
+ANSWER_IN_ENGLISH = "\n\n[アプリが添えた会話の補助情報。利用者は英語の画面を使っている。この質問には英語で答える。固有名詞は英語の正式名で書く。出典のラベルも英語にする（例: AWS official、Qiita、X）]"
 # 利用者には見せない指示（会話の履歴には残る）
 FOLLOW_UP = (Path(__file__).with_name("follow_up.local.txt").read_text().strip() if Path(__file__).with_name("follow_up.local.txt").exists() else "")
 

@@ -1,6 +1,6 @@
 // 本文の整形：先に HTML を無害化してから、太字・箇条書き・出典ラベルだけを付ける ----
-import { tr } from './i18n';
-const AWS_OFFICIAL = tr('AWS公式', 'AWS');
+import { EN, tr } from './i18n';
+const AWS_OFFICIAL = tr('AWS公式', 'AWS official');
 export const esc = (t: string) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 // 出典は [ラベル](URL) で届く。URL だけが届いたときは、ドメインから短いラベルを作る
 const SITES: [RegExp, string][] = [
@@ -18,7 +18,10 @@ const srcTag = (url: string, label: string) => `<a class="src" href="${url}" tar
 // モデルが付けたラベルが別のサイト名（URL は DevelopersIO なのに「Speaker Deck」など）や、
 // 言い訳を含む長い名前なら、URL のドメインから作り直す
 const KNOWN = new Map(SITES.map(([, l]) => [l.replace(/\s/g, '').toLowerCase(), l]));
+// 英語の画面では、日本語の文字を含むラベル（回答の指示の例にならった「AWS公式」など）を URL から作り直す
+const JA_CHARS = /[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]/;
 function srcLabel(label: string, url: string) {
+  if (EN && JA_CHARS.test(label)) return /AWS|公式/.test(label) && /aws/i.test(url) ? AWS_OFFICIAL : siteLabel(url);
   if (label.length > 14 || /ではなく|じゃなく/.test(label)) return siteLabel(url);
   const named = KNOWN.get(label.replace(/\s/g, '').toLowerCase());
   if (!named) return label;
