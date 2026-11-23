@@ -28,6 +28,13 @@ class SlidesTabTests(unittest.TestCase):
         far = sv.attach([job('b', at - dt.timedelta(hours=1))], rows)
         self.assertNotIn('row', far[0])
 
+    def test_attach_finds_question_of_guest(self):
+        at = self.start + dt.timedelta(hours=1)
+        rows = [dict(created_at=at.isoformat(), user=None, anon='5149dc4b88a40a56', tools=['make_slides'], question='ログインなし'),
+                dict(created_at=at.isoformat(), user=None, anon='0000000000000000', tools=['make_slides'], question='別の匿名')]
+        jobs = sv.attach([job('g', at, user='a:5149dc4b88a40a56')], rows)
+        self.assertEqual(jobs[0]['row']['question'], 'ログインなし')
+
     def test_states_and_stale_work_counts_as_failure(self):
         now = self.start + dt.timedelta(hours=2)
         fresh = job('w', now, stage='writing', at=int(now.timestamp()))

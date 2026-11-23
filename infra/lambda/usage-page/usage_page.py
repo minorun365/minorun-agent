@@ -1436,9 +1436,9 @@ def _recent_html(d, hrs, rows, banned=frozenset(), multi=False):
         f'<tr{" class=zero" if not x["questions"] else ""}><td>{periods.date_label(x["hour"]) if multi else str(x["hour"].hour) + "時台"}</td>'
         f'<td>{x["sessions"]}</td><td class="qcount">{x["questions"]}<span class="qbar"><i style="width:{x["questions"] / top * 100:.0f}%"></i></span></td>'
         f'<td>{_yen(x["usd"])}</td></tr>' for x in lines)
-    empty = f'<p class="note inline">{"この期間" if multi else "この日"}の質問はまだありません。</p>'
-    return (f'<div class="recent"><div class="card recent-q"><div class="recent-h"><h2>直近の質問<small>新しい順・タップで回答</small></h2>'
-            f'<a href="{html.escape(_url(v="list", d=ds, u=u))}">質問の一覧へ ›</a></div>'
+    empty = f'<p class="note inline">{"この期間" if multi else "この日"}の自由入力の質問はまだありません。</p>'
+    return (f'<div class="recent"><div class="card recent-q"><div class="recent-h"><h2>直近の質問（自由入力のみ）<small>新しい順・タップで回答</small></h2>'
+            f'<a href="{html.escape(_url(v="list", d=ds, u=u, f="typed"))}">質問の一覧へ ›</a></div>'
             f'<div class="recent-list">{"".join(items) or empty}</div></div>'
             f'<div class="card recent-h-card"><div class="recent-h"><h2>直近{len(lines)}{"日" if multi else "時間"}</h2>'
             f'<a href="{html.escape(_url(v="hours", d=ds, u=u))}">{"日ごと" if multi else "1時間ごと"}へ ›</a></div>'
@@ -1653,7 +1653,8 @@ def render(view, day, page, f=None, u=None, qid=None, group="registered"):
     summary_html = _summary_html(d, ban)
     recent_html = ""
     if view == "sum":
-        recent = rows[:RECENT]
+        # 直近の質問は自由入力だけ（候補ボタン・用意した質問は除き、来場者が自分で打った質問を見る）
+        recent = [r for r in rows if r.get("via") == "typed"][:RECENT]
         for r, a in zip(recent, _answers(recent)):
             r["answer"] = a
         recent_html = _recent_html(d, hrs, recent, ban["ids"], multi)

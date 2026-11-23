@@ -155,6 +155,20 @@ if(links[0].o.attrs['aria-current']!=='true'||links[1].o.attrs['aria-current']||
             self.assertIn('<details data-row', m.render('list', 'all', 1))
             self.assertEqual(calls[-1], True)
 
+    def test_recent_questions_show_typed_only(self):
+        # 要約の直近の質問は自由入力だけ。候補ボタン・用意した質問は一覧タブで見る
+        rows = [dict(r) for r in self.rows]
+        rows[-1].update(via='ai', question='候補ボタンから来た質問')
+        with patch.object(m, 'questions', return_value=(self.now, self.start, rows)), \
+                patch.object(m, 'bans', return_value=[]), \
+                patch.object(m, '_answers', side_effect=lambda rs: ['回答'] * len(rs)):
+            page = m.render(None, 'all', 1)
+        recent = page[page.index('<div class="recent">'):]
+        self.assertIn('直近の質問（自由入力のみ）', recent)
+        self.assertNotIn('候補ボタンから来た質問', recent)
+        self.assertIn('<details data-row', recent)
+        self.assertIn('f=typed', recent)
+
     def test_projected_fields_do_not_overlap(self):
         # DynamoDB は同じ項目・親子の項目を同時に指定すると Scan ごと断る
         for fields in (m.REPORT_FIELDS, m.DETAIL_FIELDS):

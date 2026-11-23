@@ -152,14 +152,17 @@ def load(start, end):
 
 
 def attach(jobs, rows):
-    """同じ利用者で make_slides を使った質問のうち、受け付けた時刻に一番近いものを添える。"""
-    asked = [r for r in rows if r.get("user") and "make_slides" in (r.get("tools") or [])]
+    """同じ利用者で make_slides を使った質問のうち、受け付けた時刻に一番近いものを添える。
+    スライドの持ち主はログインした人なら user、していない人なら「a:匿名ID」（agent/slides.py の owner）なので、質問の側も同じ形にそろえて比べる。"""
+    def owner(r):
+        return r.get("user") or (f"a:{r['anon']}" if r.get("anon") else "")
+    asked = [(owner(r), r) for r in rows if owner(r) and "make_slides" in (r.get("tools") or [])]
     used = set()
     for j in sorted(jobs, key=lambda x: x["at"]):
         at = datetime.datetime.fromtimestamp(j["at"], JST)
         best = None
-        for r in asked:
-            if r["user"] != j["user"] or id(r) in used:
+        for who, r in asked:
+            if who != j["user"] or id(r) in used:
                 continue
             gap = abs(datetime.datetime.fromisoformat(r["created_at"]) - at)
             if gap <= MATCH and (best is None or gap < best[0]):
