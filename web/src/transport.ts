@@ -1,3 +1,4 @@
+import { EN, tr } from './i18n';
 /** 同じ会話の先読みを待ち、未実行と分かる起動競合だけを再試行する。 */
 export type Incident = {
   id: string; at: number; phase: 'warmup' | 'question'; kind: 'session_busy' | 'http' | 'network' | 'timeout' | 'stream' | 'agent';
@@ -6,8 +7,20 @@ export type Incident = {
 export class TransportError extends Error {
   constructor(public status: number, public reason: string, message: string) { super(message); }
 }
-const BUSY = '会話の準備に時間がかかっています。少し待って、もう一度送ってください。';
-const GENERIC = 'いまうまくつながりませんでした。少し時間をおいて、もう一度送ってください。';
+const BUSY = tr('会話の準備に時間がかかっています。少し待って、もう一度送ってください。', 'Getting the conversation ready is taking a while. Please wait a moment and send it again.');
+const GENERIC = tr('いまうまくつながりませんでした。少し時間をおいて、もう一度送ってください。', "I couldn't connect just now. Please wait a bit and send it again.");
+// 英語のときは確認役の日本語の文を使わず、理由ごとの英語の文に置き換える
+export const REFUSED_EN: Record<string, string> = {
+  bad_id: 'Please reload the page and send it again.',
+  too_long: 'Please keep your question to 1,000 characters.',
+  stopped: "It's busy right now. Please try again in a little while.",
+  per_minute: 'Please wait a moment before sending again.',
+  daily_limit: "That's all for today. Questions reset at midnight Japan time.",
+  image_limit: 'You have reached the daily image limit. You can keep asking text-only questions.',
+  image_full: 'Image uploads are full for today. You can keep asking text-only questions.',
+  banned: 'Use beyond reasonable bounds was detected. You can no longer use this app.',
+  session_owner: "This conversation can't continue. Please close the page and open it again.",
+};
 const REFUSALS = new Set(['banned', 'daily_limit', 'per_minute', 'too_long', 'bad_id', 'stopped', 'image_limit', 'image_full']);
 // 先読みは1回15秒で打ち切り、もう1回だけ送り直す。サーバーが返し終えていても応答が届かず止まることがある（10/27（火）に3件。
 // いずれも Runtime は0.3秒で返し終えていた）。1回目で入れ物は起きているので、送り直しはすぐ返る。
@@ -83,7 +96,7 @@ export class ChatTransport {
       }
       if (!REFUSALS.has(data.error || '') || trouble) emit('http', res.status, 'failed', attempt);
       throw new TransportError(res.status, data.error || 'http',
-        REFUSALS.has(data.error || '') && data.message ? data.message : GENERIC);
+        EN ? (REFUSED_EN[data.error || ''] ?? GENERIC) : REFUSALS.has(data.error || '') && data.message ? data.message : GENERIC);
     }
   }
 }

@@ -18,6 +18,15 @@ body{position:absolute;inset:0;overflow:hidden;font-family:-apple-system,BlinkMa
 }
 /* 時計は2行に縦に並べて右寄せ */
 .clocks{display:flex;flex-direction:column;align-items:flex-end;line-height:1.4}
+/* 言語のスイッチ：見出しの下に小さく置く（2026-11-24 みのるん選定のB案）。押せる範囲は上下に広げ、見た目の位置は変えない */
+.top .brand{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+.lang{display:flex;align-items:center;gap:5px;margin:-4px 0 -4px -2px;padding:4px 8px 4px 2px;border:0;background:none;font:inherit;font-size:11px;line-height:1.3;color:var(--mut);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.lang .track{flex:none;position:relative;width:26px;height:15px;border-radius:999px;background:#e1e4e9;box-shadow:inset 0 0 0 1px rgba(0,0,0,.04);transition:background .2s}
+.lang .track::after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.22);transition:left .2s}
+.lang.on{color:var(--ink);font-weight:700}
+.lang.on .track{background:var(--accent)}
+.lang.on .track::after{left:13px}
+.lang:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
 .clocks i{font-style:normal;margin-right:5px}
 
 /* キャラ：ずっとふわふわ。位置と大きさは stage.js の layout() が、見えている高さと場面から決める */
@@ -329,3 +338,4 @@ td:first-child{font-weight:700;white-space:nowrap}
 /* ログイン前にスライドの入口を押したとき：アイコンを3回脈打たせて場所を示す */
 .me.nudge{animation:me-pulse 1.2s ease-in-out 3}
 @media(prefers-reduced-motion:reduce){.me.nudge,.me .badge,.mepop .myslides .ph i{animation:none}}
+:root[data-theme=dark] .lang .track{background:#3a3a3c}

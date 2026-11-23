@@ -1,22 +1,26 @@
 // スライドのカード（記事のURLから作るものと、調べてまとめるもの）。受け付けた直後に置き、スライド作成機能が書く status.json を数秒おきに見て、
 // 「記事を読む → 構成を考える → スライドを書き出す → 仕上げ」の段階を進め、できたら表紙のサムネイルに差し替える。
 
+import { EN, tr } from './i18n';
+const LOGIN = tr('ログイン', 'Log in');
+
 export interface SlidesStatus { stage: string; kind?: 'article' | 'topic'; detail?: string; message?: string; title?: string; pages?: number; viewer?: string; thumb?: string }
 
-export const STEPS = ['記事を読む', '構成を考える', 'スライドを書き出す', '仕上げ'] as const;
-const WAIT_LINES = ['記事を読んでいます', '構成を考えています', 'スライドを書き出しています', '余白を測って仕上げています'];
+export const STEPS = EN ? ['Read', 'Outline', 'Write', 'Polish'] as const : ['記事を読む', '構成を考える', 'スライドを書き出す', '仕上げ'] as const;
+const WAIT_LINES = EN ? ['Reading the article', 'Planning the outline', 'Writing the slides', 'Checking the margins and polishing'] : ['記事を読んでいます', '構成を考えています', 'スライドを書き出しています', '余白を測って仕上げています'];
 /** 調べてまとめるときは、最初の段階を「出典を読む」と言い分ける */
-export const stepLabel = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? '出典を読む' : STEPS[i]);
-export const waitLine = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? '出典を読んでいます' : WAIT_LINES[i]);
+export const stepLabel = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? tr('出典を読む', 'Sources') : STEPS[i]);
+export const waitLine = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? tr('出典を読んでいます', 'Reading the sources') : WAIT_LINES[i]);
 /** できるまでの目安。エージェントが焼いて見直すので5〜10分かかる（2026-11-21 の本番で約6.5分） */
-export const ETA_LINE = 'できるまで5〜10分ほど。閉じても続きます';
+export const ETA_LINE = tr('できるまで5〜10分ほど。閉じても続きます', 'Takes about 5–10 minutes. It keeps going even if you close this.');
 /** 作成中の一言。スライド作成機能が書く detail（「書き出して余白を測っています（2回目）」など）があればそれを、無ければ段階の言葉を出す。
  *  detail は status.json から来るので、短い日本語の文だけを通す（タグや記号の多い文は捨てる） */
 export function progressLine(s: SlidesStatus): string {
   const d = typeof s.detail === 'string' ? s.detail.trim() : '';
-  if (d && d.length <= 40 && !/[<>{}\[\]`$]/.test(d)) return d;
+  // detail は日本語の文なので、英語のときは段階の言葉を出す
+  if (!EN && d && d.length <= 40 && !/[<>{}\[\]`$]/.test(d)) return d;
   const n = stepOf(s.stage);
-  return n >= 0 && n < 4 ? waitLine(n, s.kind) : '順番を待っています';
+  return n >= 0 && n < 4 ? waitLine(n, s.kind) : tr('順番を待っています', 'Waiting in line');
 }
 /** 作成中として見張る長さ。スライド作成機能の1本の上限（60分）より短く、ふだんの所要（5〜10分）より十分長く */
 export const WORKING_MINUTES = 40;
@@ -38,13 +42,13 @@ export const GIVE_UP_MS = WORKING_MINUTES * 60_000;
 
 /** ログインしていない人へ、作成中のカードの中で待つ間のログインを勧める（11/21 みのるん選定のA案） */
 export interface LoginNudge { icon: string; onClick: () => void }
-export const LOGIN_NUDGE_TEXT = 'ログインしておくと、閉じても<br>どの端末からでも開けます';
+export const LOGIN_NUDGE_TEXT = tr('ログインしておくと、閉じても<br>どの端末からでも開けます', 'Log in to open it later<br>from any device');
 /** ログインなしの上限に当たったときの案内（同じA案の形。押すとログインし、戻ったら同じ頼みを送り直す） */
-export const LOGIN_CONTINUE_TEXT = 'ログインして戻ると、<br>このスライドを作り始めます';
+export const LOGIN_CONTINUE_TEXT = tr('ログインして戻ると、<br>このスライドを作り始めます', 'Log in and come back<br>to start these slides');
 export function loginContinueBox(nudge: LoginNudge): HTMLElement {
   const box = document.createElement('div');
   box.className = 'slides-login';
-  box.innerHTML = `<p>${LOGIN_CONTINUE_TEXT}</p><button type="button">${nudge.icon}<span>ログイン</span></button>`;
+  box.innerHTML = `<p>${LOGIN_CONTINUE_TEXT}</p><button type="button">${nudge.icon}<span>${LOGIN}</span></button>`;
   box.querySelector('button')!.addEventListener('click', () => nudge.onClick());
   return box;
 }
@@ -53,8 +57,8 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
   const fig = document.createElement('figure');
   fig.className = 'slides-card working';
   fig.innerHTML = `<div class="slides-steps">${STEPS.map((s, i) => `<span class="step" data-i="${i}"><i></i>${s}</span>`).join('')}</div>`
-    + `<div class="slides-bar"><span></span></div><figcaption class="slides-line">受け付けました。${ETA_LINE}</figcaption>`
-    + (nudge ? `<div class="slides-login"><p>${LOGIN_NUDGE_TEXT}</p><button type="button">${nudge.icon}<span>ログイン</span></button></div>` : '');
+    + `<div class="slides-bar"><span></span></div><figcaption class="slides-line">${tr('受け付けました。', 'Got it. ')}${ETA_LINE}</figcaption>`
+    + (nudge ? `<div class="slides-login"><p>${LOGIN_NUDGE_TEXT}</p><button type="button">${nudge.icon}<span>${LOGIN}</span></button></div>` : '');
   fig.querySelector('.slides-login button')?.addEventListener('click', () => nudge!.onClick());
   const line = fig.querySelector('.slides-line') as HTMLElement;
   const started = Date.now();
@@ -71,8 +75,8 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
     stopped = true;
     const { viewer, thumb } = safeViewer(base, s);
     fig.className = 'slides-card ready';
-    fig.innerHTML = `<a href="${esc(viewer)}" target="_blank" rel="noopener"><img src="${esc(thumb)}" alt="${esc(s.title || 'スライドの表紙')}" width="1200" height="675"></a>`
-      + `<figcaption><b>できました！</b>タップでめくれます${s.pages ? `（全${s.pages}ページ）` : ''}</figcaption>`;
+    fig.innerHTML = `<a href="${esc(viewer)}" target="_blank" rel="noopener"><img src="${esc(thumb)}" alt="${esc(s.title || tr('スライドの表紙', 'Slide cover'))}" width="1200" height="675"></a>`
+      + (EN ? `<figcaption><b>Done!</b> Tap to flip through${s.pages ? ` (${s.pages} pages)` : ''}</figcaption>` : `<figcaption><b>できました！</b>タップでめくれます${s.pages ? `（全${s.pages}ページ）` : ''}</figcaption>`);
     fig.querySelector('img')!.addEventListener('load', onChange);
     onChange();
   };
@@ -92,12 +96,12 @@ export function slidesCard(base: string, onChange: () => void, fetcher: typeof f
       if (r.ok) {
         const s = await r.json() as SlidesStatus;
         if (s.stage === 'done') return finish(s);
-        if (s.stage === 'error') return fail(s.message || 'スライドを作れませんでした。');
+        if (s.stage === 'error') return fail((EN ? '' : s.message) || tr('スライドを作れませんでした。', "The slides couldn't be made."));
         show(s);
       }
     } catch { /* 通信の揺れは次の回に任せる */ } finally { reading = false; }
     // スライド作成機能は1本60分で打ち切って失敗を書く。ふだんの所要（5〜10分）より十分長く待っても進まないときだけ止める
-    if (Date.now() - started > GIVE_UP_MS) return fail('時間がかかりすぎたため止めました。少し時間をおいて、もう一度頼んでください。');
+    if (Date.now() - started > GIVE_UP_MS) return fail(tr('時間がかかりすぎたため止めました。少し時間をおいて、もう一度頼んでください。', 'This took too long, so it was stopped. Please wait a bit and ask again.'));
     timer = window.setTimeout(tick, 3000);
   };
   const onVisible = () => { if (stopped) document.removeEventListener('visibilitychange', onVisible); else if (document.visibilityState === 'visible') void tick(); };
@@ -164,18 +168,18 @@ export function slidesList(items: SlidesItem[], status: (job: string) => SlidesS
     const d = `<span class="d">${when(it.at)}</span>`;
     if (kind === 'done') {
       const isNew = unseen.has(it.job) ? '<em class="new">NEW</em>' : '';
-      const tag = `<em class="kind">${s!.kind === 'topic' ? '調べて' : '記事'}</em>`;
-      rows.push(`<li><a href="${esc(it.base)}" target="_blank" rel="noopener"><img src="${esc(it.base)}og.jpg" alt="" width="64" height="36"><span class="t">${isNew}${tag}${esc(s!.title || 'スライド')}</span></a>${d}</li>`);
+      const tag = `<em class="kind">${s!.kind === 'topic' ? tr('調べて', 'Topic') : tr('記事', 'Article')}</em>`;
+      rows.push(`<li><a href="${esc(it.base)}" target="_blank" rel="noopener"><img src="${esc(it.base)}og.jpg" alt="" width="64" height="36"><span class="t">${isNew}${tag}${esc(s!.title || tr('スライド', 'Slides'))}</span></a>${d}</li>`);
     } else if (kind === 'error') {
-      rows.push(`<li><span class="t mut">作れませんでした</span>${d}</li>`);
+      rows.push(`<li><span class="t mut">${tr('作れませんでした', 'Failed')}</span>${d}</li>`);
     } else if (kind === 'working') {
       const step = esc(progressLine(s!));
-      rows.push(`<li class="working"><span class="ph"><i></i></span><span class="t"><b>作成中…</b><small>${step}</small></span>${d}</li>`);
+      rows.push(`<li class="working"><span class="ph"><i></i></span><span class="t"><b>${tr('作成中…', 'Making…')}</b><small>${step}</small></span>${d}</li>`);
     } else if (kind === 'checking') {
-      rows.push(`<li><span class="t mut">確かめています…</span>${d}</li>`);
+      rows.push(`<li><span class="t mut">${tr('確かめています…', 'Checking…')}</span>${d}</li>`);
     }
   }
-  if (rows.length) box.innerHTML = `<p class="mh">作ったスライド</p><ul>${rows.join('')}</ul>`;
+  if (rows.length) box.innerHTML = `<p class="mh">${tr('作ったスライド', 'Your slides')}</p><ul>${rows.join('')}</ul>`;
   return box;
 }
 

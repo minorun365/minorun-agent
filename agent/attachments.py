@@ -16,6 +16,8 @@ MAX_BYTES = 1_500_000
 KEY = re.compile(r"^up/([0-9a-f]{16})/[0-9a-f]{32}\.jpg$")
 DEFAULT_QUESTION = "この画像について教えてください。"
 UNREADABLE = "画像を読み込めませんでした。もう一度添付して送ってください。"
+DEFAULT_QUESTION_EN = "Tell me about this image."
+UNREADABLE_EN = "I couldn't read the image. Please attach it again and send."
 # 画像を外した場所に置く印。モデルには「前に画像があったが、いまは見られない」と伝わる
 PLACEHOLDER = "[利用者が画像を1枚添付した。画像は保存していないので、いまは見られない]"
 

@@ -1,15 +1,17 @@
 // 本文の整形：先に HTML を無害化してから、太字・箇条書き・出典ラベルだけを付ける ----
+import { tr } from './i18n';
+const AWS_OFFICIAL = tr('AWS公式', 'AWS');
 export const esc = (t: string) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 // 出典は [ラベル](URL) で届く。URL だけが届いたときは、ドメインから短いラベルを作る
 const SITES: [RegExp, string][] = [
-  [/(^|\.)aws\.amazon\.com$|(^|\.)amazon\.com$|awsstatic|(^|\.)aws$/, 'AWS公式'], [/(^|\.)(x|twitter)\.com$/, 'X'],
+  [/(^|\.)aws\.amazon\.com$|(^|\.)amazon\.com$|awsstatic|(^|\.)aws$/, AWS_OFFICIAL], [/(^|\.)(x|twitter)\.com$/, 'X'],
   [/qiita\.com$/, 'Qiita'], [/zenn\.dev$/, 'Zenn'], [/note\.com$/, 'note'], [/classmethod\.jp$/, 'DevelopersIO'],
   [/speakerdeck\.com$/, 'Speaker Deck'], [/docswell\.com$/, 'Docswell'], [/connpass\.com$/, 'connpass'],
-  [/hatenablog|hatena\.ne\.jp$/, 'はてなブログ'], [/github\.com$/, 'GitHub'], [/youtube\.com$|youtu\.be$/, 'YouTube'],
+  [/hatenablog|hatena\.ne\.jp$/, tr('はてなブログ', 'Hatena Blog')], [/github\.com$/, 'GitHub'], [/youtube\.com$|youtu\.be$/, 'YouTube'],
 ];
 function siteLabel(url: string) {
   let host = '';
-  try { host = new URL(url.replace(/&amp;/g, '&')).hostname.replace(/^www\./, ''); } catch { return 'リンク'; }
+  try { host = new URL(url.replace(/&amp;/g, '&')).hostname.replace(/^www\./, ''); } catch { return tr('リンク', 'Link'); }
   return SITES.find(([re]) => re.test(host))?.[1] ?? host.split('.').slice(-2, -1)[0] ?? host;
 }
 const srcTag = (url: string, label: string) => `<a class="src" href="${url}" target="_blank" rel="noopener">${label}</a>`;
@@ -21,7 +23,7 @@ function srcLabel(label: string, url: string) {
   const named = KNOWN.get(label.replace(/\s/g, '').toLowerCase());
   if (!named) return label;
   // AWS のイベント・Builder Center など aws を含むドメインは「AWS公式」のままでよい
-  if (named === 'AWS公式' && /aws/i.test(url)) return label;
+  if (named === AWS_OFFICIAL && /aws/i.test(url)) return label;
   const actual = siteLabel(url);
   return named === actual ? label : actual;
 }

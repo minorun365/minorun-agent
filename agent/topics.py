@@ -105,7 +105,7 @@ def summarize(heading, transcript):
 NEXT = (Path(__file__).with_name("next.local.txt").read_text().strip() if Path(__file__).with_name("next.local.txt").exists() else "")
 
 
-def suggest_next(current, shelf, question, answer=""):
+def suggest_next(current, shelf, question, answer="", lang="ja"):
     """次の質問の候補を3つ（深掘り2つ＋別の話題1つ）作る。answer があれば回答で触れなかった続きを聞かせる。失敗したら空。"""
     past = "、".join(s["heading"] for s in shelf[-4:]) or "（なし）"
     text = f"いまの話題: {current or '（なし）'}\nこれまでの話題: {past}\n直前の質問: {question}"
@@ -120,13 +120,17 @@ def suggest_next(current, shelf, question, answer=""):
     text += f"\n今回の別の話題の切り口: {angle}。直前やこれまでの話題と重なるなら他の話題を選ぶ。"
     if answer:
         text += f"\n直前の回答（この続きを深掘りにする）: {answer[:600]}"
+    en = lang == "en"
+    if en:
+        # 英語の画面：候補も英語の短い問いにする（日本語の24字の代わりに60字まで）
+        text += "\n利用者は英語の画面を使っている。3つとも自然な英語の短い質問（1つ60字以内）で書く。"
     try:
         raw = _ask(NEXT, text, 300)
         # 言い直して配列を2つ続けて返すことがあるので、最後に読める配列（言い直した方）を使う
         items = next(json.loads(m) for m in reversed(re.findall(r"\[[^\[\]]*\]", raw)) if _json_ok(m))
         items = [re.sub(r"\s+", " ", str(i)).strip() for i in items if str(i).strip()]
-        items = [i if i.endswith(("？", "?")) else i + "？" for i in items]
-        return list(dict.fromkeys(i for i in items if len(i) <= 24 and i != question))[:3]
+        items = [i if i.endswith(("？", "?")) else i + ("?" if en else "？") for i in items]
+        return list(dict.fromkeys(i for i in items if len(i) <= (60 if en else 24) and i != question))[:3]
     except Exception as e:
         print(json.dumps({"suggest_error": type(e).__name__, "raw": (locals().get("raw") or "")[:200]}, ensure_ascii=False))
         return []

@@ -69,10 +69,34 @@ LABELS = {
     "search_aws_blog": "AWS ブログを調べています",
     "show_map": "画像を用意しています",
 }
+LABELS_EN = {
+    "fetch_url": "Reading the page",
+    "make_slides": "Getting the slides ready",
+    "now": "Checking the date and time",
+    "search_sessions": "Checking the official catalog",
+    "search_2026": "Checking the knowledge base",
+    "search_past": "Checking past event reports",
+    "search_web": "Searching the web",
+    "search_recent": "Checking the latest news",
+    "search_japanese": "Searching Japanese websites",
+    "search_x_users": "Checking X profiles",
+    "search_x_posts": "Checking recent posts on X",
+    "get_announcements": "Checking updates from the venue",
+    "search_whats_new": "Checking AWS What's New",
+    "search_aws_blog": "Checking the AWS Blog",
+    "show_map": "Getting the image ready",
+}
 SORRY = "いまうまく答えられませんでした。少し時間をおいて、もう一度送ってください。"
 VERIFY_WAIT = 6.0
 FOLLOW_UP_LEAD = "もう少し追加で調べてみますね…"
 FOLLOW_UP_FAILED = "追加で調べようとしましたが、うまくいきませんでした。"
+# 英語の画面（payload の lang が en）で出す文（2026-11-24）。日本語の文と同じ意味にそろえる
+SORRY_EN = "I couldn't answer just now. Please wait a bit and send it again."
+FOLLOW_UP_LEAD_EN = "Let me look into this a little more…"
+FOLLOW_UP_FAILED_EN = "I tried to look into it further, but it didn't work out."
+EMPTY_EN = "Please type a question before sending."
+# 回答の言語の指定。会話の補助情報と同じ書き出しにして、要約や記録の文字起こしでは質問から外れるようにする
+ANSWER_IN_ENGLISH = "\n\n[アプリが添えた会話の補助情報。利用者は英語の画面を使っている。この質問には英語で答える。固有名詞は英語の正式名で書く]"
 # 利用者には見せない指示（会話の履歴には残る）
 FOLLOW_UP = (Path(__file__).with_name("follow_up.local.txt").read_text().strip() if Path(__file__).with_name("follow_up.local.txt").exists() else "")
 
@@ -326,6 +350,10 @@ def _tool_label(name, question, current):
     return LABELS.get(name, "調べています")
 
 
+def _tool_label_en(name):
+    return LABELS_EN.get(name, "Looking into it")
+
+
 async def _prebaked_turn(conv, turn, pb, model_question, started, base, ledger, session):
     """用意した回答を本番と同じ速さで流し、会話の履歴・記録・裏の処理は本番と同じにする。"""
     ledger.prebaked = True
@@ -386,6 +414,7 @@ async def invoke(payload, context):
     question = str(payload.get("prompt", "")).strip()[:1000]
     tid = str(payload.get("tid") or "")[:40]  # 画面が質問ごとに作る番号（回答の評価を、この行へ結び付ける）
     via = str(payload.get("via") or "")[:10]  # 質問の出どころ（typed・ai・starter・link）
+    en = payload.get("lang") == "en"  # 英語の画面から来た質問（確認役は en のときだけ渡す）
     if payload.get("warmup"):
         # ページを開いたときの先読み。入れ物が起き、会話の控えも戻しておく
         await asyncio.gather(asyncio.to_thread(_warm_up), asyncio.to_thread(_conversation, actor, session, anon))
@@ -405,16 +434,16 @@ async def invoke(payload, context):
         return
     image_key = attachments.owned_key(str(payload.get("image") or ""), str(payload.get("anon") or ""))
     if not question and image_key:
-        question = attachments.DEFAULT_QUESTION
+        question = attachments.DEFAULT_QUESTION_EN if en else attachments.DEFAULT_QUESTION
     if not question:
-        yield {"type": "error", "message": "質問を入れてから送ってください。"}
+        yield {"type": "error", "message": EMPTY_EN if en else "質問を入れてから送ってください。"}
         yield {"type": "done"}
         return
     image = None
     if image_key:
         image = await asyncio.to_thread(attachments.load, image_key)
         if image is None:
-            yield {"type": "error", "message": attachments.UNREADABLE}
+            yield {"type": "error", "message": attachments.UNREADABLE_EN if en else attachments.UNREADABLE}
             yield {"type": "done"}
             return
 
@@ -438,9 +467,10 @@ async def invoke(payload, context):
             except Exception as e:
                 print(json.dumps({"recall_error": type(e).__name__, "detail": str(e)[:200]}))
         previous_context = getattr(conv, "last_context", None)
-        model_question = _question_prompt(conv, question, memories)
-        # 画像つきの質問は用意した回答を使わない（同じ文でも、聞いている中身は画像で変わる）
-        pb = None if image else prebaked.lookup(question, getattr(conv, "last_prebaked", None))
+        model_question = _question_prompt(conv, question, memories) + (ANSWER_IN_ENGLISH if en else "")
+        # 画像つきの質問は用意した回答を使わない（同じ文でも、聞いている中身は画像で変わる）。
+        # 用意した回答は日本語なので、英語の画面でも使わない
+        pb = None if image or en else prebaked.lookup(question, getattr(conv, "last_prebaked", None))
         conv.last_prebaked = None
         if pb is not None:
             base = {"anon": actor, "user": user or None, "memories": len(memories),
@@ -450,7 +480,7 @@ async def invoke(payload, context):
             handed_off = True
             return
         judge = asyncio.create_task(asyncio.to_thread(topics.judge, conv.current, conv.shelf, question))
-        nexts = asyncio.create_task(asyncio.to_thread(topics.suggest_next, conv.current, conv.shelf, question))
+        nexts = asyncio.create_task(asyncio.to_thread(topics.suggest_next, conv.current, conv.shelf, question, **({"lang": "en"} if en else {})))
         topic_sent, seen_tools, first_ms, answer, failed, maps_sent, slides_sent = False, set(), None, [], False, 0, 0
 
         def topic_event(j):
@@ -459,7 +489,7 @@ async def invoke(payload, context):
 
         def tool_event(use):
             name = use.get("name")
-            return {"type": "tool", "name": name, "label": _tool_label(name, question, conv.current)}
+            return {"type": "tool", "name": name, "label": _tool_label_en(name) if en else _tool_label(name, question, conv.current)}
 
         asked = model_question
         if image:
@@ -489,7 +519,7 @@ async def invoke(payload, context):
         except Exception as e:
             failed = True
             print(json.dumps({"agent_error": type(e).__name__, "detail": str(e)[:300]}))
-            yield {"type": "error", "message": SORRY}
+            yield {"type": "error", "message": SORRY_EN if en else SORRY}
 
         initial_answer = "".join(answer)
         research_audit = {"decision_status": "skipped", "outcome": "not_started",
@@ -499,7 +529,7 @@ async def invoke(payload, context):
                 research.needed, question, "".join(answer),
                 _transcript(conv.agent.messages[-8:]), turn.tools_used, research_audit):
             followed = True
-            yield {"type": "follow_up", "text": FOLLOW_UP_LEAD}
+            yield {"type": "follow_up", "text": FOLLOW_UP_LEAD_EN if en else FOLLOW_UP_LEAD}
             turn.tool_calls = min(turn.tool_calls, MAX_TOOL_CALLS - 3)
             revised = []
             follow_up_start = len(conv.agent.messages)
@@ -525,7 +555,7 @@ async def invoke(payload, context):
                 research_audit["error_type"] = type(e).__name__
                 print(json.dumps({"follow_up_error": type(e).__name__, "detail": str(e)[:300]}))
                 conv.agent.messages = conv.agent.messages[:follow_up_start]
-                yield {"type": "follow_up", "text": FOLLOW_UP_FAILED}
+                yield {"type": "follow_up", "text": FOLLOW_UP_FAILED_EN if en else FOLLOW_UP_FAILED}
             finally:
                 research_audit["follow_up_tools"] = list(turn.tools_used[follow_up_tools_start:])
                 usage.PHASE.reset(phase_token)
@@ -550,7 +580,7 @@ async def invoke(payload, context):
             except Exception:
                 result = None
             if result:
-                lines = catalog.describe(result)
+                lines = catalog.describe(result, en=en)
                 catalog_state = "changed" if lines else "verified"
                 if lines:
                     yield {"type": "catalog_update", "at": result["checked_at"], "lines": lines}
@@ -579,7 +609,7 @@ async def invoke(payload, context):
         row = {"anon": actor, "user": user or None, "memories": len(memories), "question": question, "answer": "".join(answer), "first_ms": first_ms,
                "total_ms": store.elapsed_ms(started), "tools": turn.tools_used, "x_search": turn.x_usage, "catalog": catalog_state,
                "model": _answer_models(ledger), "effort": MAIN_EFFORT, "status": "error" if failed else "ok",
-               "_usage": ledger, "initial_answer": initial_answer, "research": research_audit, "follow_up": followed, **({"image_bytes": len(image)} if image else {}), **({"tid": tid} if tid else {}), **({"via": via} if via else {})}
+               "_usage": ledger, "initial_answer": initial_answer, "research": research_audit, "follow_up": followed, **({"image_bytes": len(image)} if image else {}), **({"tid": tid} if tid else {}), **({"via": via} if via else {}), **({"lang": "en"} if en else {})}
         task_id = app.add_async_task("after_answer", {"session": session})
         threading.Thread(target=_after_answer, args=(conv, task_id, turn_start, judged, row), daemon=True).start()
         handed_off = True

@@ -17,9 +17,11 @@ import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { saveCarryover, takeCarryover, type LastTurn, type Pending } from './carryover';
 import { AttachError, shrink, upload } from './attach';
 import { parseSlidesList, seenBefore, loginContinueBox, slidesCard, slidesList, SlidesTracker } from './slides-card';
+import { EN, switchLang, tr } from './i18n';
+import { REFUSED_EN } from './transport';
 import { OFFER_CHIP, OFFER_REQUEST, PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withOfferChip, withSlidesStarter } from './slides-hint';
 
-interface MapShown { src: string; alt: string; caption: string; width: number; height: number; source_url: string }
+interface MapShown { src: string; alt: string; caption: string; alt_en?: string; caption_en?: string; width: number; height: number; source_url: string }
 type AgentEvent =
   | { type: 'topic'; heading: string; changed: boolean }
   | { type: 'tool'; name: string; label: string }
@@ -47,7 +49,32 @@ const stage = $('#stage'), bubble = $('#bubble'), answer = $('#answer'), thought
 const chara = $('#chara'), doing = $('#doing'), suggest = $('#suggest'), sendBtn = $('#send');
 const q = $<HTMLTextAreaElement>('#q');
 const header = $('.top'), dock = $('.dock'), write = $('.write'), notice = $('.notice');
-const replyTo = $('#replyTo'), REPLY_PLACEHOLDER = 'この回答に返信';
+const replyTo = $('#replyTo'), REPLY_PLACEHOLDER = tr('この回答に返信', 'Reply to this answer');
+// ---- 言語：見出しの下のスイッチ（2026-11-24 みのるん選定のB案）。英語のときは HTML に書いた日本語の文言をここで差し替える ----
+const langBtn = $<HTMLButtonElement>('#lang');
+langBtn.setAttribute('aria-checked', String(EN));
+langBtn.classList.toggle('on', EN);
+langBtn.addEventListener('click', () => {
+  langBtn.classList.toggle('on', !EN); langBtn.setAttribute('aria-checked', String(!EN));
+  // つまみが動いたのを見せてから読み込み直す
+  setTimeout(() => switchLang(EN ? 'ja' : 'en'), 220);
+});
+if (EN) {
+  document.documentElement.lang = 'en';
+  document.title = 'Minorun Agent';
+  $('.top b').textContent = 'Minorun Agent';
+  greet.innerHTML = "Hi, I'm Minorun!<br>Ask me anything about AWS re:Invent 2026.";
+  notice.textContent = "Please don't send personal or confidential information.";
+  q.placeholder = 'Ask me anything'; q.setAttribute('aria-label', 'Question');
+  const mark = replyTo.querySelector('svg')!.outerHTML;
+  replyTo.querySelector('b')!.innerHTML = `${mark}Replying to “<span id="replyQ"></span>”`;
+  replyTo.querySelector('.sub')!.textContent = "I'll answer with our conversation so far in mind";
+  for (const [sel, label] of [['#me', 'Log in'], ['#mepop', 'Log in'], ['#back', 'Close and go back'], ['#clip', 'Attach an image'],
+    ['#attachDrop', 'Remove the image'], ['#send', 'Send']] as const) $(sel).setAttribute('aria-label', label);
+  $<HTMLImageElement>('#attachImg').alt = 'Image to attach';
+  $('#zoomClose').textContent = 'Close';
+  $('#zoom .hint').textContent = 'Pinch to zoom in';
+}
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const has = (c: string) => stage.classList.contains(c);
@@ -95,7 +122,7 @@ addEventListener('scroll', fitViewport, { passive: true });
 
 // ---- 時計（ラスベガス・日本） ----
 const fmt = (tz: string) => new Intl.DateTimeFormat('ja-JP', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-const tick = () => { $('#clocks').innerHTML = `<span><i>ラスベガス</i>${fmt('America/Los_Angeles')}</span><span><i>日本</i>${fmt('Asia/Tokyo')}</span>`; };
+const tick = () => { $('#clocks').innerHTML = `<span><i>${tr('ラスベガス', 'Las Vegas')}</i>${fmt('America/Los_Angeles')}</span><span><i>${tr('日本', 'Japan')}</i>${fmt('Asia/Tokyo')}</span>`; };
 tick(); setInterval(tick, 15000);
 
 // ---- 配置：上端の見出しから下の操作部までの「空き」を測り、その中にキャラ・雲・吹き出しを収める ----
@@ -305,7 +332,7 @@ zoom.addEventListener('wheel', (e) => {
 
 // ---- ときどき出る付箋 ----
 const gift = document.createElement('aside'); gift.className = 'surprise'; gift.hidden = true;
-gift.setAttribute('aria-label', 'みのるんのおまけ');
+gift.setAttribute('aria-label', tr('みのるんのおまけ', 'A little extra from Minorun'));
 stage.append(gift);
 let activeGift: Surprise | undefined, giftState: GiftState = freshState();
 let currentTopic = '', expoDepth = 0, currentGiftCandidates: Surprise[] = [], giftEligible = false;
@@ -344,7 +371,8 @@ function placeGift(p: { ct: number; ch: number; dockTop: number; side: boolean; 
   }
 }
 function showGift(candidates: Surprise[], linked?: Surprise) {
-  if (!giftEligible || activeGift || busy || has('composing')) return;
+  // 付箋（本人の資料・著書など）は日本語の中身なので、英語の画面では出さない
+  if (EN || !giftEligible || activeGift || busy || has('composing')) return;
   const preview = import.meta.env.DEV ? params.get('gift') : null;
   const now = Date.now();
   const side = stage.classList.contains('side');
@@ -384,18 +412,18 @@ function renderSuggest(list: string[], retry = false, via: Via = 'starter') {
     const b = document.createElement('button'); b.className = 'chip' + (cls ? ' ' + cls : ''); b.type = 'button'; b.textContent = t;
     b.onclick = () => fn(b); suggest.appendChild(b);
   };
-  if (retry) add('もう一度送る', '', (b) => send(lastText, b, lastVia, lastImage));
+  if (retry) add(tr('もう一度送る', 'Send again'), '', (b) => send(lastText, b, lastVia, lastImage));
   list.forEach((t) => (t === SLIDES_STARTER ? add(t, '', openSlidesCompose)
     : t === OFFER_CHIP ? add(t, '', (b) => send(OFFER_REQUEST, b, via))
     : add(t, '', (b) => send(t, b, via))));
   // 一度答えたあとは、続けて聞けることが分かるように「追加で質問」にする
-  add(has('started') ? '追加で質問' : '質問する', 'ask', openCompose);
+  add(has('started') ? tr('追加で質問', 'Ask more') : tr('質問する', 'Ask a question'), 'ask', openCompose);
   relayout();
 }
 
 // ---- 画像の添付：1枚だけ。選んだ時点で縮めておき、送るときに置き場へ上げる ----
 const clip = $('#clip'), fileInput = $<HTMLInputElement>('#file'), attachBox = $('#attach'), attachImg = $<HTMLImageElement>('#attachImg');
-const NO_TEXT = 'この画像について教えてください';
+const NO_TEXT = tr('この画像について教えてください', 'Tell me about this image');
 let attached: Blob | null = null, picking = false;
 const canSend = () => q.value.trim().length > 0 || !!attached;
 function setAttached(blob: Blob | null) {
@@ -452,7 +480,7 @@ function setReplyTo(question: string | null) {
 }
 function replyButton() {
   const b = document.createElement('button'); b.type = 'button'; b.className = 'reply';
-  b.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 016 6v5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>返信する';
+  b.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 016 6v5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' + tr('返信する', 'Reply');
   b.onclick = openCompose;
   return b;
 }
@@ -526,7 +554,7 @@ async function postChat(body: Record<string, unknown>, signal?: AbortSignal) {
   });
   if (body.warmup && response.status === 403) {
     const data = await response.clone().json().catch(() => ({}));
-    if (data.error === 'banned' && data.message) showBanned(data.message);
+    if (data.error === 'banned' && data.message) showBanned(EN ? REFUSED_EN.banned : data.message);
   }
   return response;
 }
@@ -575,10 +603,10 @@ async function* chat(body: Record<string, unknown>): AsyncGenerator<AgentEvent> 
   } finally { reader.releaseLock(); }
 }
 
-const DAILY_LIMIT = '今日はたくさんお話ししたので、続きは明日にしましょう。日本時間0時（ラスベガス7時）に、またお話しできるようにしておきますね。';
+const DAILY_LIMIT = tr('今日はたくさんお話ししたので、続きは明日にしましょう。日本時間0時（ラスベガス7時）に、またお話しできるようにしておきますね。', "We've talked a lot today, so let's continue tomorrow. I'll be ready again at midnight Japan time (7 a.m. in Las Vegas).");
 // この会話で話した話題（エージェントが付ける見出し）。上限に達したときのシェア文に使う
 const topicsSeen: string[] = [];
-const DAILY_LIMIT_GUEST = DAILY_LIMIT + '\n\n右上のアイコンから Google でログインすると、もっとお話しできるようになります。';
+const DAILY_LIMIT_GUEST = DAILY_LIMIT + tr('\n\n右上のアイコンから Google でログインすると、もっとお話しできるようになります。', '\n\nLog in with Google from the icon at the top right to keep talking more.');
 let busy = false, turnVersion = 0;
 type Via = 'typed' | 'ai' | 'starter' | 'link';
 let lastVia: Via = 'typed', lastImage: Blob | null = null;
@@ -632,12 +660,12 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   try {
     let image: string | undefined;
     if (picture) {
-      doing.textContent = '画像を送っています'; doing.classList.add('on');
+      doing.textContent = tr('画像を送っています', 'Sending the image'); doing.classList.add('on');
       try { image = await upload((body) => postChat(body, AbortSignal.timeout(15000)), picture); }
       catch (e) { throw new Refused(0, e instanceof AttachError ? e.reason : 'network', e instanceof Error ? e.message : ''); }
-      doing.textContent = '画像を見ています';
+      doing.textContent = tr('画像を見ています', 'Looking at the image');
     }
-    for await (const ev of chat({ prompt: text, tid, via, ...(image ? { image } : {}) })) {
+    for await (const ev of chat({ prompt: text, tid, via, ...(EN ? { lang: 'en' } : {}), ...(image ? { image } : {}) })) {
       if (ev.type === 'topic') {
         topic = ev.heading;
         if (ev.heading && !topicsSeen.includes(ev.heading)) topicsSeen.push(ev.heading);
@@ -665,7 +693,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
         const imageReady = director.prepareImage();
         director.answer(raw, showingMap);
         const fig = document.createElement('figure');
-        fig.innerHTML = `<img src="${esc(ev.src)}" alt="${esc(ev.alt)}" width="${ev.width}" height="${ev.height}"><figcaption>${esc(ev.caption)}・タップで拡大</figcaption>`;
+        fig.innerHTML = `<img src="${esc(ev.src)}" alt="${esc(EN ? ev.alt_en || ev.alt : ev.alt)}" width="${ev.width}" height="${ev.height}"><figcaption>${esc(EN ? ev.caption_en || ev.caption : ev.caption)}${tr('・タップで拡大', ' · Tap to zoom')}</figcaption>`;
         fig.querySelector('img')!.addEventListener('click', () => openZoom(ev));
         fig.querySelector('img')!.addEventListener('load', relayout);
         // 表示前から読み込み、画素の展開が済んでから回答姿勢へ移る。失敗時も待ち続けない。
@@ -687,7 +715,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
         }
       } else if (ev.type === 'catalog_update') {
         const box = document.createElement('div'); box.className = 'update';
-        box.innerHTML = `<b>最新の公式カタログで変更あり（${esc(ev.at)}）</b><ul>${ev.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`;
+        box.innerHTML = `<b>${EN ? `Changes in the latest official catalog (${esc(ev.at)})` : `最新の公式カタログで変更あり（${esc(ev.at)}）`}</b><ul>${ev.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`;
         extras.push(box); render(false);
       } else if (ev.type === 'preview') {
         linkPreview = ev;
@@ -703,7 +731,7 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
       }
     }
   } catch (e) {
-    refused = e instanceof Refused ? e : new Refused(0, 'network', 'いまうまくつながりませんでした。電波の良いところで、もう一度送ってください。');
+    refused = e instanceof Refused ? e : new Refused(0, 'network', tr('いまうまくつながりませんでした。電波の良いところで、もう一度送ってください。', "I couldn't connect just now. Please try again where the signal is better."));
   }
 
   if (refused) {
@@ -717,13 +745,14 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
       stage.classList.add('limited');
       await open(); raw = profile() ? DAILY_LIMIT : DAILY_LIMIT_GUEST; render(false);
       // 例：#みのるんエージェント にバッジの受け取りやホテル選びのことなどたくさん質問できて大満足！みんなも使ってみてね。（改行して URL）
-      limitShare = `#みのるんエージェント に${topicsSeen.slice(-2).join('や') || 're:Invent'}のことなどたくさん質問できて大満足！みんなも使ってみてね。\n${location.origin}/`;
+      limitShare = EN ? `I asked #みのるんエージェント lots of questions about re:Invent! Give it a try.\n${location.origin}/`
+        : `#みのるんエージェント に${topicsSeen.slice(-2).join('や') || 're:Invent'}のことなどたくさん質問できて大満足！みんなも使ってみてね。\n${location.origin}/`;
     } else if (followingUp && raw) {
-      seeking = '追加で調べようとしましたが、うまくいきませんでした。'; render(false);
+      seeking = tr('追加で調べようとしましたが、うまくいきませんでした。', "I tried to look into it further, but it didn't work out."); render(false);
     } else if (refused.reason === 'network' && raw.trim()) {
       // 回答の途中で通信が切れた。届いた分は消さず、途中までかもしれないことを添える
       const note = document.createElement('p'); note.className = 'seeking';
-      note.textContent = '通信が途切れたため、回答が途中で止まっているかもしれません。';
+      note.textContent = tr('通信が途切れたため、回答が途中で止まっているかもしれません。', 'The connection dropped, so the answer may have stopped partway.');
       extras.push(note); render(false);
     } else {
       await open(); raw = refused.message; answer.classList.add('oops'); render(false);
@@ -733,14 +762,14 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   if (limitShare) {
     const share = document.createElement('a'); share.className = 'share'; share.target = '_blank'; share.rel = 'noopener';
     share.href = 'https://x.com/intent/post?text=' + encodeURIComponent(limitShare);
-    share.textContent = 'Xでシェア'; answer.appendChild(share); layout();
+    share.textContent = tr('Xでシェア', 'Share on X'); answer.appendChild(share); layout();
   }
   if (!failed && raw) {
     const share = document.createElement('a'); share.className = 'share'; share.target = '_blank'; share.rel = 'noopener';
     // 例：#みのるんエージェント に「バッジはどこで受け取る？」を質問したよ！みんなも使ってみてね。（改行して URL）
     const asked = text.length > 40 ? text.slice(0, 39) + '…' : text;
-    share.href = 'https://x.com/intent/post?text=' + encodeURIComponent(`#みのるんエージェント に「${asked}」を質問したよ！みんなも使ってみてね。\n${location.origin}/`);
-    share.textContent = 'Xでシェア';
+    share.href = 'https://x.com/intent/post?text=' + encodeURIComponent(EN ? `I asked #みのるんエージェント “${asked}” — give it a try!\n${location.origin}/` : `#みのるんエージェント に「${asked}」を質問したよ！みんなも使ってみてね。\n${location.origin}/`);
+    share.textContent = tr('Xでシェア', 'Share on X');
     // 最後の行：右にシェア
     const row = document.createElement('div'); row.className = 'foot';
     row.append(replyButton(), share); answer.appendChild(row); layout();
@@ -795,7 +824,11 @@ const meBtn = $('#me'), mePop = $('#mepop');
 const PERSON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="8.5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4.8 19.5c1.3-3.3 4-5 7.2-5s5.9 1.7 7.2 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 const GOOGLE = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
 // ログインした人の特典。スライドはログインなしでも作れるので、ログインで増える本数とどの端末からでも開けることを先頭に置く
-const PERKS = `<ul class="perks">
+const PERKS = EN ? `<ul class="perks">
+  <li class="slides"><b>Make up to 2 slide decks a day</b><span>Open your slides from any device.<i>1 a day without logging in</i></span></li>
+  <li>Talk with me more times a day</li>
+  <li>I remember what we talked about</li>
+</ul>` : `<ul class="perks">
   <li class="slides"><b>スライドを1日2本まで作れます</b><span>作ったスライドを、どの端末からでも開けます。<i>ログインなしは1日1本</i></span></li>
   <li>1日に話せる回数が増えます</li>
   <li>話した内容を覚えて答えます</li>
@@ -817,12 +850,12 @@ const slides = new SlidesTracker(() => {
   syncMaking();
   if (mePop.classList.contains('on')) { slides.unseen.forEach((j) => freshNew.add(j)); renderList(); slides.seen(); }
 });
-const BADGE_LABEL = { '': '', working: '（スライドを作成中）', ready: '（スライドができました）' };
+const BADGE_LABEL = EN ? { '': '', working: ' (making slides)', ready: ' (slides ready)' } : { '': '', working: '（スライドを作成中）', ready: '（スライドができました）' };
 function renderBadge() {
   const p = profile();
   const b = slides.badge();
   meBtn.dataset.badge = b;
-  meBtn.setAttribute('aria-label', (p ? 'ログイン中' : 'ログイン') + BADGE_LABEL[b]);
+  meBtn.setAttribute('aria-label', (p ? tr('ログイン中', 'Logged in') : tr('ログイン', 'Log in')) + BADGE_LABEL[b]);
 }
 function renderList() {
   const box = $('#myslides');
@@ -838,9 +871,9 @@ function renderMe() {
   meBtn.classList.toggle('in', !!p);
   renderBadge();
   mePop.innerHTML = p
-    ? `<p class="lead">ログイン中です。</p>${PERKS}<div id="myslides"></div><button class="out" id="logout" type="button">ログアウト</button>`
-    : `<p class="lead">ログインすると、こんなことができます。</p>${PERKS}
-       <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>Google でログイン</span></button><div id="myslides"></div>`;
+    ? `<p class="lead">${tr('ログイン中です。', "You're logged in.")}</p>${PERKS}<div id="myslides"></div><button class="out" id="logout" type="button">${tr('ログアウト', 'Log out')}</button>`
+    : `<p class="lead">${tr('ログインすると、こんなことができます。', 'Logging in lets you:')}</p>${PERKS}
+       <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>${tr('Google でログイン', 'Log in with Google')}</span></button><div id="myslides"></div>`;
   $('#glogin')?.addEventListener('click', () => { saveCarryover(sessionStorage, lastTurn, pendingLogin); void login(); });
   $('#logout')?.addEventListener('click', () => logout());
   renderList();
@@ -890,7 +923,7 @@ function restoreCarryover(turn: LastTurn | null) {
 }
 // 画面を読み込み直したとき（Safari がタブを捨てた・開き直した）に、少し前に頼んだスライドがまだ見ていないなら、
 // 吹き出しにカードを出し直す。作成中なら続きから進み具合を見せ、できていれば表紙を出す
-const RESUME_LINE = 'さっき頼んでくれたスライドです！';
+const RESUME_LINE = tr('さっき頼んでくれたスライドです！', 'Here are the slides you asked for!');
 function resumeSlides() {
   if (has('started') || busy) return;
   const item = slides.items.find((i) => Date.now() / 1000 - i.at < 30 * 60 && !seenBefore(i.job));

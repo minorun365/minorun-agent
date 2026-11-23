@@ -1,14 +1,16 @@
 // 質問に添える画像。画面の中で縮めて JPEG に描き直し（撮影場所などの付帯情報はここで落ちる）、
 // 確認役が出した期限つきの宛先へ直接送る。質問の本文には、置き場の番号だけを添える。
 
+import { EN, tr } from './i18n';
+import { REFUSED_EN } from './transport';
 export const MAX_EDGE = 1568;
 const QUALITY = [0.85, 0.7, 0.55];
 
 export class AttachError extends Error {
   constructor(public reason: string, message: string) { super(message); }
 }
-export const UNREADABLE = 'この画像は読み込めませんでした。別の画像で試してください。';
-export const UPLOAD_FAILED = '画像を送れませんでした。電波の良いところで、もう一度送ってください。';
+export const UNREADABLE = tr('この画像は読み込めませんでした。別の画像で試してください。', "This image couldn't be read. Please try another one.");
+export const UPLOAD_FAILED = tr('画像を送れませんでした。電波の良いところで、もう一度送ってください。', "The image couldn't be sent. Please try again where the signal is better.");
 
 /** 長辺を max に収めた大きさ（拡大はしない）。 */
 export function fitSize(width: number, height: number, max = MAX_EDGE) {
@@ -48,7 +50,7 @@ export async function upload(post: Post, blob: Blob, send: typeof fetch = fetch)
     ticket = await res.json().catch(() => ({}));
   } catch { throw new AttachError('network', UPLOAD_FAILED); }
   if (status !== 200 || !ticket.image || !ticket.url || !ticket.fields) {
-    throw new AttachError(ticket.error || 'http', ticket.error && ticket.message ? ticket.message : UPLOAD_FAILED);
+    throw new AttachError(ticket.error || 'http', EN ? REFUSED_EN[ticket.error || ''] ?? UPLOAD_FAILED : ticket.error && ticket.message ? ticket.message : UPLOAD_FAILED);
   }
   const form = new FormData();
   for (const [name, value] of Object.entries(ticket.fields)) form.append(name, value);

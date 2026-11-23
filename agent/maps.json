@@ -13,7 +13,9 @@
    "width": 1200,
    "height": 674,
    "alt": "AWS re:Invent 2026 のキャンパスマップ。ラスベガス・ストリップ沿いの会場6か所（黄色）と宿泊専用ホテル14軒（水色）",
+   "alt_en": "AWS re:Invent 2026 campus map: six venues along the Las Vegas Strip (yellow) and 14 lodging-only hotels (light blue)",
    "caption": "re:Invent 2026 公式キャンパスマップ（出典：AWS re:Invent 2026 Venues & Hotels）",
+   "caption_en": "Official re:Invent 2026 campus map (source: AWS re:Invent 2026 Venues & Hotels)",
    "show_when": [
     "会場の位置関係・会場間の移動・歩く距離を聞かれたとき",
     "どのホテルに泊まるか、ホテルと会場の近さを聞かれたとき",
@@ -54,7 +56,9 @@
    "width": 1600,
    "height": 811,
    "alt": "みのるんエージェントのアーキテクチャ図。CloudFront → AgentCore Gateway → AgentCore Runtime（Strands Agents）→ ツールの Gateway（Managed KB・Web Search）など",
+   "alt_en": "Minorun Agent architecture: CloudFront → AgentCore Gateway → AgentCore Runtime (Strands Agents) → tools Gateway (Managed KB, Web Search) and more",
    "caption": "みのるんエージェントのアーキテクチャ図",
+   "caption_en": "Minorun Agent architecture",
    "show_when": [
     "このアプリ（みのるんエージェント）の作り・構成・使っている技術を聞かれたとき"
    ],

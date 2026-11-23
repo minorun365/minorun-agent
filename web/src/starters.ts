@@ -1,5 +1,6 @@
 // 最初に出す質問の例。自動生成する knowledge/starters.json と、選定した starters-curated.json を
 // ビルド時に読み込む。ナレッジベースの外のツールや最新情報を調べる問いはここで管理する。
+import { EN } from './i18n';
 import byTopic from '../../knowledge/starters.json';
 import curated from '../../knowledge/starters-curated.json';
 
@@ -44,7 +45,19 @@ export const TOPIC_GROUPS = Object.fromEntries(
     topic, [...new Set([...(generated[topic]?.questions ?? []), ...(selected[topic] ?? [])])],
   ]),
 );
-export const GROUPS: string[][] = [TOOLS, ...DISCOVERY, ...Object.values(TOPIC_GROUPS)]
+// 英語の画面で出す問い。自動生成の束は日本語なので使わず、ここで話題ごとに持つ（2026-11-24）
+export const GROUPS_EN: string[][] = [
+  ['How many days until re:Invent?', 'When are the AgentCore sessions?', 'How far apart are the venues?'],
+  ["What's new in AWS lately?", 'What changed in Bedrock recently?', "What are AgentCore's latest features?"],
+  ['Which Jam is good for first-timers?', 'Any GameDay you recommend?', 'Which hands-on sessions should I try?'],
+  ['Good sessions on Wednesday afternoon?', 'Any sessions worth catching Monday morning?'],
+  ['When are the keynotes?', 'How do I pick up my badge?'],
+  ['How do I get around between venues?', 'What should I pack for Las Vegas?'],
+  ['Where can I grab a quick lunch?', 'Any tips for eating in Las Vegas?'],
+  ['How can I meet Minorun at re:Invent?', 'What community events are there?'],
+  ['How was this app built?'],
+];
+export const GROUPS: string[][] = EN ? GROUPS_EN : [TOOLS, ...DISCOVERY, ...Object.values(TOPIC_GROUPS)]
   .filter((g) => g.length);
 export const STARTERS = GROUPS.flat();
 

@@ -375,6 +375,7 @@ def map_payload(map_id):
     """画面へ送る画像の情報（未登録の ID なら None）。"""
     m = next((m for m in MAPS if m["id"] == map_id), None)
     return m and {"id": m["id"], "src": f"{ASSET_BASE}/maps/{m['file']}", "alt": m["alt"], "caption": m["caption"],
+                  **{k: m[k] for k in ("alt_en", "caption_en") if m.get(k)},  # 英語の画面で使う説明
                   "width": m["width"], "height": m["height"], "source_url": m["page_url"]}
 
 

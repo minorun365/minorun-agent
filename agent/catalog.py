@@ -220,8 +220,10 @@ def start_verify(shown_codes, query):
     return _pool.submit(verify, list(shown_codes), query)
 
 
-def describe(result):
-    """照合の結果を、画面へ出すひな形の文にする（モデルに書かせない）。"""
+def describe(result, en=False):
+    """照合の結果を、画面へ出すひな形の文にする（モデルに書かせない）。en は英語の画面の文。"""
+    if en:
+        return _describe_en(result)
     lines = []
     for c in result["changes"]:
         if c["kind"] == "removed":
@@ -232,6 +234,20 @@ def describe(result):
     if result["new"]:
         lines.append(f"ほかに、控えに無い新しいセッションが {len(result['new'])} 件あります（"
                      + "、".join(f"{n['code']}「{n['title']}」" for n in result["new"][:3]) + "）")
+    return lines
+
+
+def _describe_en(result):
+    lines = []
+    for c in result["changes"]:
+        if c["kind"] == "removed":
+            lines.append(f"{c['code']} “{c['title']}” is no longer in the official catalog")
+        else:
+            after = ", ".join(f"{d} {s}–{e} {r}" for d, s, e, r in c["after"])
+            lines.append(f"{c['code']} has a new time or room → {after}")
+    if result["new"]:
+        lines.append(f"There are also {len(result['new'])} new sessions not in my notes ("
+                     + ", ".join(f"{n['code']} “{n['title']}”" for n in result["new"][:3]) + ")")
     return lines
 
 
