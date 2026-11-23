@@ -161,7 +161,11 @@
     "re:Inventの名前の由来は？",
     "「Simplexity」ってどういう意味？",
     "セッション名にAgentが付くのは何割？",
-    "Nova Reelで6秒の動画は何分かかる？"
+    "Nova Reelで6秒の動画は何分かかる？",
+    "Express One Zoneは何倍速い？",
+    "Lambdaのdurableは何が便利？",
+    "Nitro v5は何が良くなった？",
+    "Zero-ETLはどこまで広がった？"
   ],
   "immigration": [
     "入国審査で参加イベントをどう説明する？",
@@ -208,7 +212,11 @@
     "AIに回文を作らせたらどうなった？",
     "電子ペーパーで何か作った人はいる？",
     "開発未経験でアプリを作った社員はいる？",
-    "柴犬が出てくるAIアプリがある？"
+    "柴犬が出てくるAIアプリがある？",
+    "Claude Codeのトークン節約術は？",
+    "LLM Wikiってどんな手法？",
+    "worktreeで並列開発するには？",
+    "Playwright MCPでテスト自動化？"
   ],
   "lasvegas-hotel": [
     "Venetianに近いホテルを選ぶには？",
@@ -523,7 +531,15 @@
     "AWSにカードなしで登録できる？",
     "エージェントの行動を外から縛れる？",
     "AgentCoreの起動は速くなった？",
-    "AWS Emulatorって何ができる？"
+    "AWS Emulatorって何ができる？",
+    "オリジンへのHTTP/2で何が変わる？",
+    "Aurora serverlessの上限は？",
+    "SSMでAzureも自動化できる？",
+    "Inspectorの到達性判定って何？",
+    "LambdaでGPUは使える？",
+    "DevOps AgentはMCPで呼べる？",
+    "MCPサーバーをCognitoで守れる？",
+    "Transcribeの同期APIは何が楽？"
   ],
   "tech-agents": [
     "StrandsとMastraはどう選ぶ？",
@@ -542,7 +558,13 @@
     "日程調整をAIに任せられる？",
     "Kimi K2でClaude代を節約できる？",
     "本部長の代わりにAIがレビューする？",
-    "Slackで事例を貯めるBotはある？"
+    "Slackで事例を貯めるBotはある？",
+    "AgentCoreのV2は何が速い？",
+    "A2Aのv1.0で何が変わった？",
+    "agentcore-pushで何ができる？",
+    "AgentCoreでAG-UIは使える？",
+    "AgentCore最適化のA/Bテストとは？",
+    "Jevでツールを選ばせられる？"
   ],
   "tech-bedrock": [
     "RAGとモデルの学習は何が違う？",
@@ -561,7 +583,13 @@
     "Bedrockのクォータが0だったら？",
     "Bedrockのバッチ推論はいくら安い？",
     "Bedrockで画像を作るならどのモデル？",
-    "Bedrock Agentsの弱点は何？"
+    "Bedrock Agentsの弱点は何？",
+    "マネージドKBで何が楽になる？",
+    "期限付きURLをDBなしで作れる？",
+    "Redshiftに自然言語で聞ける？",
+    "Bedrockマルチエージェントは月いくら？",
+    "JevはHaikuより何倍速い？",
+    "Claudeの利用申請は今も必要？"
   ],
   "tech-ai-work": [
     "みのるんはAIにどんな仕事を任せる？",
@@ -580,7 +608,11 @@
     "AIが代筆した記事を何か所直した？",
     "Claude Codeを24時間回すと？",
     "蓋を閉じてもMacを止めないアプリ？",
-    "Claude Codeを部下4人と思えって？"
+    "Claude Codeを部下4人と思えって？",
+    "Kiro CrewのYOLOモードは安全？",
+    "MCPツールにフックを掛けるには？",
+    "claude -pでCIに組み込める？",
+    "AIと開発するならCDKは必須？"
   ],
   "tech-output": [
     "技術ブログの最初の一本は何を書く？",
@@ -597,7 +629,10 @@
     "Xのカード画像が古いときは？",
     "みのるんは本の本文をAIで書く？",
     "勉強会で名刺交換より大事なことは？",
-    "ユーザーの発信が公式より役立つときは？"
+    "ユーザーの発信が公式より役立つときは？",
+    "MarpのPDF書き出しに何が要る？",
+    "Cloud9の代わりのハンズオン環境は？",
+    "書籍のサンプルコードはどう保守する？"
   ],
   "venue-campus": [
     "Caesars Forumに泊まれるの？",

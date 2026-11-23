@@ -34,3 +34,12 @@ test('3問は別々の話題から選び、除いた問いは出さない', asyn
     assert.ok(!got.includes(ex));
   }
 });
+
+test('3問のうち1問は必ず技術の話題から選ぶ', async () => {
+  const { pickStarters, TECH_TOPICS } = await import('../../web/src/starters.ts');
+  const tech = new Set(TECH_TOPICS.flatMap((t) => TOPIC_GROUPS[t] ?? []));
+  for (let i = 0; i < 300; i++) {
+    const got = pickStarters(3);
+    assert.ok(got.some((q) => tech.has(q) || q.includes('更新') || q.includes('AgentCore') || q.includes('Bedrock')), got.join(' / '));
+  }
+});

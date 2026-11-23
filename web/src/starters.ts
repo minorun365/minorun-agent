@@ -71,13 +71,33 @@ const shuffle = <T,>(list: T[]) => {
   return out;
 };
 
-// 別々の話題から1問ずつ n 問選ぶ。exclude（直前に聞いた問いなど）は除く
+// 技術の話題。話題を均等に選ぶと技術の束が50束中8束しかなく、初回の3問に技術の問いが
+// 1つも無いことが約6割あった（2026-11-24 みのるん指摘）。3問のうち1問は必ずここから選ぶ。
+export const TECH_TOPICS = [
+  'tech-agents', 'tech-bedrock', 'tech-ai-work', 'tech-output', 'kag-tech',
+  'recent-updates', 'history-announcements', 'about-this-app',
+];
+const TECH_GROUPS: string[][] = EN ? [] : [DISCOVERY[0], ...TECH_TOPICS.map((t) => TOPIC_GROUPS[t] ?? [])]
+  .filter((g) => g.length);
+
+// 別々の話題から1問ずつ n 問選ぶ。exclude（直前に聞いた問いなど）は除く。
+// 2問以上のときは、技術の束から1問を先に選んでから残りを全体から選び、並びは混ぜる
 export function pickStarters(n: number, exclude: string[] = []): string[] {
   const out: string[] = [];
-  for (const g of shuffle(GROUPS)) {
-    const q = shuffle(g).find((s) => !exclude.includes(s));
-    if (q) out.push(q);
-    if (out.length >= n) break;
+  const used = new Set<string[]>();
+  const take = (groups: string[][]) => {
+    for (const g of shuffle(groups)) {
+      if (used.has(g)) continue;
+      const q = shuffle(g).find((s) => !exclude.includes(s));
+      if (q) { out.push(q); used.add(g); }
+      if (out.length >= n) break;
+    }
+  };
+  if (n >= 2 && TECH_GROUPS.length) {
+    const tech = shuffle(TECH_GROUPS);
+    take([tech[0]]);
+    if (!out.length) take(tech.slice(1, 2));
   }
-  return out;
+  take(GROUPS);
+  return shuffle(out);
 }
