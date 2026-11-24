@@ -72,18 +72,16 @@ test('関係する話題なら、初回は4回答までに出会える', () => {
   assert.equal(chooseGift(s, [gifts.experience], 2e6, () => .9), undefined);
 });
 
-test('支援先は2種類から選び、どちらを表示しても再表示間隔を共有する', () => {
+test('支援先は GitHub Sponsors だけで、旧 X サブスク案内を見た人にも再表示間隔を守る', () => {
   const state = { ...freshState(), turns: 5 };
-  for (const [draw, id, source] of [
-    [.49, 'support-github', 'https://github.com/sponsors/minorun365'],
-    [.5, 'support-x', 'https://x.com/minorun365/subs'],
-  ] as const) {
+  for (const draw of [.49, .5]) {
     const rolls = [0, draw];
     const gift = chooseSupport(state, 0, 1e9, () => rolls.shift()!);
-    assert.equal(gift?.id, id);
-    assert.equal(gift?.source, source);
-    assert.equal(chooseSupport({ ...state, seen: [id] }, 0, 1e9, () => 0), undefined);
+    assert.equal(gift?.id, 'support-github');
+    assert.equal(gift?.source, 'https://github.com/sponsors/minorun365');
   }
+  assert.equal(gifts['support-x'], undefined);
+  for (const id of ['support-github', 'support-x']) assert.equal(chooseSupport({ ...state, seen: [id] }, 0, 1e9, () => 0), undefined);
 });
 
 test('話題に合う登壇資料だけを候補にする', () => {

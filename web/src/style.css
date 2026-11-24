@@ -286,22 +286,35 @@ td:first-child{font-weight:700;white-space:nowrap}
 @keyframes float-soft{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.2%)}}
 .stage[data-pose-state="error"] .chara .float,.stage[data-pose-state="error"] .chara .shadow{animation:none}
 @media(prefers-reduced-motion:reduce){.chara .float,.chara .shadow,.stage.idea .chara .float{animation:none!important}.chara img{transition:none}}
-/* URL から作るスライドのカード：段階の丸と流れる光で待ち時間を見せ、できたら表紙のサムネイルに替わる */
-.bubble .slides-card.working,.bubble .slides-card.failed{padding:14px 14px 12px;border-radius:14px;background:var(--soft);box-shadow:0 0 0 1px var(--line)}
-.bubble .slides-steps{display:flex;justify-content:space-between;gap:6px}
-.bubble .slides-steps .step{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:11.5px;color:var(--mut);text-align:center;line-height:1.3}
-.bubble .slides-steps .step i{width:12px;height:12px;border-radius:50%;background:var(--line);transition:background .3s}
-.bubble .slides-steps .step.done{color:var(--sub)}
-.bubble .slides-steps .step.done i{background:var(--accent)}
-.bubble .slides-steps .step.now{color:var(--ink);font-weight:700}
-.bubble .slides-steps .step.now i{background:var(--accent);animation:slides-pulse 1.2s ease-in-out infinite}
-.bubble .slides-bar{position:relative;height:6px;margin:12px 0 8px;border-radius:3px;background:var(--line);overflow:hidden}
-.bubble .slides-bar span{position:absolute;inset:0 auto 0 -40%;width:40%;border-radius:3px;background:linear-gradient(90deg,transparent,var(--accent),transparent);animation:slides-flow 1.6s ease-in-out infinite}
-.bubble .slides-card .slides-line{margin:0;text-align:center;color:var(--sub);font-size:12.5px}
+/* URL から作るスライドのカード：題・目安・進んだ分だけ伸びる棒・いまの段階を、題と小さい字の2段で見せ、できたら表紙のサムネイルに替わる（11/24 D案） */
+.bubble .slides-card.working,.bubble .slides-card.failed{padding:16px;border-radius:14px;background:var(--soft);box-shadow:0 0 0 1px var(--line)}
+.bubble .slides-card .slides-title{margin:0 0 2px;font-size:16px;font-weight:700;color:var(--ink)}
+.bubble .slides-card .slides-eta{margin:0 0 12px;font-size:13px;color:var(--sub)}
+.bubble .slides-bar{position:relative;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.bubble .slides-bar span{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--accent);transition:width .6s ease}
+.bubble .slides-card .slides-line{margin:8px 0 0;font-size:13px;color:var(--sub)}
+.bubble .slides-wait{margin:12px 0 2px}
+.bubble .slides-wait p{margin:0}
+/* スライド作成中に別の質問をしたとき、見出しの下に固定する進み具合の帯（top は layout() が見出しの下端に合わせる） */
+.slides-strip{position:absolute;left:0;right:0;margin:0 auto;z-index:6;width:min(560px,calc(100% - 28px));min-height:42px;
+  display:flex;align-items:center;gap:10px;padding:8px 12px 8px 14px;border-radius:14px;background:var(--card);
+  box-shadow:0 0 0 1px var(--line),0 6px 18px rgba(0,0,0,.08);font-size:12.5px;color:var(--sub);transform-origin:center;transition:background .35s,color .35s}
+.slides-strip[hidden]{display:none}
+.slides-strip .t{font-weight:700;color:var(--ink);white-space:nowrap}
+.slides-strip .g{flex:1;min-width:40px;position:relative;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
+.slides-strip .g i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--accent);transition:width .6s ease}
+.slides-strip .s{flex:0 1 auto;min-width:0;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slides-strip .x{flex:none;font:inherit;font-size:18px;line-height:1;border:0;background:transparent;color:inherit;padding:4px 2px 4px 6px;cursor:pointer;opacity:.75}
+.slides-strip.done{background:#16181d;color:#fff;box-shadow:0 0 0 1px var(--line),0 8px 22px rgba(0,0,0,.2)}
+.slides-strip.done .go{flex:1;display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none;min-width:0}
+.slides-strip.done img{flex:none;width:56px;height:32px;border-radius:4px;object-fit:cover;background:#fff}
+.slides-strip.done .t{color:#fff;overflow:hidden;text-overflow:ellipsis}
+.slides-strip.done .open{margin-left:auto;flex:none;font-weight:700;color:#fff;background:var(--accent);border-radius:999px;padding:5px 13px}
+.slides-strip.error .t{flex:1;font-weight:600;color:var(--sub)}
 .bubble .slides-card.failed figcaption{margin:0;color:var(--sub);font-size:13px}
 /* ログインしていない人への案内（作成中のカードの中。11/21 A案） */
-.bubble .slides-login{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
-.bubble .slides-login p{margin:0;flex:1;font-size:12px;line-height:1.5;color:var(--sub)}
+.bubble .slides-login{display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.bubble .slides-login p{margin:0;flex:1;font-size:13px;line-height:1.5;color:var(--sub)}
 .bubble .slides-login button{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:0;border-radius:99px;background:#fff;color:var(--ink);
   box-shadow:0 0 0 1px var(--line),0 2px 6px rgba(0,0,0,.06);font:inherit;font-size:12.5px;font-weight:700;white-space:nowrap;cursor:pointer}
 .bubble .slides-login button svg{width:16px;height:16px}
@@ -309,8 +322,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 .bubble .slides-card.ready figcaption{font-size:12.5px;color:var(--sub)}
 .bubble .slides-card.ready figcaption b{color:var(--accent);margin-right:.4em;background:none}
 @keyframes slides-pulse{0%,100%{box-shadow:0 0 0 0 rgba(8,145,178,.45)}50%{box-shadow:0 0 0 6px rgba(8,145,178,0)}}
-@keyframes slides-flow{to{left:100%}}
-@media(prefers-reduced-motion:reduce){.bubble .slides-bar span,.bubble .slides-steps .step.now i{animation:none}}
+@media(prefers-reduced-motion:reduce){.bubble .slides-bar span{transition:none}}
 /* 作ったスライドの一覧（ログインのメニュー）。作成中の進み具合もここに出す */
 .mepop .myslides:not(:empty){margin:0 0 12px;padding-top:12px;border-top:1px solid var(--line)}
 .mepop .myslides .mh{margin:0 0 8px;font-size:12px;font-weight:700;color:var(--sub)}

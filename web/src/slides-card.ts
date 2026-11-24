@@ -12,7 +12,7 @@ const WAIT_LINES = EN ? ['Reading the article', 'Planning the outline', 'Writing
 export const stepLabel = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? tr('出典を読む', 'Sources') : STEPS[i]);
 export const waitLine = (i: number, kind?: string) => (i === 0 && kind === 'topic' ? tr('出典を読んでいます', 'Reading the sources') : WAIT_LINES[i]);
 /** できるまでの目安。エージェントが焼いて見直すので5〜10分かかる（2026-11-21 の本番で約6.5分） */
-export const ETA_LINE = tr('できるまで5〜10分ほど。閉じても続きます', 'Takes about 5–10 minutes. It keeps going even if you close this.');
+export const ETA_LINE = tr('できあがるまで5〜10分ほどかかります', 'Takes about 5–10 minutes');
 /** 作成中の一言。スライド作成機能が書く detail（「書き出して余白を測っています（2回目）」など）があればそれを、無ければ段階の言葉を出す。
  *  detail は status.json から来るので、短い日本語の文だけを通す（タグや記号の多い文は捨てる） */
 export function progressLine(s: SlidesStatus): string {
@@ -42,7 +42,7 @@ export const GIVE_UP_MS = WORKING_MINUTES * 60_000;
 
 /** ログインしていない人へ、作成中のカードの中で待つ間のログインを勧める（11/21 みのるん選定のA案） */
 export interface LoginNudge { icon: string; onClick: () => void }
-export const LOGIN_NUDGE_TEXT = tr('ログインしておくと、閉じても<br>どの端末からでも開けます', 'Log in to open it later<br>from any device');
+export const LOGIN_NUDGE_TEXT = tr('ログインしておくと、あとから<br>どの端末でも開けます', 'Log in to open it later<br>from any device');
 /** ログインなしの上限に当たったときの案内（同じA案の形。押すとログインし、戻ったら同じ頼みを送り直す） */
 export const LOGIN_CONTINUE_TEXT = tr('ログインして戻ると、<br>このスライドを作り始めます', 'Log in and come back<br>to start these slides');
 export function loginContinueBox(nudge: LoginNudge): HTMLElement {
@@ -53,23 +53,28 @@ export function loginContinueBox(nudge: LoginNudge): HTMLElement {
   return box;
 }
 
+/** 作成中のカードの棒をどこまで伸ばすか（％）。受付待ちでも少しだけ見せ、仕上げでも満タンにはしない */
+export function barWidth(n: number): number {
+  return [8, 25, 50, 72, 90][Math.max(-1, Math.min(n, 3)) + 1];
+}
+
 export function slidesCard(base: string, onChange: () => void, fetcher: typeof fetch = fetch.bind(window), nudge?: LoginNudge): HTMLElement {
   const fig = document.createElement('figure');
   fig.className = 'slides-card working';
-  fig.innerHTML = `<div class="slides-steps">${STEPS.map((s, i) => `<span class="step" data-i="${i}"><i></i>${s}</span>`).join('')}</div>`
-    + `<div class="slides-bar"><span></span></div><figcaption class="slides-line">${tr('受け付けました。', 'Got it. ')}${ETA_LINE}</figcaption>`
+  fig.dataset.base = base;
+  // 吹き出しの中の文字を「題」と「小さい字」の2段にそろえ、段階の丸は出さない（11/24 みのるん選定のD案。吹き出しが込み合うため）
+  fig.innerHTML = `<p class="slides-title">${tr('スライドを作っています', 'Making your slides')}</p><p class="slides-eta">${ETA_LINE}</p>`
+    + `<div class="slides-bar"><span style="width:${barWidth(-1)}%"></span></div><figcaption class="slides-line">${tr('いまは', '')}${progressLine({ stage: 'queued' })}</figcaption>`
     + (nudge ? `<div class="slides-login"><p>${LOGIN_NUDGE_TEXT}</p><button type="button">${nudge.icon}<span>${LOGIN}</span></button></div>` : '');
   fig.querySelector('.slides-login button')?.addEventListener('click', () => nudge!.onClick());
   const line = fig.querySelector('.slides-line') as HTMLElement;
+  const bar = fig.querySelector('.slides-bar span') as HTMLElement;
   const started = Date.now();
   let stopped = false;
   const show = (s: SlidesStatus) => {
     const n = stepOf(s.stage);
-    fig.querySelectorAll<HTMLElement>('.step').forEach((el, i) => {
-      el.classList.toggle('done', i < n); el.classList.toggle('now', i === n);
-      if (i === 0) el.lastChild!.textContent = stepLabel(0, s.kind);
-    });
-    if (n >= 0 && n < 4) line.textContent = progressLine(s) + '…';
+    bar.style.width = barWidth(n) + '%';
+    if (n < 4) line.textContent = tr('いまは', '') + progressLine(s);
   };
   const finish = (s: SlidesStatus) => {
     stopped = true;

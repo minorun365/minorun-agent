@@ -3,8 +3,7 @@ import { bookGifts, githubGifts, qiitaGifts } from './topic-gifts';
 export interface Surprise { id: string; title: string; text: string; english?: string; source?: string; sourceLabel?: string; image?: string; preview?: boolean; cover?: boolean; pose: 'idea' | 'pc' }
 const slides = 'https://speakerdeck.com/minorun365/';
 export const gifts: Record<string, Surprise> = {
-  'support-github': { id: 'support-github', title: '応援してね', text: 'GitHub Sponsors で応援してもらえるとうれしいです！', source: 'https://github.com/sponsors/minorun365', pose: 'pc' },
-  'support-x': { id: 'support-x', title: '応援してね', text: 'X のサブスクで応援してもらえるとうれしいです！', source: 'https://x.com/minorun365/subs', pose: 'pc' },
+  'support-github': { id: 'support-github', title: '応援してね', text: 'GitHub Sponsors で寄付してもらえると励みになります！', source: 'https://github.com/sponsors/minorun365', pose: 'pc' },
   experience: { id: 'experience', title: '私の失敗談', text: '2024年、ワーナーのキーノートにレシーバーなしで臨んだら、英語が聞き取れませんでした。', source: slides + 'mi-zhao-bedrockergare-invent-2024deguo-gosita5ri-jian-woshao-jie', pose: 'idea' },
   english: { id: 'english', title: '通ですね！', text: '短いデモを見せてもらえますか？', english: 'Could you show me a quick demo?', pose: 'idea' },
   slide: { id: 'slide', title: '2025年の登壇資料より', text: 're:Invent エージェントの開発秘話', image: 'https://files.speakerdeck.com/presentations/e51d54203aca4064a54d1a33be539437/slide_0.jpg', source: slides + 'awsnoxin-ji-neng-wohuruhuo-yong-sita-re-inventeziento-kai-fa-mi-hua', pose: 'pc' },
@@ -48,12 +47,13 @@ export const freshState = (): GiftState => ({ turns: 0, lastTurn: -3, lastAt: 0,
 export const isSupport = (id: string): boolean => id === 'support' || id === 'support-github' || id === 'support-x';
 export const SUPPORT_INTERVAL = 7 * 24 * 60 * 60 * 1000;
 // 支援案内には初回の強制表示を適用せず、保存不可・破損時も控える。
+// 'support-x' は X のサブスクをやめて外した旧案内。表示済みの記録が残る人のために判定にだけ残す。
 export function chooseSupport(state: GiftState, lastShown: number | null, now: number, random: () => number = Math.random): Surprise | undefined {
   if (lastShown === null || !Number.isFinite(lastShown) || lastShown < 0 || state.turns < 5 || state.seen.some(isSupport)) return;
   if (lastShown > 0 && now - lastShown < SUPPORT_INTERVAL) return;
   if (state.seen.length >= 3 || state.turns - state.lastTurn < 2 || (state.seen.length > 0 && now - state.lastAt < 60_000)) return;
   if (random() >= .1) return;
-  return random() < .5 ? gifts['support-github'] : gifts['support-x'];
+  return gifts['support-github'];
 }
 // 1会話で貼る上限。話題に合う資料を増やしたので、3枚から6枚へ増やした（11/7（土）みのるん指示）。
 export const GIFT_LIMIT = 6;

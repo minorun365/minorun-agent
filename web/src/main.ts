@@ -17,6 +17,7 @@ import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { saveCarryover, takeCarryover, type LastTurn, type Pending } from './carryover';
 import { AttachError, shrink, upload } from './attach';
 import { parseSlidesList, seenBefore, loginContinueBox, slidesCard, slidesList, SlidesTracker } from './slides-card';
+import { SlidesStrip } from './slides-strip';
 import { EN, switchLang, tr } from './i18n';
 import { REFUSED_EN } from './transport';
 import { OFFER_CHIP, OFFER_REQUEST, PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withOfferChip, withSlidesStarter } from './slides-hint';
@@ -128,11 +129,14 @@ tick(); setInterval(tick, 15000);
 // ---- 配置：上端の見出しから下の操作部までの「空き」を測り、その中にキャラ・雲・吹き出しを収める ----
 let raf = 0;
 const relayout = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; layout(); }); };
+// スライド作成中に別の質問をしたら、作成中のカードを見出しの下の帯へ移して進み具合を見せ続ける（11/24 みのるん選定のD案）
+const strip = new SlidesStrip(stage, () => relayout(), (base) => { const it = slides.items.find((i) => i.base === base); if (it) slides.seen(it.job); });
 // X のアプリ内ブラウザは、読み込んだ後で上の余白（状態バーと X の見出しの分）を足す。サイズの変化の通知が来ないので、見出しの高さが変わったら測り直す
 new ResizeObserver(relayout).observe(header, { box: 'border-box' });
 function layout() {
   const H = stage.clientHeight, Wd = stage.clientWidth;
-  const headB = header.offsetTop + header.offsetHeight + 6;
+  const headB = header.offsetTop + header.offsetHeight + 6 + (strip.visible ? strip.el.offsetHeight + 8 : 0);
+  strip.el.style.top = header.offsetTop + header.offsetHeight + 4 + 'px';
   const comp = has('composing'), ans = has('answering') && !comp;
   const pad = parseFloat(getComputedStyle(dock).paddingBottom);
   // 添付した画像の見本が出ているときは、その高さもキャラクターの下に空ける
@@ -280,9 +284,9 @@ chara.querySelectorAll<HTMLImageElement>('img').forEach(i => {
 });
 const director = new PoseDirector(pose, new PosePicker(), missing);
 function cancelIdle() { clearTimeout(restTimer); clearTimeout(settleTimer); }
-// スライドを作っている間の待機は、休憩（コーヒー）ではなくパソコンで作業中の姿にする
-// ログインしていない人は一覧のバッジが無いので、画面にある作成中のカードでも見る
-const slidesWorking = () => (!!profile() && slides.badge() === 'working') || !!document.querySelector('.slides-card.working');
+// 吹き出しに作成中のカードが出ている間の待機は、休憩（コーヒー）ではなくパソコンで作業中の姿にする。
+// 別の質問をしてカードが上の帯へ移ったら、ふつうの質問と同じ姿に戻す（11/24 みのるん指示）
+const slidesWorking = () => !!answer.querySelector('.slides-card.working');
 function idle() {
   cancelIdle();
   if (slidesWorking()) { director.phase('making'); return; }
@@ -620,8 +624,13 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   closeGift(); giftEligible = false; currentGiftCandidates = [];
   cancelIdle(); busy = true; lastText = text; lastVia = via;
   stage.classList.add('busy', 'started'); greet.classList.remove('on');
+  // 作成中のカードが出ていたら、消える前にその位置から上の帯へ移す
+  const making = bubble.classList.contains('on') ? answer.querySelector<HTMLElement>('.slides-card.working') : null;
+  if (making?.dataset.base) strip.show(making.dataset.base, making.getBoundingClientRect());
   bubble.classList.remove('on'); stage.classList.remove('answering', 'composing');
   q.blur(); q.value = ''; q.style.height = 'auto'; sendBtn.classList.remove('on');
+  // 入力欄を空にしたら「この記事をスライドにする」の札も隠す。残すと、次に「返信する」で入力欄を開いたときに空の欄の上へ古い札が出る
+  slideChip.hidden = true;
   $('#thoughtText').textContent = text; layout(); drawCloud();
   await fly(text, fromEl);
   thought.classList.add('on'); director.phase('thinking', true);
@@ -632,12 +641,14 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
   const figures: HTMLElement[] = [], extras: HTMLElement[] = [];
   const turnSlides: { job: string; base: string }[] = []; // この回答で受け付けたスライド（ログインの往復のあとにカードを描き直す）
   let followingUp = false, showingMap = false;
+  // スライドを受け付けた回は、目安・進み具合・ログインをカードが伝えるので、同じことを言う本文は出さない（D案）
+  let slidesHere = false;
   let linkPreview: LinkPreview | undefined;
   const render = (caret: boolean) => {
     answer.innerHTML = '';
     figures.forEach((el) => answer.appendChild(el));
     // 流している途中は、書きかけの出典 [ラベル](URL を隠す（届ききったらラベルになる）
-    answer.insertAdjacentHTML('beforeend', md(caret ? raw.replace(/\s*\[[^\]\n]*(\]\([^)\s]*)?$/, '') : raw));
+    if (!slidesHere) answer.insertAdjacentHTML('beforeend', md(caret ? raw.replace(/\s*\[[^\]\n]*(\]\([^)\s]*)?$/, '') : raw));
     const last = answer.lastElementChild;
     if (seeking && (caret || followingUp)) answer.insertAdjacentHTML('beforeend', `<p class="seeking">${esc(seeking)}${caret ? '<span class="caret"></span>' : ''}</p>`);
     else if (caret && last && last.tagName !== 'FIGURE') (last.tagName === 'UL' || last.tagName === 'OL' ? last.lastElementChild! : last).insertAdjacentHTML('beforeend', '<span class="caret"></span>');
@@ -709,7 +720,10 @@ async function send(text: string, fromEl?: HTMLElement, via: Via = 'link', retry
           // 吹き出しのカードで完成を見たら、アイコンの「できた」の印は出さない
           const job = ev.job;
           turnSlides.push({ job, base: ev.base });
-          figures.push(slidesCard(ev.base, () => { relayout(); syncMaking(); if (slides.get(job)?.stage === 'done' || document.querySelector(`.slides-card.ready a[href="${ev.base}"]`)) slides.seen(job); }, undefined, loginNudge()));
+          figures.push(slidesCard(ev.base, () => { dropWaitBox(); relayout(); syncMaking(); if (slides.get(job)?.stage === 'done' || document.querySelector(`.slides-card.ready a[href="${ev.base}"]`)) slides.seen(job); }, undefined, loginNudge()));
+          // 本文の代わりに、待つ間に別の質問ができると一言添える（下の候補を押すとカードは上の帯へ移る）
+          slidesHere = true;
+          extras.push(waitBox());
           if (opened) render(true);
           slides.add({ job, base: ev.base, at: Math.floor(Date.now() / 1000) });
         }
@@ -840,6 +854,14 @@ async function authHeader(): Promise<Record<string, string>> {
 // メニューを開いている間は、開いた時点で見ていなかった完成品に NEW を付けたままにする（閉じたら消す）
 let freshNew = new Set<string>();
 let wasWorking = false;
+// 作成中のカードの下に置く「待つ間に」の一言。スライドを受け付けた回はこれが本文になる。
+// 質問の候補は吹き出しに出さず、いつもどおり下の並びに任せる（画面が込み合うため。みのるん指示）
+function waitBox() {
+  const box = document.createElement('div'); box.className = 'slides-wait';
+  box.innerHTML = `<p>${tr('待っている間に、<br>ほかのことも気軽に聞いてくださいね。', 'Feel free to ask me anything else while you wait.')}</p>`;
+  return box;
+}
+function dropWaitBox() { if (!answer.querySelector('.slides-card.working')) answer.querySelector('.slides-wait')?.remove(); }
 function syncMaking() {
   const working = slidesWorking();
   if (working !== wasWorking) { wasWorking = working; if (!busy && ['idle', 'resting', 'making'].includes(director.state)) idle(); }

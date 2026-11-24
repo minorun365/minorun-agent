@@ -78,3 +78,12 @@ test('作成中の一言：スライド作成機能の detail を出し、怪し
   assert.equal(progressLine({ stage: 'queued' }), '順番を待っています');
   assert.equal(progressLine({ stage: 'reading', kind: 'topic' }), '出典を読んでいます');
 });
+
+test('作成中の棒は段階ごとに伸び、受付待ちでも少し見せ、仕上げでも満タンにしない', async () => {
+  const { barWidth } = await import('../../web/src/slides-card.ts');
+  const w = [-1, 0, 1, 2, 3].map(barWidth);
+  assert.ok(w[0] > 0);
+  for (let i = 1; i < w.length; i++) assert.ok(w[i] > w[i - 1]);
+  assert.ok(w[4] < 100);
+  assert.equal(barWidth(4), w[4]);
+});
