@@ -43,3 +43,21 @@ test('3問のうち1問は必ず技術の話題から選ぶ', async () => {
     assert.ok(got.some((q) => tech.has(q) || q.includes('更新') || q.includes('AgentCore') || q.includes('Bedrock')), got.join(' / '));
   }
 });
+
+test('推したい催しの問いは開催日まで約半分の回に1問入り、過ぎたら入れる仕組みが止まる', async () => {
+  const { pickStarters, PUSH_QUESTIONS, PUSH_UNTIL } = await import('../../web/src/starters.ts');
+  for (const q of PUSH_QUESTIONS) assert.ok(STARTERS.includes(q), `用意した質問に無い: ${q}`);
+  const push = new Set(PUSH_QUESTIONS);
+  const before = PUSH_UNTIL - 1;
+  let hit = 0;
+  for (let i = 0; i < 1000; i++) {
+    const got = pickStarters(3, [], before);
+    assert.equal(got.length, 3);
+    if (got.some((q) => push.has(q))) hit++;
+  }
+  assert.ok(hit > 430 && hit < 650, `開催前に入った回: ${hit}/1000`);
+  // 期間後も話題の抽選で偶然出ることはあるが、ずっと少ない
+  let after = 0;
+  for (let i = 0; i < 1000; i++) if (pickStarters(3, [], PUSH_UNTIL + 1).some((q) => push.has(q))) after++;
+  assert.ok(after < 150, `開催後に入った回: ${after}/1000`);
+});

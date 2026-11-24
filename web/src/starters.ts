@@ -80,11 +80,26 @@ export const TECH_TOPICS = [
 const TECH_GROUPS: string[][] = EN ? [] : [DISCOVERY[0], ...TECH_TOPICS.map((t) => TOPIC_GROUPS[t] ?? [])]
   .filter((g) => g.length);
 
+// 特に推したい催し（KAG の re:Cap）の問い。開催日まで、初回の3問の2回に1回はここから1問を入れる
+// （2026-11-24 みのるん指示「結構プッシュしたいイベント」）。問いは事前回答のある after-recap の用意した質問
+export const PUSH_QUESTIONS = [
+  'KAGのre:Capでは何を話す？', 'KAGのre:Capは誰でも参加できる？',
+  'KAGのre:Capに懇親会はある？', 'みのるんの帰国後の登壇は？',
+];
+export const PUSH_UNTIL = Date.parse('2026-12-17T21:00:00+09:00');
+export const PUSH_RATE = 0.5;
+
 // 別々の話題から1問ずつ n 問選ぶ。exclude（直前に聞いた問いなど）は除く。
-// 2問以上のときは、技術の束から1問を先に選んでから残りを全体から選び、並びは混ぜる
-export function pickStarters(n: number, exclude: string[] = []): string[] {
+// 2問以上のときは、推したい催しの問い（期間中・確率 PUSH_RATE）と技術の束から1問ずつを先に選んでから
+// 残りを全体から選び、並びは混ぜる
+export function pickStarters(n: number, exclude: string[] = [], now = Date.now()): string[] {
   const out: string[] = [];
   const used = new Set<string[]>();
+  if (n >= 2 && !EN && now < PUSH_UNTIL && Math.random() < PUSH_RATE) {
+    const q = shuffle(PUSH_QUESTIONS).find((s) => !exclude.includes(s) && STARTERS.includes(s));
+    const g = q ? GROUPS.find((x) => x.includes(q)) : undefined;
+    if (q && g) { out.push(q); used.add(g); }
+  }
   const take = (groups: string[][]) => {
     for (const g of shuffle(groups)) {
       if (used.has(g)) continue;
