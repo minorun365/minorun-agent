@@ -104,6 +104,11 @@ def run(runtime, name, case, timeout):
     if not 10 <= pages <= 24:
         ng.append(f"ページ数が {pages}")
     md = s3.get_object(Bucket=BUCKET, Key=f"s/{job}/deck.md")["Body"].read().decode()
+    # 表紙の題の下の1行は短い句1つ（全角15字まで。英数字は2字で全角1字）。長いと表紙が説明文で埋まり、右の飾りの輪にもかかる
+    cover = md.split("\n---\n")[1] if md.startswith("---") else md.split("\n---\n")[0]
+    tail = [ln.strip() for ln in cover.strip().splitlines() if ln.strip() and not ln.lstrip().startswith(("#", "<!--"))]
+    if tail and sum(0.5 if c.isascii() else 1 for c in tail[-1]) > 16:
+        ng.append(f"表紙の題の下の1行が長い：{tail[-1]}")
     runtime_id = runtime.rsplit("/", 1)[-1]
     time.sleep(15)
     recs = final_log(runtime_id, job, started)
