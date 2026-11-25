@@ -253,7 +253,8 @@ td:first-child{font-weight:700;white-space:nowrap}
 .me{flex:none;width:32px;height:32px;margin-top:1px;padding:0;border:0;border-radius:50%;background:var(--soft);color:var(--sub);
   display:grid;place-items:center;cursor:pointer;overflow:hidden;box-shadow:0 0 0 1px var(--line);transition:box-shadow .2s}
 .me:hover,.me[aria-expanded=true]{box-shadow:0 0 0 2px var(--accent)}
-.me.in{background:var(--ink);color:#fff;box-shadow:none}
+.me.in{background:#cff4fa;color:#0e7490;box-shadow:none}
+.me.in:hover,.me.in[aria-expanded=true]{box-shadow:0 0 0 2px var(--accent)}
 .mepop{position:absolute;z-index:8;right:var(--edge-x);top:calc(env(safe-area-inset-top,0px) + var(--edge-y) + 42px);width:min(280px,calc(100% - 32px));
   padding:16px 16px 14px;border-radius:18px;background:var(--card);box-shadow:0 12px 40px rgba(22,24,29,.14),0 0 0 1px var(--line);
   opacity:0;transform:translateY(-6px) scale(.97);transform-origin:90% 0;pointer-events:none;transition:opacity .2s ease,transform .25s cubic-bezier(.2,1.2,.3,1)}
@@ -295,14 +296,15 @@ td:first-child{font-weight:700;white-space:nowrap}
 .bubble .slides-card .slides-line{margin:8px 0 0;font-size:13px;color:var(--sub)}
 .bubble .slides-wait{margin:12px 0 2px}
 .bubble .slides-wait p{margin:0}
-/* スライド作成中に別の質問をしたとき、見出しの下に固定する進み具合の帯（top は layout() が見出しの下端に合わせる） */
+/* スライド作成中に別の質問をしたとき、見出しの下に固定する進み具合の帯（top は layout() が見出しの下端に合わせる）。
+   作成中からできあがりまで墨色の面に白抜きの文字（11/24 みのるん選定の案A） */
 .slides-strip{position:absolute;left:0;right:0;margin:0 auto;z-index:6;width:min(560px,calc(100% - 28px));min-height:42px;
-  display:flex;align-items:center;gap:10px;padding:8px 12px 8px 14px;border-radius:14px;background:var(--card);
-  box-shadow:0 0 0 1px var(--line),0 6px 18px rgba(0,0,0,.08);font-size:12.5px;color:var(--sub);transform-origin:center;transition:background .35s,color .35s}
+  display:flex;align-items:center;gap:10px;padding:8px 12px 8px 14px;border-radius:14px;background:#16181d;
+  box-shadow:0 8px 22px rgba(0,0,0,.2);font-size:12.5px;color:rgba(255,255,255,.75);transform-origin:center;transition:background .35s,color .35s}
 .slides-strip[hidden]{display:none}
-.slides-strip .t{font-weight:700;color:var(--ink);white-space:nowrap}
-.slides-strip .g{flex:1;min-width:40px;position:relative;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
-.slides-strip .g i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--accent);transition:width .6s ease}
+.slides-strip .t{font-weight:700;color:#fff;white-space:nowrap}
+.slides-strip .g{flex:1;min-width:40px;position:relative;height:5px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden}
+.slides-strip .g i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:#22d3ee;transition:width .6s ease}
 .slides-strip .s{flex:0 1 auto;min-width:0;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .slides-strip .x{flex:none;font:inherit;font-size:18px;line-height:1;border:0;background:transparent;color:inherit;padding:4px 2px 4px 6px;cursor:pointer;opacity:.75}
 .slides-strip.done{background:#16181d;color:#fff;box-shadow:0 0 0 1px var(--line),0 8px 22px rgba(0,0,0,.2)}
@@ -310,7 +312,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 .slides-strip.done img{flex:none;width:56px;height:32px;border-radius:4px;object-fit:cover;background:#fff}
 .slides-strip.done .t{color:#fff;overflow:hidden;text-overflow:ellipsis}
 .slides-strip.done .open{margin-left:auto;flex:none;font-weight:700;color:#fff;background:var(--accent);border-radius:999px;padding:5px 13px}
-.slides-strip.error .t{flex:1;font-weight:600;color:var(--sub)}
+.slides-strip.error .t{flex:1;font-weight:600;color:rgba(255,255,255,.85)}
 .bubble .slides-card.failed figcaption{margin:0;color:var(--sub);font-size:13px}
 /* ログインしていない人への案内（作成中のカードの中。11/21 A案） */
 .bubble .slides-login{display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}

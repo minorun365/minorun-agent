@@ -290,28 +290,10 @@ def read_with_browser(url):
             pass
 
 
-SUMMARY = "の要約"
-
-
-def cover_line(text):
-    """表紙の題の下の1行を「〜の要約」の形にする。公開元の社名だけが著者の位置に出ると、
-    その会社が作った公式のスライドに見えるため（例：「Amazon Web Services」→「Amazon Web Servicesの記事の要約」）"""
-    text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"[「『\"“][^」』\"”]*[」』\"”]", "", text)  # 記事名は入れない（長くなって表紙の飾りにかぶる）。出どころの名前だけにする
-    text = re.sub(r"(の記事)+(の要約)?$", "", text).strip()
-    if text.endswith(SUMMARY):
-        text = text[:-len(SUMMARY)].strip()
-    if not text:
-        return "記事の要約"
-    if re.search(r"(ブログ|記事|ニュース|ドキュメント|資料|論文|発表|ページ|[Bb]log|[Nn]ews|[Dd]ocs?)$", text):
-        return text + SUMMARY
-    return text + "の記事" + SUMMARY
-
-
 def fix_cover(md):
     """表紙を決まった形にそろえる。
     ・モデルが題まで ## で書いたときは、表紙の最後の ## を # に直す
-    ・題の下の地の文は1行にまとめ、cover_line で「〜の要約」の形にする（どの公開元でも同じ）"""
+    ・題の下の地の文は1行にまとめる（文言は書き手のエージェントが材料に合わせて決める。書き換えない）"""
     parts = md.split("\n---\n", 1)
     head = parts[0]
     if "_class: top" not in head:
@@ -327,7 +309,8 @@ def fix_cover(md):
             keep.append(ln)
         else:
             prose.append(re.sub(r"<[^>]+>", "", ln))
-    head = re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).rstrip() + f"\n\n{cover_line(' '.join(prose))}\n"
+    line = re.sub(r"\s+", " ", " ".join(prose)).strip()
+    head = re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).rstrip() + (f"\n\n{line}\n" if line else "\n")
     return "\n---\n".join([head] + parts[1:])
 
 
