@@ -1,5 +1,5 @@
 boto3
-pillow==11.3.0
+pillow==13.0.0
 python-pptx==1.0.2
 # スライド作成機能（strands-agents 1.62.0 が入れる版）とそろえる。2系は httpx2 に替わり、ID 連携の呼び方が動かない
 anthropic==0.125.0
