@@ -12,6 +12,22 @@ SEARCH_TOOLS = frozenset({
     "search_japanese", "search_x_users", "search_x_posts",
 })
 
+
+
+def drop_preamble(chunks, cuts):
+    """検索の道具を呼ぶ前にモデルが書いた文（「調べます」の類の前置き）を落とし、最後の検索の後の文だけを残す。
+
+    cuts は検索の道具を呼び始めた時点の chunks の長さ。最後の検索の前に文が無いとき、
+    後ろに文が無いときは chunks をそのまま返す（地図・スライドの道具の前の本文は消さない）。
+    """
+    if not cuts:
+        return chunks
+    head, tail = chunks[:cuts[-1]], chunks[cuts[-1]:]
+    if not "".join(head).strip() or not "".join(tail).strip():
+        return chunks
+    return tail
+
+
 CHECK = (Path(__file__).with_name("check.local.txt").read_text().strip() if Path(__file__).with_name("check.local.txt").exists() else "")
 
 

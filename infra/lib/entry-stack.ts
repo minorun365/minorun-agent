@@ -23,6 +23,8 @@ export interface EntryStackProps extends cdk.StackProps {
   readonly conversationLog: dynamodb.ITable;
   // 添付画像の一時置き場。確認役が、画面から直接送るための期限つきの宛先を出す
   readonly uploadBucket: s3.IBucket;
+  // 資料から動画を作る機能（MinorunVideo）。確認役が回数を数え、起こし役を呼ぶ
+  readonly video?: { table: dynamodb.ITable; bucket: s3.IBucket; launcher: lambda.IFunction };
 }
 
 // 入口：回数を数える表、確認役（インターセプター）、Gateway とそのロール。
@@ -106,6 +108,21 @@ export class EntryStack extends cdk.Stack {
       resources: [uploadRole.roleArn],
     }));
     this.interceptor.addEnvironment('UPLOAD_ROLE_ARN', uploadRole.roleArn);
+    if (props.video) {
+      // 資料は doc/<利用者>/ へ。動画はログインした人だけ1人1日1本・全体で1日20本（2026-11-26 みのるん決定）
+      uploadRole.addToPolicy(new iam.PolicyStatement({ actions: ['s3:PutObject'], resources: [props.uploadBucket.arnForObjects('doc/*')] }));
+      props.video.table.grant(this.interceptor, 'dynamodb:BatchGetItem', 'dynamodb:GetItem', 'dynamodb:UpdateItem');
+      this.interceptor.addToRolePolicy(new iam.PolicyStatement({ actions: ['dynamodb:TransactWriteItems'], resources: [props.video.table.tableArn] }));
+      props.video.bucket.grantPut(this.interceptor, 'v/*');
+      props.video.launcher.grantInvoke(this.interceptor);
+      this.interceptor.addEnvironment('VIDEO_TABLE', props.video.table.tableName);
+      this.interceptor.addEnvironment('VIDEO_BUCKET', props.video.bucket.bucketName);
+      this.interceptor.addEnvironment('VIDEO_LAUNCHER', props.video.launcher.functionName);
+      this.interceptor.addEnvironment('VIDEO_USER_DAILY', '1');
+      this.interceptor.addEnvironment('VIDEO_TOTAL_DAILY', '20');
+      // 回数を数えない利用者（ログインした人のハッシュのカンマ区切り。運営者のテスト用）
+      this.interceptor.addEnvironment('VIDEO_UNLIMITED', process.env.VIDEO_UNLIMITED ?? '');
+    }
     this.interceptor.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:Query', 'dynamodb:UpdateItem'],
       resources: [props.conversationLog.tableArn],
@@ -164,12 +181,13 @@ export class EntryStack extends cdk.Stack {
       targetConfiguration: { http: { agentcoreRuntime: { arn: props.runtime.attrAgentRuntimeArn } } },
     });
     // 認証なしの Gateway ではヘッダーごとの回数制限を作れない（2026-10-25 実測）。匿名IDごとの1分5件は
-    // 確認役が数え、ここではターゲット全体の上限だけを持つ（費用の安全網）
+    // 確認役が数え、ここではターゲット全体の上限だけを持つ（費用の安全網）。re:Invent の週の混雑に備えて
+    // 60 → 120 に上げた（2026-11-25 みのるん承認。公開日の最大は1分33問、回答は1問約 $0.019）
     const rateLimit = new agentcore.CfnGatewayRateLimit(this, 'GatewayRateLimit', {
       gatewayIdentifier: this.gateway.attrGatewayIdentifier,
-      description: '全体で1分60件',
+      description: '全体で1分120件',
       dimensionKeys: ['targetName'],
-      entries: [{ dimensions: { targetName: 'minorun' }, requests: [{ rate: 60, period: 'minute' }] }],
+      entries: [{ dimensions: { targetName: 'minorun' }, requests: [{ rate: 120, period: 'minute' }] }],
     });
     rateLimit.addDependency(target);
 

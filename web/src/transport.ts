@@ -8,6 +8,9 @@ export class TransportError extends Error {
   constructor(public status: number, public reason: string, message: string) { super(message); }
 }
 const BUSY = tr('会話の準備に時間がかかっています。少し待って、もう一度送ってください。', 'Getting the conversation ready is taking a while. Please wait a moment and send it again.');
+// 入口の全体の上限（Gateway の1分の回数）や WAF の IP ごとの上限で断られたとき。会場の Wi-Fi のように
+// 大勢が同じ出口から使うと当たりやすいので、つながらないのではなく混んでいると伝える（2026-11-25）
+const CROWDED = tr('いまとても混み合っています。少し時間をおいて、もう一度送ってください。', "It's very busy right now. Please wait a moment and send it again.");
 const GENERIC = tr('いまうまくつながりませんでした。少し時間をおいて、もう一度送ってください。', "I couldn't connect just now. Please wait a bit and send it again.");
 // 英語のときは確認役の日本語の文を使わず、理由ごとの英語の文に置き換える
 export const REFUSED_EN: Record<string, string> = {
@@ -95,6 +98,7 @@ export class ChatTransport {
         throw new TransportError(409, 'session_busy', BUSY);
       }
       if (!REFUSALS.has(data.error || '') || trouble) emit('http', res.status, 'failed', attempt);
+      if (res.status === 429 && !REFUSALS.has(data.error || '')) throw new TransportError(429, 'crowded', CROWDED);
       throw new TransportError(res.status, data.error || 'http',
         EN ? (REFUSED_EN[data.error || ''] ?? GENERIC) : REFUSALS.has(data.error || '') && data.message ? data.message : GENERIC);
     }

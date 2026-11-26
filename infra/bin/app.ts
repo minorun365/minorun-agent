@@ -6,6 +6,7 @@ import { EdgeStack } from '../lib/edge-stack.js';
 import { EntryStack } from '../lib/entry-stack.js';
 import { KnowledgeStack } from '../lib/knowledge-stack.js';
 import { SlidesStack } from '../lib/slides-stack.js';
+import { VideoStack } from '../lib/video-stack.js';
 import { WatchStack } from '../lib/watch-stack.js';
 import { WebStack } from '../lib/web-stack.js';
 
@@ -27,7 +28,10 @@ const agent = new AgentStack(app, 'MinorunAgent', {
 });
 agent.addDependency(knowledge);
 agent.addDependency(slides);
-const entry = new EntryStack(app, 'MinorunEntry', { env, runtime: agent.runtime, legacyRuntime: agent.legacyRuntime, runtimeV2: agent.runtimeV2, conversationLog: agent.conversationLog, uploadBucket: agent.uploadBucket });
+// 資料からずんだもんの解説動画を作る機能（2026-11-26）。資料の一時置き場は MinorunAgent の Uploads を名前で使う
+const video = new VideoStack(app, 'MinorunVideo', { env, uploadBucketName: `minorun-agent-uploads-${env.account}` });
+const entry = new EntryStack(app, 'MinorunEntry', { env, runtime: agent.runtime, legacyRuntime: agent.legacyRuntime, runtimeV2: agent.runtimeV2, conversationLog: agent.conversationLog, uploadBucket: agent.uploadBucket,
+  video: { table: video.quota, bucket: video.bucket, launcher: video.launcher } });
 
 // CloudFront の WAF はバージニア北部にしか置けない
 new EdgeStack(app, 'MinorunEdge', { env: { account: env.account, region: 'us-east-1' } });
@@ -49,7 +53,7 @@ const watch = new WatchStack(app, 'MinorunWatch', {
   adminBaseUrl: `https://${edge?.domain ?? 'agent.minoruonda.com'}/admin/`,
   pageToken: fs.readFileSync(tokenFile, 'utf-8').trim(),
 });
-const web = new WebStack(app, 'MinorunWeb', { env, entry, edge, watch, slidesBucketName: slides.bucket.bucketName });
+const web = new WebStack(app, 'MinorunWeb', { env, entry, edge, watch, slidesBucketName: slides.bucket.bucketName, videosBucketName: video.bucket.bucketName });
 web.addDependency(watch);
 
 

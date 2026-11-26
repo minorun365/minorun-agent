@@ -207,8 +207,11 @@ export class AgentStack extends cdk.Stack {
         SLIDES_RUNTIME: props.slides.runtimeArn,
         SLIDES_TABLE: props.slides.tableName,
         SLIDES_BUCKET: props.slides.bucketName,
-        SLIDES_USER_DAILY: '2',
-        SLIDES_TOTAL_DAILY: '50',
+        // 2026-11-25 に上げた（みのるん決定。使いたい人を断らない側へ。会場の Wi-Fi は大勢が同じ IP になる）
+        SLIDES_USER_DAILY: '5',
+        SLIDES_TOTAL_DAILY: '200',
+        SLIDES_GUEST_DAILY: '2',
+        SLIDES_IP_DAILY: '30',
         // 回数を数えない利用者（ログインした人のハッシュのカンマ区切り。運営者のテスト用）
         SLIDES_UNLIMITED: process.env.SLIDES_UNLIMITED ?? '',
         BRAVE_WORKLOAD: braveWorkload.name,

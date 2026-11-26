@@ -25,7 +25,7 @@ test('返信先の帯は答えたあとだけ。失敗した回では消す', ()
 });
 
 test('スライドのURL待ち・画像の見本・スライドの札が出ている間は、帯を隠して高さにも数えない', () => {
-  assert.match(main, /const reply = comp && !replyTo\.hidden && !slidesMode && shot\.hidden && chip\.hidden;/);
+  assert.match(main, /const reply = comp && !replyTo\.hidden && !slidesMode && shot\.hidden && chip\.hidden && docChip\.hidden;/);
   assert.match(main, /\(reply \? replyTo\.offsetHeight \+ 14 : 0\)/);
 });
 

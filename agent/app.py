@@ -491,6 +491,7 @@ async def invoke(payload, context):
             name = use.get("name")
             return {"type": "tool", "name": name, "label": _tool_label_en(name) if en else _tool_label(name, question, conv.current)}
 
+        search_cut = []  # 検索の道具を呼び始めた時点の answer の位置（その前の文は前置き）
         asked = model_question
         if image:
             # 持つ画像は最新の1枚だけ。前の画像は印の文に置き換える（毎問の入力を増やし続けない）
@@ -506,6 +507,8 @@ async def invoke(payload, context):
                 use = ev.get("current_tool_use")
                 if use and use.get("toolUseId") and use["toolUseId"] not in seen_tools:
                     seen_tools.add(use["toolUseId"])
+                    if use.get("name") in research.SEARCH_TOOLS:
+                        search_cut.append(len(answer))
                     yield tool_event(use)
                 while turn.maps[maps_sent:]:
                     yield {"type": "map", **turn.maps[maps_sent]}
@@ -521,6 +524,17 @@ async def invoke(payload, context):
             print(json.dumps({"agent_error": type(e).__name__, "detail": str(e)[:300]}))
             yield {"type": "error", "message": SORRY_EN if en else SORRY}
 
+        if not failed and not "".join(answer).strip():
+            # モデルが1文字も返さずに終えた回。空の吹き出しを出さず、失敗と同じく会話から外す。
+            # 残すと次の普通の質問まで空になる（11/26）
+            failed = True
+            print(json.dumps({"empty_answer": True}))
+            yield {"type": "error", "message": SORRY_EN if en else SORRY}
+        if not failed:
+            kept = research.drop_preamble(answer, search_cut)
+            if kept is not answer:
+                answer = kept
+                yield {"type": "replace", "text": "".join(answer)}
         initial_answer = "".join(answer)
         research_audit = {"decision_status": "skipped", "outcome": "not_started",
                           "initial_tools": list(turn.tools_used)}
@@ -531,7 +545,7 @@ async def invoke(payload, context):
             followed = True
             yield {"type": "follow_up", "text": FOLLOW_UP_LEAD_EN if en else FOLLOW_UP_LEAD}
             turn.tool_calls = min(turn.tool_calls, MAX_TOOL_CALLS - 3)
-            revised = []
+            revised, revised_cut = [], []
             follow_up_start = len(conv.agent.messages)
             follow_up_tools_start = len(turn.tools_used)
             try:
@@ -542,7 +556,10 @@ async def invoke(payload, context):
                     use = ev.get("current_tool_use")
                     if use and use.get("toolUseId") and use["toolUseId"] not in seen_tools:
                         seen_tools.add(use["toolUseId"])
+                        if use.get("name") in research.SEARCH_TOOLS:
+                            revised_cut.append(len(revised))
                         yield tool_event(use)
+                revised = research.drop_preamble(revised, revised_cut)
                 if not research.SEARCH_TOOLS & set(turn.tools_used[follow_up_tools_start:]):
                     raise ValueError("follow-up skipped research")
                 if not "".join(revised).strip():

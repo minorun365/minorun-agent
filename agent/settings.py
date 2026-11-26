@@ -34,12 +34,13 @@ KB_RESULTS = int(os.environ.get("KB_RESULTS", "6"))
 WEB_RESULTS = int(os.environ.get("WEB_RESULTS", "4"))
 
 # URL からスライドを作る機能（2026-11-15 みのるん決定：1人1日2本・全体で1日50本。11/21 からログインしていない人も匿名IDで1日1本・同じIPから1日3本）
+# 2026-11-25 みのるん決定で上げた：ログインした人1日5本・全体1日200本・ログインなし1日2本・同じIPから1日30本（会場の Wi-Fi は大勢が同じ出口を使うため）
 SLIDES_RUNTIME = os.environ.get("SLIDES_RUNTIME", "")
 SLIDES_TABLE = os.environ.get("SLIDES_TABLE", "")
 SLIDES_BUCKET = os.environ.get("SLIDES_BUCKET", "")
-SLIDES_USER_DAILY = int(os.environ.get("SLIDES_USER_DAILY", "2"))
-SLIDES_TOTAL_DAILY = int(os.environ.get("SLIDES_TOTAL_DAILY", "50"))
-SLIDES_GUEST_DAILY = int(os.environ.get("SLIDES_GUEST_DAILY", "1"))
-SLIDES_IP_DAILY = int(os.environ.get("SLIDES_IP_DAILY", "3"))
+SLIDES_USER_DAILY = int(os.environ.get("SLIDES_USER_DAILY", "5"))
+SLIDES_TOTAL_DAILY = int(os.environ.get("SLIDES_TOTAL_DAILY", "200"))
+SLIDES_GUEST_DAILY = int(os.environ.get("SLIDES_GUEST_DAILY", "2"))
+SLIDES_IP_DAILY = int(os.environ.get("SLIDES_IP_DAILY", "30"))
 # 回数を数えない利用者（ログインした人のハッシュ。カンマ区切り）。テストでよく作る運営者だけを入れる
 SLIDES_UNLIMITED = frozenset(u for u in os.environ.get("SLIDES_UNLIMITED", "").split(",") if u)

@@ -214,7 +214,7 @@ def main():
         futs = []
         for i, c in enumerate(cases):
             futs.append(ex.submit(run_case, a.url, i, c))
-            time.sleep(2)  # アプリ全体の1分60件に当たらないよう、投げる間隔をあける
+            time.sleep(2)  # アプリ全体の1分の上限（120件）に当たらないよう、投げる間隔をあける
         for f in futs:
             rows += f.result()
     rows.sort(key=lambda r: r["i"])

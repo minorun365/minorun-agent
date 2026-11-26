@@ -21,6 +21,8 @@ export interface WebStackProps extends cdk.StackProps {
   // URL から作ったスライドの置き場（/s/<ジョブ>/ をビューアとして配る）
   // 別スタックのバケットに OAC の許可を足すと循環するので、名前で取り込み、許可は MinorunSlides 側に置く
   readonly slidesBucketName: string;
+  // 資料から作った解説動画の置き場（/v/<ジョブ>/ を配る。許可は MinorunVideo 側）
+  readonly videosBucketName?: string;
 }
 
 // 画面は S3、/api は入口の Gateway へ。ブラウザが見るドメインは1つにする。
@@ -48,6 +50,14 @@ export class WebStack extends cdk.Stack {
       runtime: cloudfront.FunctionRuntime.JS_2_0,
       code: cloudfront.FunctionCode.fromInline(
         "function handler(event){var r=event.request;if(/^\\/s\\/[A-Za-z0-9_-]+\\/?$/.test(r.uri)){if(!r.uri.endsWith('/')){return{statusCode:301,statusDescription:'Moved',headers:{location:{value:r.uri+'/'}}};}r.uri+='index.html';}return r;}",
+      ),
+    });
+
+    // /v/<ジョブ>/ と /v/<ジョブ> を、動画のビューア（画面と同じバケットの v.html）へ
+    const videoIndex = new cloudfront.Function(this, 'VideoIndex', {
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+      code: cloudfront.FunctionCode.fromInline(
+        "function handler(event){var r=event.request;if(/^\\/v\\/[A-Za-z0-9_-]+\\/?$/.test(r.uri)){if(!r.uri.endsWith('/')){return{statusCode:301,statusDescription:'Moved',headers:{location:{value:r.uri+'/'}}};}r.uri+='index.html';}return r;}",
       ),
     });
 
@@ -85,6 +95,18 @@ export class WebStack extends cdk.Stack {
           }),
           functionAssociations: [{ function: slidesIndex, eventType: cloudfront.FunctionEventType.VIEWER_REQUEST }],
         },
+        ...(props.videosBucketName ? {
+          // 作った解説動画・表紙・字幕・進み具合（status.json は no-cache）
+          '/v/*': {
+            origin: origins.S3BucketOrigin.withOriginAccessControl(s3.Bucket.fromBucketName(this, 'VideosBucket', props.videosBucketName)),
+            viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            cachePolicy: new cloudfront.CachePolicy(this, 'VideosCache', {
+              minTtl: cdk.Duration.seconds(0), defaultTtl: cdk.Duration.minutes(5), maxTtl: cdk.Duration.days(365),
+              enableAcceptEncodingGzip: true, enableAcceptEncodingBrotli: true,
+            }),
+            functionAssociations: [{ function: videoIndex, eventType: cloudfront.FunctionEventType.VIEWER_REQUEST }],
+          },
+        } : {}),
         // 監視ページ（ログインは Lambda 側）。cookie とクエリをそのまま渡し、キャッシュしない
         '/admin*': {
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,

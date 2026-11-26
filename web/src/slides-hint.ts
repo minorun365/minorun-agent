@@ -3,6 +3,7 @@
 
 import { EN, tr } from './i18n';
 
+// 質問を主役にし、資料の添付などは使ううちに気づくサブ機能として薄い字には並べない（2026-11-26 みのるん指示）
 export const PLACEHOLDER = tr('質問、または記事のURL', 'Ask me anything');
 export const SLIDES_PLACEHOLDER = '記事のURLを入力';
 export const SLIDES_STARTER = 'URLをスライドに要約して！';

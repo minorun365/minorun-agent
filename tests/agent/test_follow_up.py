@@ -19,6 +19,8 @@ class FollowUp(unittest.IsolatedAsyncioTestCase):
             if text != app.FOLLOW_UP:
                 if mode in ('already_web', 'partial_web', 'prior_search_only'):
                     app.tools.Turn.current.tools_used.append('search_web')
+                if mode == 'silent':
+                    return
                 yield {'data': ('公式サイトで確認してください。' if mode == 'wording' else initial) if mode != 'normal' else '会場間はシャトルで移動できます。'}
             else:
                 name = mode if mode in app.research.SEARCH_TOOLS or mode in ('now', 'show_map') else 'search_web'
@@ -65,6 +67,14 @@ class FollowUp(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(row["research"]["outcome"], "failed")
                 self.assertEqual([e['text'] for e in events if e['type']=='follow_up'][-1], app.FOLLOW_UP_FAILED)
                 self.assertEqual(len(messages), 1)
+
+    async def test_silent_answer_is_failure_and_leaves_history(self):
+        # モデルが1文字も返さない回は、空の吹き出しにせず失敗として扱い、次の質問へ持ち越さない
+        events, row, messages, _, _ = await self.run_turn('silent')
+        self.assertEqual([e['message'] for e in events if e['type'] == 'error'], [app.SORRY])
+        self.assertEqual(row['status'], 'error')
+        self.assertEqual(messages, [])
+        self.assertFalse(any(e['type'] in ('follow_up', 'suggest') for e in events))
 
     async def test_normal_and_already_searched_do_not_follow_up(self):
         for mode in ['normal', 'already_web']:

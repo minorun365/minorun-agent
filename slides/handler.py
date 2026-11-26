@@ -356,6 +356,10 @@ header h1{{flex:1;margin:0;font-size:17px;line-height:1.4;font-weight:700}}
 .count{{min-width:70px;text-align:center;font-variant-numeric:tabular-nums;color:var(--mute)}}
 footer{{padding:6px 16px 28px;font-size:13px;color:var(--mute);text-align:center;line-height:1.7}}
 footer a{{color:var(--accent)}}
+footer .src{{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:4px 0 0}}
+footer .pill{{display:inline-flex;align-items:center;gap:8px;max-width:100%;background:var(--btn);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:9px 18px;font-size:14px;font-weight:700;text-decoration:none}}
+footer .pill span{{font-weight:400;font-size:13px;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+footer .note{{margin:18px 0 0;font-size:12px;line-height:1.75}}
 </style>
 </head>
 <body>
@@ -369,11 +373,22 @@ const name=(n)=>String(n).padStart(2,'0')+'.webp';
 function show(n){{i=Math.min(N,Math.max(1,n));img.src=name(i);img.alt=i+'ページ目';count.textContent=i+' / '+N;
 document.getElementById('prev').disabled=i===1;document.getElementById('next').disabled=i===N;
 if(i<N){{const p=new Image();p.src=name(i+1);}}}}
-document.getElementById('prev').onclick=()=>show(i-1);document.getElementById('next').onclick=()=>show(i+1);
-img.onclick=(e)=>show(e.offsetX<img.clientWidth/3?i-1:i+1);
+const side=(x)=>{{const r=img.getBoundingClientRect();show(x-r.left<r.width/3?i-1:i+1);}};
+img.onclick=(e)=>side(e.clientX);
 addEventListener('keydown',(e)=>{{if(e.key==='ArrowRight'||e.key===' ')show(i+1);if(e.key==='ArrowLeft')show(i-1);}});
-let x0=null;img.addEventListener('touchstart',(e)=>{{x0=e.touches[0].clientX}},{{passive:true}});
-img.addEventListener('touchend',(e)=>{{if(x0===null)return;const d=e.changedTouches[0].clientX-x0;if(Math.abs(d)>40)show(d<0?i+1:i-1);x0=null;}});
+/* iPhone は touch-action だけでは連打をダブルタップの拡大に取ることがあるので、指で触ったときは touchend で動かして既定の動きを止める */
+for(const [id,step] of [['prev',-1],['next',1]]){{const b=document.getElementById(id);b.onclick=()=>show(i+step);
+b.addEventListener('touchend',(e)=>{{e.preventDefault();const t=e.changedTouches[0];
+if(!b.disabled&&b.contains(document.elementFromPoint(t.clientX,t.clientY)))show(i+step);}},{{passive:false}});}}
+let x0=null,y0=0,multi=false;
+img.addEventListener('touchstart',(e)=>{{if(e.touches.length>1){{multi=true;x0=null;return;}}x0=e.touches[0].clientX;y0=e.touches[0].clientY;}},{{passive:true}});
+img.addEventListener('touchend',(e)=>{{if(e.touches.length===0&&multi){{multi=false;return;}}if(x0===null||multi)return;
+const t=e.changedTouches[0],dx=t.clientX-x0,dy=t.clientY-y0;x0=null;
+if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){{e.preventDefault();show(dx<0?i+1:i-1);}}
+else if(Math.abs(dx)<10&&Math.abs(dy)<10){{e.preventDefault();side(t.clientX);}}}},{{passive:false}});
+/* ボタンの周りの余白への素早い2回目のタップも拡大に取らせない。リンクは押した通りに開く */
+let last=-1e9;document.addEventListener('touchend',(e)=>{{const quick=e.timeStamp-last<450;last=e.timeStamp;
+if(quick&&!e.defaultPrevented&&e.touches.length===0&&!e.target.closest('a'))e.preventDefault();}},{{passive:false}});
 show(1);
 </script>
 </body>
@@ -383,15 +398,19 @@ show(1);
 
 def viewer_texts(title, viewer, sources):
     """ビューアの紹介文・シェア文・足元。sources は出典のURLの並び（記事から作ったときは記事の1件）。"""
-    link = lambda u: f'<a href="{html.escape(u)}" rel="noopener nofollow" target="_blank">{html.escape(urllib.parse.urlparse(u).netloc)}</a>'
+    # 出典は押せる丸ボタンにし、注記は間を空けて小さく置く（文字がひと塊に見えないように。2026-11-26 みのるん選択）
+    pill = lambda u, label: (f'<a class="pill" href="{html.escape(u)}" rel="noopener nofollow" target="_blank">{label} '
+                             f'<span>{html.escape(urllib.parse.urlparse(u).netloc)} ↗</span></a>')
     site = f'<a href="{SITE}/">みのるんエージェント</a>'
     if KIND["value"] == "topic":
         made, verb = "調べてまとめた", "調べて"
-        footer = (("出典：" + "、".join(link(u) for u in sources) + "<br>") if sources else "") + \
-            f"{site}がナレッジベースとWebで調べて自動で作ったスライドです。内容は出典で確かめてください。"
+        src = "".join(pill(u, "出典") for u in sources)
+        note = f"{site}がナレッジベースとWebで調べて自動で作ったスライドです。<br>内容は出典で確かめてください。"
     else:
         made, verb = "記事から作った", "記事を渡して"
-        footer = f"元の記事：{link(sources[0])}<br>{site}がこの記事から自動で作ったスライドです。内容は元の記事で確かめてください。"
+        src = pill(sources[0], "元の記事を読む")
+        note = f"{site}がこの記事から自動で作ったスライドです。<br>内容は元の記事で確かめてください。"
+    footer = (f'<p class="src">{src}</p>' if src else "") + f'<p class="note">{note}</p>'
     share = "https://x.com/intent/post?text=" + urllib.parse.quote(
         f"#みのるんエージェント に{verb}「{title}」のスライドを作ってもらったよ！\n{viewer}")
     return {"made": made, "share": html.escape(share), "footer": footer}

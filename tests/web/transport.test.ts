@@ -42,6 +42,15 @@ test('他の409、5xx、429、通信切断は自動再送しない', async () =>
     await assert.rejects(t.question({})); assert.equal(calls, 1);
   }
 });
+test('入口やIPごとの上限で断られたら、混み合っていると案内する', async () => {
+  for (const body of ['{}', JSON.stringify({ error: 'per_ip', message: '少し間をあけてから、もう一度送ってください。' })]) {
+    const t = new ChatTransport(async () => new Response(body, { status: 429 }), () => {}, async () => {});
+    await assert.rejects(t.question({}), e => e instanceof TransportError && e.reason === 'crowded' && e.message.includes('混み合って'));
+  }
+  // 確認役の1分の上限は、確認役の文をそのまま出す
+  const t = new ChatTransport(async () => new Response(JSON.stringify({ error: 'per_minute', message: '1分に5件までです。' }), { status: 429 }), () => {}, async () => {});
+  await assert.rejects(t.question({}), e => e instanceof TransportError && e.reason === 'per_minute' && e.message === '1分に5件までです。');
+});
 test('先読み失敗でも次の質問は試せる。停止通知を一般エラーに変えない', async () => {
   let calls = 0;
   const t = new ChatTransport(async () => { calls++; return calls === 1 ? new Response('{}', {status: 500}) : new Response(JSON.stringify({error:'banned',message:'利用停止です'}),{status:403}); }, () => {});

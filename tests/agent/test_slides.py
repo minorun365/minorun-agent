@@ -97,6 +97,16 @@ class StartTests(unittest.TestCase):
         r, c = start(user="", anon="a1")
         self.assertEqual(len(c["dynamodb"].transact_write_items.call_args.kwargs["TransactItems"]), 2)
 
+    def test_guest_limit_note_uses_configured_counts(self):
+        # 上限の本数を変えても、断るときの案内の本数が設定と食い違わない（2026-11-25 に 1→2本・2→5本へ上げた）
+        c = clients(["ConditionalCheckFailed", "None", "None"])
+        with patch.object(slides, "_clients", c), patch.object(slides, "_spawn", lambda fn, *a: fn(*a)):
+            r = slides.start("https://example.com/post", "", "", runtime="arn:rt", table="tb", bucket="bk", user_daily=5,
+                             total_daily=200, anon="a1", ip="ip9", guest_daily=2, ip_daily=30)
+        self.assertEqual(r["status"], "guest_limit")
+        self.assertIn("1日2本まで", r["note"])
+        self.assertIn("1日5本まで作れます", r["note"])
+
     def test_unlimited_is_only_for_signed_in(self):
         r, c = start(user="", anon="a1", unlimited=True)
         self.assertEqual(r["status"], "accepted")

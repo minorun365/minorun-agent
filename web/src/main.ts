@@ -18,6 +18,7 @@ import { saveCarryover, takeCarryover, type LastTurn, type Pending } from './car
 import { AttachError, shrink, upload } from './attach';
 import { parseSlidesList, seenBefore, loginContinueBox, slidesCard, slidesList, SlidesTracker } from './slides-card';
 import { SlidesStrip } from './slides-strip';
+import { CHIP_LABEL, isDoc, listVideos, startVideo, videoCard, videosList } from './video-card';
 import { EN, switchLang, tr } from './i18n';
 import { REFUSED_EN } from './transport';
 import { OFFER_CHIP, OFFER_REQUEST, PLACEHOLDER, SLIDES_PLACEHOLDER, SLIDES_STARTER, slidesRequest, wantsSlidesHint, withOfferChip, withSlidesStarter } from './slides-hint';
@@ -70,8 +71,8 @@ if (EN) {
   const mark = replyTo.querySelector('svg')!.outerHTML;
   replyTo.querySelector('b')!.innerHTML = `${mark}Replying to “<span id="replyQ"></span>”`;
   replyTo.querySelector('.sub')!.textContent = "I'll answer with our conversation so far in mind";
-  for (const [sel, label] of [['#me', 'Log in'], ['#mepop', 'Log in'], ['#back', 'Close and go back'], ['#clip', 'Attach an image'],
-    ['#attachDrop', 'Remove the image'], ['#send', 'Send']] as const) $(sel).setAttribute('aria-label', label);
+  for (const [sel, label] of [['#me', 'Log in'], ['#mepop', 'Log in'], ['#back', 'Close and go back'], ['#clip', 'Attach an image or a document'],
+    ['#attachDrop', 'Remove the image'], ['#docDrop', 'Remove the document'], ['#send', 'Send']] as const) $(sel).setAttribute('aria-label', label);
   $<HTMLImageElement>('#attachImg').alt = 'Image to attach';
   $('#zoomClose').textContent = 'Close';
   $('#zoom .hint').textContent = 'Pinch to zoom in';
@@ -144,13 +145,13 @@ function layout() {
   const pad = parseFloat(getComputedStyle(dock).paddingBottom);
   // 添付した画像の見本が出ているときは、その高さもキャラクターの下に空ける
   const shot = $('#attach');
-  const chip = $('#slideChip');
+  const chip = $('#slideChip'), docChip = $('#docChip');
   // 返信先の帯：答えたあとに入力を開いたときだけ出す。スライドのURL待ち・画像の見本・スライドの札が出ている間は、場所を譲って隠す
-  const reply = comp && !replyTo.hidden && !slidesMode && shot.hidden && chip.hidden;
+  const reply = comp && !replyTo.hidden && !slidesMode && shot.hidden && chip.hidden && docChip.hidden;
   replyTo.classList.toggle('on', reply);
   // 長いURLなどで入力欄が2行以上に伸びたら、その分だけ注意書き・札・添付の見本を上へずらす（1行のときの高さは左の添付ボタンと同じ）
   dock.style.setProperty('--grow', Math.max(0, write.offsetHeight - $('#clip').offsetHeight) + 'px');
-  const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 + (shot.hidden ? 0 : shot.offsetHeight + 14) + (chip.hidden ? 0 : chip.offsetHeight + 14) + (reply ? replyTo.offsetHeight + 14 : 0) : has('limited') ? 0 : suggest.offsetHeight;
+  const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 + (shot.hidden ? 0 : shot.offsetHeight + 14) + (chip.hidden ? 0 : chip.offsetHeight + 14) + (docChip.hidden ? 0 : docChip.offsetHeight + 14) + (reply ? replyTo.offsetHeight + 14 : 0) : has('limited') ? 0 : suggest.offsetHeight;
   const dockTop = H - pad - inner - (comp ? 10 : 16);
   const avail = dockTop - headB;
   // 通常ブラウザの縦向きは上下、Xのアプリ内と横向きの低い画面は左右に配置する。
@@ -433,7 +434,7 @@ function renderSuggest(list: string[], retry = false, via: Via = 'starter') {
 const clip = $('#clip'), fileInput = $<HTMLInputElement>('#file'), attachBox = $('#attach'), attachImg = $<HTMLImageElement>('#attachImg');
 const NO_TEXT = tr('この画像について教えてください', 'Tell me about this image');
 let attached: Blob | null = null, picking = false;
-const canSend = () => q.value.trim().length > 0 || !!attached;
+const canSend = () => q.value.trim().length > 0 || !!attached || !!attachedDoc;
 function setAttached(blob: Blob | null) {
   if (attachImg.src) URL.revokeObjectURL(attachImg.src);
   attached = blob;
@@ -444,6 +445,9 @@ function setAttached(blob: Blob | null) {
 }
 async function pickImage(file: Blob | null | undefined) {
   if (!file) return;
+  // 資料（PDF・PPTX）は縮めずに持っておき、「3分の動画にする」の札を出す
+  if (file instanceof File && isDoc(file)) { setAttached(null); setDoc(file); return; }
+  setDoc(null);
   try { setAttached(await shrink(file)); }
   catch (e) { setAttached(null); notice.textContent = e instanceof AttachError ? e.message : NOTICE; setTimeout(() => { notice.textContent = NOTICE; }, 4000); }
 }
@@ -458,7 +462,31 @@ q.addEventListener('paste', (e) => {
   const file = Array.from(e.clipboardData?.files ?? []).find((f) => f.type.startsWith('image/'));
   if (file) { e.preventDefault(); void pickImage(file); }
 });
+// ---- 資料から解説動画（2026-11-26 みのるん選定の案C）：添付ボタンで PDF・PPTX を選ぶと札を出し、押すと作り始める ----
+// 動画はログインした人だけ（1日1本）。ログインしていない人には、札の代わりにログインの案内を出す
+const docChip = $('#docChip'), docGo = $<HTMLButtonElement>('#docGo');
+let attachedDoc: File | null = null;
+function setDoc(file: File | null) {
+  attachedDoc = file;
+  docChip.hidden = !file;
+  if (file) {
+    slideChip.hidden = true;
+    docGo.textContent = profile() ? CHIP_LABEL : tr('ログインすると、この資料を動画にできます', 'Log in to turn this document into a video');
+    docChip.classList.toggle('login', !profile());
+  }
+  clip.classList.toggle('has', !!file || !!attached);
+  sendBtn.classList.toggle('on', canSend());
+  relayout();
+}
+docChip.addEventListener('pointerdown', (e) => e.preventDefault());
+docGo.addEventListener('click', () => {
+  if (!attachedDoc) return;
+  if (!profile()) { saveCarryover(sessionStorage, lastTurn, pendingLogin); void login(); return; }
+  void makeVideo(attachedDoc, docGo);
+});
+$('#docDrop').addEventListener('click', () => setDoc(null));
 const submitTyped = () => {
+  if (attachedDoc) { docGo.click(); return; }
   if (!canSend()) return;
   const text = q.value.trim() || NO_TEXT;
   send(slidesMode && wantsSlidesHint(text) ? slidesRequest(text) : text, q, 'typed');
@@ -492,14 +520,14 @@ function replyButton() {
   b.onclick = openCompose;
   return b;
 }
-// スライド作成はログインしていなくても頼める（2026-11-21〜。ログインなしは1日1本、ログインすると1日2本）
+// スライド作成はログインしていなくても頼める（2026-11-21〜。2026-11-25 から、ログインなしは1日2本、ログインすると1日5本）
 function openSlidesCompose() { setSlidesMode(true); openCompose(); }
 // ログイン前に最後に答えた質問と回答（作成中のスライドを含む）。ログインの往復のあとに描き直して続ける。
 // pendingLogin は 11/21 より前の、ログインしてから頼む流れの名残り（古い控えを読んだときだけ使う）
 let lastTurn: LastTurn | null = null;
 const pendingLogin: Pending | null = null;
 function renderSlideChip() {
-  const show = has('composing') && !attached && wantsSlidesHint(q.value);
+  const show = has('composing') && !attached && !attachedDoc && wantsSlidesHint(q.value);
   if (slideChip.hidden !== !show) { slideChip.hidden = !show; relayout(); }
 }
 slideChip.addEventListener('pointerdown', (e) => e.preventDefault());
@@ -849,7 +877,7 @@ const PERKS = EN ? `<ul class="perks">
   <li>Talk with me more times a day</li>
   <li>I remember what we talked about</li>
 </ul>` : `<ul class="perks">
-  <li class="slides"><b>スライドを1日2本まで作れます</b><span>作ったスライドを、どの端末からでも開けます。<i>ログインなしは1日1本</i></span></li>
+  <li class="slides"><b>スライドを1日5本まで作れます</b><span>作ったスライドを、どの端末からでも開けます。<i>ログインなしは1日2本</i></span></li>
   <li>1日に話せる回数が増えます</li>
   <li>話した内容を覚えて答えます</li>
 </ul>`;
@@ -860,6 +888,42 @@ async function authHeader(): Promise<Record<string, string>> {
 // メニューを開いている間は、開いた時点で見ていなかった完成品に NEW を付けたままにする（閉じたら消す）
 let freshNew = new Set<string>();
 let wasWorking = false;
+// 資料から解説動画を作り始める。質問と同じく玉が飛んでいき、資料を送って受け付けたら、吹き出しに作成中のカードを出す。
+// エージェントは呼ばない（確認役が回数を数えて、動画作成機能を起こす）
+async function makeVideo(file: File, fromEl?: HTMLElement) {
+  if (busy) return;
+  const requestVersion = ++turnVersion;
+  closeGift(); giftEligible = false; currentGiftCandidates = [];
+  cancelIdle(); busy = true;
+  stage.classList.add('busy', 'started'); greet.classList.remove('on');
+  const making = bubble.classList.contains('on') ? answer.querySelector<HTMLElement>('.slides-card.working') : null;
+  if (making?.dataset.base) strip.show(making.dataset.base, making.getBoundingClientRect());
+  bubble.classList.remove('on'); stage.classList.remove('answering', 'composing');
+  q.blur(); q.value = ''; q.style.height = 'auto';
+  slideChip.hidden = true; setDoc(null); sendBtn.classList.remove('on');
+  const label = CHIP_LABEL;
+  $('#thoughtText').textContent = label; layout(); drawCloud();
+  await fly(label, fromEl);
+  thought.classList.add('on'); director.phase('thinking', true);
+  doing.textContent = tr('資料を送っています', 'Sending the document'); doing.classList.add('on');
+  let base = '', message = '';
+  try { base = `/v/${await startVideo((body) => postChat(body, AbortSignal.timeout(20000)), file, file.name)}/`; }
+  catch (e) { message = e instanceof Error && e.message ? e.message : tr('動画を作り始められませんでした。少し時間をおいて、もう一度送ってください。', "The video couldn't be started. Please wait a bit and try again."); }
+  doing.classList.remove('on'); thought.classList.remove('on');
+  answer.classList.remove('oops'); answer.innerHTML = ''; answer.scrollTop = 0;
+  stage.classList.add('answering');
+  if (base) {
+    answer.appendChild(videoCard(base, () => { dropWaitBox(); relayout(); }));
+    answer.appendChild(waitBox());
+    director.answer(label, false);
+  } else {
+    answer.classList.add('oops'); answer.innerHTML = md(message); director.phase('error');
+  }
+  layout(); bubble.classList.add('on');
+  busy = false; stage.classList.remove('busy');
+  if (!has('limited')) renderSuggest(starters());
+  if (base) settleTimer = window.setTimeout(() => { if (!busy && !has('composing') && requestVersion === turnVersion) idle(); }, 1400);
+}
 // 作成中のカードの下に置く「待つ間に」の一言。スライドを受け付けた回はこれが本文になる。
 // 質問の候補は吹き出しに出さず、いつもどおり下の並びに任せる（画面が込み合うため。みのるん指示）
 function waitBox() {
@@ -889,6 +953,17 @@ function renderList() {
   const box = $('#myslides');
   if (box) box.replaceChildren(slidesList(slides.items, slides.get, new Set([...slides.unseen, ...freshNew])));
 }
+// 作った動画は、メニューを開いたときに確認役から番号をもらって並べる（ログインした人だけ）
+let videosLoading = false;
+async function renderVideos() {
+  if (!profile() || videosLoading) return;
+  videosLoading = true;
+  try {
+    const items = await listVideos((body) => postChat(body, AbortSignal.timeout(10000)));
+    const box = document.getElementById('myvideos');
+    if (box && items.length) box.replaceChildren(await videosList(items));
+  } finally { videosLoading = false; }
+}
 // ログインしていない人の作成中のカードに出すログインの案内。Google から戻ったら、同じカードを描き直して続ける
 function loginNudge() {
   return profile() ? undefined : { icon: GOOGLE, onClick: () => { saveCarryover(sessionStorage, lastTurn, pendingLogin); void login(); } };
@@ -899,7 +974,7 @@ function renderMe() {
   meBtn.classList.toggle('in', !!p);
   renderBadge();
   mePop.innerHTML = p
-    ? `<p class="lead">${tr('ログイン中です。', "You're logged in.")}</p>${PERKS}<div id="myslides"></div><button class="out" id="logout" type="button">${tr('ログアウト', 'Log out')}</button>`
+    ? `<p class="lead">${tr('ログイン中です。', "You're logged in.")}</p>${PERKS}<div id="myslides"></div><div id="myvideos"></div><button class="out" id="logout" type="button">${tr('ログアウト', 'Log out')}</button>`
     : `<p class="lead">${tr('ログインすると、こんなことができます。', 'Logging in lets you:')}</p>${PERKS}
        <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>${tr('Google でログイン', 'Log in with Google')}</span></button><div id="myslides"></div>`;
   $('#glogin')?.addEventListener('click', () => { saveCarryover(sessionStorage, lastTurn, pendingLogin); void login(); });
@@ -912,7 +987,7 @@ meBtn.addEventListener('click', (e) => {
   const on = !mePop.classList.contains('on');
   freshNew = on ? new Set(slides.unseen) : new Set();
   if (on && !profile()) renderMe();
-  if (on) renderList();
+  if (on) { renderList(); void renderVideos(); }
   toggleMe(on);
   if (on) slides.seen(); // 開いて一覧を見たら「できた」の印を消す（NEW の表示は閉じるまで残る）
 });

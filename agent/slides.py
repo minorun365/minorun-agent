@@ -2,6 +2,7 @@
 
 回数を表で数え（1人1日・全体で1日）、進み具合の最初の1行を公開用 S3 に置き、スライド作成機能（AgentCore Runtime）をジョブごとのセッションで起こす。
 ログインしていない人も頼める（2026-11-21 みのるん決定）。匿名IDで1日1本・同じIPから1日3本まで、ログインした人は1日2本。
+2026-11-25 に re:Invent の週へ備えて上限を上げた（みのるん決定）：ログインなし1日2本・同じIPから1日30本・ログインした人は1日5本・全体で1日200本。
 匿名で作った分は匿名IDの一覧に残し、ログインしたら claim でその人の一覧へ移す。
 """
 
@@ -114,8 +115,11 @@ def _launch(runtime, body, table, bucket):
 
 
 # 回答は決めた2文にする。上限の理由とログインで増える本数は回答で、ログインしたら何が起きるかは画面の案内で伝える（同じことを二度言わない）
-GUEST_REPLY = "ログインなしだと、スライドは1日1本までなんです。下のボタンから Google でログインすると、1日2本まで作れますよ！"
-GUEST_NOTE = f"画面にログインのボタンを出しています。回答はこの2文をそのまま使い、ほかの説明は足さないでください：{GUEST_REPLY}"
+def guest_note(guest_daily, user_daily):
+    """ログインなしの今日の分を使い切ったときの指示。本数は上限の設定から入れる（2026-11-25 に上限を変えたため）"""
+    reply = (f"ログインなしだと、スライドは1日{guest_daily}本までなんです。"
+             f"下のボタンから Google でログインすると、1日{user_daily}本まで作れますよ！")
+    return f"画面にログインのボタンを出しています。回答はこの2文をそのまま使い、ほかの説明は足さないでください：{reply}"
 
 
 def owner(user, anon):
@@ -155,7 +159,7 @@ def start(material, request, user, *, runtime, table, bucket, user_daily, total_
         if user:
             return {"status": "limit", "note": f"今日の分（1人1日{user_daily}本）を使い切りました。明日（日本時間の0時以降）にまた使えます"}
         return {"status": "guest_limit",
-                "note": f"ログインなしで作れる今日の分（1日{guest_daily}本）は使い切りました。{GUEST_NOTE}"}
+                "note": f"ログインなしで作れる今日の分（1日{guest_daily}本）は使い切りました。{guest_note(guest_daily, user_daily)}"}
     job = secrets.token_urlsafe(12).replace("-", "a").replace("_", "b")
     _client("s3").put_object(Bucket=bucket, Key=f"s/{job}/status.json", ContentType="application/json",
                              CacheControl="no-cache, max-age=0",

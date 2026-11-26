@@ -36,8 +36,8 @@ async def verify(call, expected):
     limits = await api('bedrock-agentcore-control', 'ListGatewayRateLimits', gatewayIdentifier=gateway_id)
     assert any(limit['status'] == 'ACTIVE' and limit['dimensionKeys'] == ['targetName'] and
                any(entry['dimensions'] == {'targetName': 'minorun'} and
-                   {'rate': 60, 'period': 'minute'} in entry['requests'] for entry in limit['entries'])
-               for limit in limits['rateLimits']), '本番全体の毎分60件の上限が欠落'
+                   {'rate': 120, 'period': 'minute'} in entry['requests'] for entry in limit['entries'])
+               for limit in limits['rateLimits']), '本番全体の毎分120件の上限が欠落'
     assert any('REQUEST' in i['interceptionPoints'] for i in gateway['interceptorConfigurations']), '確認役が欠落'
     permission = await api('iam', 'SimulatePrincipalPolicy', PolicySourceArn=gateway['roleArn'],
                            ActionNames=['bedrock-agentcore:InvokeAgentRuntime'],
