@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280, viewport-fit=cover">
+<!-- 解説動画の1コマを描く台紙。frames.mjs が window.show(コマ, 行) を呼んで1行ずつ焼く。外へは一切つながない -->
+<style>
+  /* みのるんグラス（2026-11-26 みのるん指定。slides/theme/minorun-glass.css と同じ地・輪・ガラスのカード・グラデ）。書体は入れ物の Noto Sans JP と Inter */
+  :root { --ink:#3b4c57; --title:#0d1b24; --sub:#6b8190; --mute:#9db0bb; --accent:#0ea5e9;
+    --grad:linear-gradient(90deg,#1d6fd8,#0891b2); --r:26px;
+    --card:rgba(255,255,255,.56); --card-s:0 14px 36px rgba(8,100,130,.08), inset 0 1.5px 0 #fff, inset 0 0 0 1px rgba(214,230,237,.95);
+    --warn:#e0566b; --latin:"Inter Display","Inter",sans-serif; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { width:1280px; height:720px; overflow:hidden; background:#f1fafc; color:var(--ink);
+    font-family:"Noto Sans JP","Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif; font-feature-settings:"palt"; letter-spacing:.02em; }
+  #stage { position:relative; width:1280px; height:720px; overflow:hidden; isolation:isolate;
+    background:radial-gradient(640px 540px at 94% 98%, rgba(34,211,238,.34), transparent 70%), radial-gradient(520px 420px at 0% 0%, rgba(14,165,233,.08), transparent 70%), #f1fafc; }
+  /* 右下の輪 */
+  #stage::before { content:''; position:absolute; z-index:-1; right:-150px; bottom:-230px; width:560px; height:560px; border-radius:50%;
+    background:conic-gradient(from 200deg, #0284c7, #06b6d4, #22d3ee, #a5f3fc, #ecfeff, #0284c7);
+    -webkit-mask:radial-gradient(circle, transparent 0 62%, #000 62.4%); mask:radial-gradient(circle, transparent 0 62%, #000 62.4%); }
+  body.k-title #stage { background:radial-gradient(720px 620px at 100% 50%, rgba(34,211,238,.32), transparent 70%), radial-gradient(520px 420px at 0% 0%, rgba(14,165,233,.08), transparent 70%), #f1fafc; }
+  body.k-title #stage::before { right:-300px; bottom:auto; top:50%; transform:translateY(-50%); }
+  /* 上の進み具合の線（スライドの見出しの上の短い線を、動画の長さぶん伸ばす） */
+  #bar { position:absolute; left:0; top:0; height:6px; background:linear-gradient(90deg,#0ea5e9,#06b6d4 50%,#22d3ee); }
+  #heading { position:absolute; left:84px; top:38px; right:84px; font-size:32px; font-weight:700; color:var(--title); letter-spacing:.04em; }
+  #heading:empty { display:none; }
+  #main { position:absolute; left:84px; right:84px; top:104px; bottom:156px; display:flex; align-items:center; justify-content:center; }
+  #sub { position:absolute; left:120px; right:120px; bottom:40px; min-height:84px; display:flex; align-items:center; justify-content:center;
+    background:rgba(255,255,255,.8); box-shadow:var(--card-s); -webkit-backdrop-filter:blur(22px) saturate(1.5); backdrop-filter:blur(22px) saturate(1.5);
+    color:var(--title); border-radius:var(--r); padding:14px 34px; font-size:31px; font-weight:700; line-height:1.45; text-align:center; }
+  #credit { position:absolute; right:24px; bottom:12px; font:500 14px/1 var(--latin); color:var(--mute); letter-spacing:.06em; }
+
+  .page { position:relative; height:100%; aspect-ratio: var(--ar); max-width:100%; border-radius:18px; overflow:hidden;
+    box-shadow:0 18px 44px rgba(8,100,130,.16), 0 0 0 1px rgba(214,230,237,.95); background:#fff; }
+  .page .inner { position:absolute; left:0; top:0; width:100%; height:100%; transform-origin:0 0; }
+  .page img { width:100%; height:100%; display:block; }
+  .page .hl { position:absolute; border:5px solid #22d3ee; border-radius:12px; box-shadow:0 0 0 2000px rgba(13,27,36,.4), 0 0 28px rgba(34,211,238,.9); }
+  .pno { position:absolute; left:12px; top:10px; background:rgba(255,255,255,.86); color:var(--title); font:600 14px/1 var(--latin); padding:6px 12px; border-radius:20px; z-index:2;
+    box-shadow:0 0 0 1px rgba(214,230,237,.95); }
+
+  .gt { background:var(--grad); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+  .title { width:100%; text-align:left; padding:0 28px; }
+  .title .kicker { display:block; font:600 20px/1 var(--latin); letter-spacing:.18em; color:var(--accent); margin-bottom:34px; }
+  .title h1 { font-size:58px; font-weight:700; line-height:1.36; color:var(--title); max-width:880px; }
+  .title p { font-size:30px; color:var(--sub); margin-top:30px; max-width:880px; }
+
+  .card { background:var(--card); box-shadow:var(--card-s); -webkit-backdrop-filter:blur(22px) saturate(1.5); backdrop-filter:blur(22px) saturate(1.5); border-radius:var(--r); }
+  .qs { width:100%; display:flex; flex-direction:column; gap:20px; }
+  .q { display:flex; gap:26px; align-items:center; padding:20px 32px; }
+  .q .no { flex:none; width:70px; font:200 52px/1 var(--latin); letter-spacing:-.03em; }
+  .q .body { font-size:29px; font-weight:700; line-height:1.4; color:var(--title); }
+  .q .ans { font-size:24px; font-weight:600; color:#0369a1; margin-top:6px; }
+  .off { opacity:0; }
+  .now { box-shadow:var(--card-s), 0 0 0 4px #22d3ee, 0 0 26px rgba(34,211,238,.55); }
+
+  .steps { display:flex; align-items:stretch; width:100%; }
+  .step { flex:1; padding:32px 24px; min-height:260px; display:flex; flex-direction:column; justify-content:center; text-align:left; }
+  .arrow { flex:none; width:46px; display:flex; align-items:center; justify-content:center; font-size:30px; color:var(--mute); }
+  .step .n { font:200 64px/1 var(--latin); letter-spacing:-.04em; margin-bottom:14px; }
+  .label { font-size:28px; font-weight:700; line-height:1.35; color:var(--title); }
+  .note { font-size:20px; color:var(--sub); line-height:1.5; margin-top:10px; }
+  .compare { display:flex; gap:40px; width:100%; height:100%; align-items:stretch; }
+  .side { flex:1; padding:30px; text-align:center; display:flex; flex-direction:column; justify-content:center; }
+  .side.good { background:linear-gradient(160deg, rgba(186,236,250,.72), rgba(255,255,255,.6)); }
+  .side .mark { font:200 84px/1 var(--latin); }
+  .side.bad .mark { color:var(--warn); }
+  .side .label { font-size:42px; margin-top:18px; } .side .note { font-size:27px; margin-top:14px; }
+  .points { display:grid; grid-template-columns:1fr 1fr; gap:24px; width:100%; height:100%; align-content:center; }
+  .points.n3 { grid-template-columns:1fr 1fr 1fr; }
+  .point { padding:30px 30px; display:flex; flex-direction:column; justify-content:center; min-height:180px; }
+  .point .label { font-size:34px; } .point .note { font-size:24px; }
+  .points.n3 .point { min-height:300px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bar"></div>
+  <div id="heading"></div>
+  <div id="main"></div>
+  <div id="sub"></div>
+  <div id="credit">VOICEVOX:ずんだもん</div>
+</div>
+<script>
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const $ = (id) => document.getElementById(id);
+
+function pageView(sc, ln) {
+  const ar = sc.ar || 16 / 9;
+  const f = sc.focus || [0, 0, 1, 1];
+  // 寄るとき：focus の範囲が枠いっぱいになるよう拡大して、左上をずらす
+  const k = Math.min(1 / (f[2] - f[0]), 1 / (f[3] - f[1]));
+  const cx = (f[0] + f[2]) / 2, cy = (f[1] + f[3]) / 2;
+  const tx = Math.min(0, Math.max(1 - k, 0.5 - cx * k)), ty = Math.min(0, Math.max(1 - k, 0.5 - cy * k));
+  const b = ln.box;
+  const hl = b ? `<div class="hl" style="left:${b[0] * 100}%;top:${b[1] * 100}%;width:${(b[2] - b[0]) * 100}%;height:${(b[3] - b[1]) * 100}%"></div>` : '';
+  return `<div class="page" style="--ar:${ar}"><span class="pno">資料 ${sc.page}ページ</span>
+    <div class="inner" style="transform:translate(${tx * 100}%,${ty * 100}%) scale(${k})"><img src="${esc(sc.src)}">${hl}</div></div>`;
+}
+
+function diagramView(sc, ln) {
+  const r = ln.reveal ?? sc.items.length;
+  const cls = (i) => (i >= r ? 'off' : i === r - 1 && sc.items.length > 1 && r < sc.items.length ? 'now' : '');
+  if (sc.type === 'steps') {
+    return `<div class="steps">${sc.items.map((it, i) => `${i ? `<div class="arrow ${i >= r ? 'off' : ''}">➜</div>` : ''}
+      <div class="step card ${cls(i)}"><div class="n gt">${String(i + 1).padStart(2, '0')}</div><div class="label">${esc(it.label)}</div><div class="note">${esc(it.note)}</div></div>`).join('')}</div>`;
+  }
+  if (sc.type === 'compare') {
+    return `<div class="compare">${sc.items.map((it, i) => `<div class="side card ${i ? 'good' : 'bad'} ${cls(i)}">
+      <div class="mark ${i ? 'gt' : ''}">${i ? '○' : '×'}</div><div class="label">${esc(it.label)}</div><div class="note">${esc(it.note)}</div></div>`).join('')}</div>`;
+  }
+  return `<div class="points ${sc.items.length === 3 ? 'n3' : ''}">${sc.items.map((it, i) => `<div class="point card ${cls(i)}">
+    <div class="label">${esc(it.label)}</div><div class="note">${esc(it.note)}</div></div>`).join('')}</div>`;
+}
+
+function qaView(story, sc, ln) {
+  const r = ln.reveal ?? story.questions.length;
+  return `<div class="qs">${story.questions.map((q, i) => `<div class="q card ${i >= r ? 'off' : ''}">
+    <div class="no gt">${sc.kind === 'recap' ? 'A' : 'Q'}${i + 1}</div><div><div class="body">${esc(q)}</div>
+    ${sc.kind === 'recap' && story.answers[i] ? `<div class="ans">→ ${esc(story.answers[i])}</div>` : ''}</div></div>`).join('')}</div>`;
+}
+
+window.show = (si, li, progress) => {
+  const story = window.STORY;
+  const sc = story.scenes[si], ln = sc.lines[li];
+  document.body.className = 'k-' + sc.kind;
+  $('bar').style.width = `${(progress || 0) * 100}%`;
+  $('heading').textContent = sc.kind === 'title' ? '' : (sc.heading || (sc.kind === 'questions' ? 'この動画でわかること' : sc.kind === 'recap' ? 'まとめ' : ''));
+  let html = '';
+  if (sc.kind === 'title') html = `<div class="title"><div class="kicker">資料を3分で解説</div><h1>${esc(story.title)}</h1><p>${esc(story.subtitle)}</p></div>`;
+  else if (sc.kind === 'page') html = pageView(sc, ln);
+  else if (sc.kind === 'diagram') html = diagramView(sc, ln);
+  else html = qaView(story, sc, ln);
+  $('main').innerHTML = html;
+  $('sub').textContent = ln.text;
+  return new Promise((ok) => { const img = document.querySelector('#main img'); if (!img || img.complete) ok(); else { img.onload = ok; img.onerror = ok; } });
+};
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@ import { EN, tr } from './i18n';
 import { AttachError } from './attach';
 import { REFUSED_EN } from './transport';
 
-export interface VideoStatus { stage: string; title?: string; seconds?: number; message?: string; name?: string }
+export interface VideoStatus { stage: string; title?: string; seconds?: number; message?: string; name?: string; pages?: number; total?: number }
 
 /** 確認役が受け付ける上限（interceptor の DOC_MAX_BYTES と同じ） */
 export const DOC_MAX_BYTES = 40 * 1024 * 1024;
@@ -82,6 +82,14 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 export const OK_VIDEO_BASE = /^\/v\/[A-Za-z0-9]{8,32}\/$/;
 const mmss = (sec?: number) => (sec ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}` : '');
 
+/** 完成の札の文。資料が上限より長くて先頭だけで作ったときは、そのことを一言添える（2026-11-26 みのるん指示。700ページの資料が黙って60ページで切られたため） */
+export function doneCaption(s: VideoStatus): string {
+  const len = mmss(s.seconds);
+  const cut = !!(s.pages && s.total && s.total > s.pages);
+  if (EN) return `<b>Done!</b> ${cut ? `Made from the first ${s.pages} of ${s.total} pages. ` : ''}Tap to play${len ? ` (${len})` : ''}`;
+  return `<b>できました！</b>${cut ? `${s.total}ページのうち先頭${s.pages}ページから作りました。` : ''}タップで再生できます${len ? `（${len}）` : ''}`;
+}
+
 /** 作成中のカード。できたら表紙の絵と再生の案内に変わる（スライドのカードと同じ class を使い、見た目と上の帯への移り方をそろえる） */
 export function videoCard(base: string, onChange: () => void, fetcher: typeof fetch = fetch.bind(window)): HTMLElement {
   const fig = document.createElement('figure');
@@ -96,9 +104,8 @@ export function videoCard(base: string, onChange: () => void, fetcher: typeof fe
   const finish = (s: VideoStatus) => {
     stopped = true;
     fig.className = 'slides-card video ready';
-    const len = mmss(s.seconds);
     fig.innerHTML = `<a href="${esc(base)}" target="_blank" rel="noopener"><img src="${esc(base)}poster.jpg" alt="${esc(s.title || tr('動画の表紙', 'Video cover'))}" width="1280" height="720"><span class="play" aria-hidden="true"></span></a>`
-      + (EN ? `<figcaption><b>Done!</b> Tap to play${len ? ` (${len})` : ''}</figcaption>` : `<figcaption><b>できました！</b>タップで再生できます${len ? `（${len}）` : ''}</figcaption>`);
+      + `<figcaption>${doneCaption(s)}</figcaption>`;
     fig.querySelector('img')!.addEventListener('load', onChange);
     onChange();
   };
