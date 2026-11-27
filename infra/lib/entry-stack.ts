@@ -109,7 +109,7 @@ export class EntryStack extends cdk.Stack {
     }));
     this.interceptor.addEnvironment('UPLOAD_ROLE_ARN', uploadRole.roleArn);
     if (props.video) {
-      // 資料は doc/<利用者>/ へ。動画はログインした人だけ1人1日1本・全体で1日20本（2026-11-26 みのるん決定）
+      // 資料は doc/<持ち主>/ へ。動画は1人1日1本・全体で1日20本（2026-11-26 みのるん決定）
       uploadRole.addToPolicy(new iam.PolicyStatement({ actions: ['s3:PutObject'], resources: [props.uploadBucket.arnForObjects('doc/*')] }));
       props.video.table.grant(this.interceptor, 'dynamodb:BatchGetItem', 'dynamodb:GetItem', 'dynamodb:UpdateItem');
       this.interceptor.addToRolePolicy(new iam.PolicyStatement({ actions: ['dynamodb:TransactWriteItems'], resources: [props.video.table.tableArn] }));
@@ -120,6 +120,9 @@ export class EntryStack extends cdk.Stack {
       this.interceptor.addEnvironment('VIDEO_LAUNCHER', props.video.launcher.functionName);
       this.interceptor.addEnvironment('VIDEO_USER_DAILY', '1');
       this.interceptor.addEnvironment('VIDEO_TOTAL_DAILY', '20');
+      // 11/27 からログインなしでも作れる（スライドと同じ形。匿名IDで1日1本・同じIPから1日5本）
+      this.interceptor.addEnvironment('VIDEO_GUEST_DAILY', '1');
+      this.interceptor.addEnvironment('VIDEO_IP_DAILY', '5');
       // 回数を数えない利用者（ログインした人のハッシュのカンマ区切り。運営者のテスト用）
       this.interceptor.addEnvironment('VIDEO_UNLIMITED', process.env.VIDEO_UNLIMITED ?? '');
     }

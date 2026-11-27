@@ -26,5 +26,7 @@
  {"q": "現地でみのるんに会いたい。どこに行けばいい？", "tools": ["search_2026"], "meet_minorun": true},
  {"q": "What is re:Invent?", "tools": ["search_2026", "search_past"]},
  {"q": "Venetianの近くで朝ごはんを食べるなら？", "tools": ["search_2026", "search_past"]},
- {"turns": ["ホテルはどう選べばいい？", "じゃあ会場に一番近いのは？"], "tools": ["search_2026", "search_past"]}
+ {"turns": ["ホテルはどう選べばいい？", "じゃあ会場に一番近いのは？"], "tools": ["search_2026", "search_past"]},
+ {"q": "現地の水曜の夜、みのるんは何してる？", "tools": ["search_2026"]},
+ {"q": "12/3の木曜の昼過ぎ、みのるんに会えそうな場所は？", "tools": ["search_2026"]}
 ]

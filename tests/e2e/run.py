@@ -82,6 +82,40 @@ def check_tool_spans(rows, start):
     return spans
 
 
+# 回答の指示で答えるようにした問いを、保存後の見張り（turn_flag.py）が違反として加点していても、回答だけ見る検査では気づけない
+# （11/27 居場所の問いが probing の2点になっていた）。問いのあと会話の表を読み、攻撃役の問い（injection・offtopic）以外の加点を NG にする
+MODERATION_WAIT_S = 120
+
+
+def check_moderation(rows, cases):
+    import boto3
+    table = boto3.Session(profile_name=None if os.environ.get("AWS_ACCESS_KEY_ID") else os.environ.get("AWS_PROFILE", "sandbox"),
+                          region_name="us-west-2").client("dynamodb")
+    allowed = {i for i, c in enumerate(cases) if c.get("injection") or c.get("offtopic") or c.get("violation_ok")}
+    by_session = {}
+    for r in rows:
+        by_session.setdefault(r["session"], []).append(r)
+    deadline = time.time() + MODERATION_WAIT_S
+    for sid, turns in by_session.items():
+        while True:
+            items = table.query(TableName="minorun-agent-conversations", ConsistentRead=True,
+                                KeyConditionExpression="pk=:p", ExpressionAttributeValues={":p": {"S": sid}})["Items"]
+            if (len(items) >= len(turns) and all("moderation_kind" in it for it in items)) or time.time() > deadline:
+                break
+            time.sleep(10)
+        if turns[0]["i"] in allowed:
+            continue
+        for it in items:
+            kind = it.get("moderation_kind", {}).get("S")
+            delta = int(it.get("moderation_delta", {}).get("N") or it.get("moderation_delta", {}).get("S") or 0)
+            if kind is None:
+                turns[-1]["warn"].append("見張りの判定が届いていない")
+            elif delta > 0:
+                q = it.get("question", {}).get("S", "")[:30]
+                turns[-1]["ng"].append(f"見張りが {kind} で{delta}点加点（{q}）: {it.get('flag_reason', {}).get('S', '')}。"
+                                       "回答の指示と turn_flag.py の基準がずれている")
+
+
 def ask(url, text, anon, session):
     req = urllib.request.Request(url, data=json.dumps({"prompt": text}).encode(), method="POST", headers={
         "Content-Type": "application/json", "Accept": "text/event-stream", "x-anon-id": anon,
@@ -228,6 +262,11 @@ def main():
         except Exception as e:
             for r in rows:
                 r["ng"].append(f"道具の成否をトレースで確かめられない: {type(e).__name__}: {e}"[:300])
+        try:
+            check_moderation(rows, cases)
+        except Exception as e:
+            for r in rows:
+                r["warn"].append(f"見張りの加点を確かめられない: {type(e).__name__}: {e}"[:300])
     for r in rows:
         mark = "NG  " if r["ng"] else ("WARN" if r["warn"] else "OK  ")
         print(f"{mark} {r['q'][:28]:<28} {r.get('chars','-'):>4}字 最初{r['first_s']}秒 {' / '.join(r['ng'] + r['warn'])}")

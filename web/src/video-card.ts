@@ -4,6 +4,7 @@
 
 import { EN, tr } from './i18n';
 import { AttachError } from './attach';
+import { collapsible, LOGIN_NUDGE_TEXT, type LoginNudge } from './slides-card';
 import { REFUSED_EN } from './transport';
 
 export interface VideoStatus { stage: string; title?: string; seconds?: number; message?: string; name?: string; pages?: number; total?: number }
@@ -57,7 +58,7 @@ export async function startVideo(post: Post, file: Blob, name: string, send: typ
   return started.job;
 }
 
-/** 作った動画の番号（新しい順）。ログインしている人だけ */
+/** 作った動画の番号（新しい順）。ログインしていない人は、このブラウザの匿名IDで作った分 */
 export async function listVideos(post: Post): Promise<{ job: string; at: number }[]> {
   try {
     const res = await post({ videos: true });
@@ -91,12 +92,15 @@ export function doneCaption(s: VideoStatus): string {
 }
 
 /** 作成中のカード。できたら表紙の絵と再生の案内に変わる（スライドのカードと同じ class を使い、見た目と上の帯への移り方をそろえる） */
-export function videoCard(base: string, onChange: () => void, fetcher: typeof fetch = fetch.bind(window)): HTMLElement {
+export function videoCard(base: string, onChange: () => void, fetcher: typeof fetch = fetch.bind(window), nudge?: LoginNudge): HTMLElement {
   const fig = document.createElement('figure');
   fig.className = 'slides-card video working';
   fig.dataset.base = base;
   fig.innerHTML = `<p class="slides-title">${tr('解説動画を作っています', 'Making your video')}</p><p class="slides-eta">${VIDEO_ETA}</p>`
-    + `<div class="slides-bar"><span style="width:${barWidth(-1)}%"></span></div><figcaption class="slides-line">${tr('いまは', '')}${videoLine({ stage: 'queued' })}</figcaption>`;
+    + `<div class="slides-bar"><span style="width:${barWidth(-1)}%"></span></div><figcaption class="slides-line">${tr('いまは', '')}${videoLine({ stage: 'queued' })}</figcaption>`
+    // ログインしていない人には、スライドと同じくログインの案内を添える（どの端末からでも開けるように）
+    + (nudge ? `<div class="slides-login"><p>${LOGIN_NUDGE_TEXT}</p><button type="button">${nudge.icon}<span>${tr('ログイン', 'Log in')}</span></button></div>` : '');
+  fig.querySelector('.slides-login button')?.addEventListener('click', () => nudge!.onClick());
   const line = fig.querySelector('.slides-line') as HTMLElement;
   const bar = fig.querySelector('.slides-bar span') as HTMLElement;
   const started = Date.now();
@@ -158,6 +162,6 @@ export async function videosList(items: { job: string; at: number }[], fetcher: 
     return '';
   }));
   const list = rows.filter(Boolean);
-  if (list.length) box.innerHTML = `<p class="mh">${tr('作った動画', 'Your videos')}</p><ul>${list.join('')}</ul>`;
+  collapsible(box, 'videos', tr('作った動画', 'Your videos'), list);
   return box;
 }

@@ -8,7 +8,7 @@ import { characterGift, previewGift, type LinkPreview } from './link-preview';
 import { bookGift } from './book-preview';
 import { POSES, PoseDirector, PosePicker, type Pose } from './poses';
 import { visibleHeight, LayoutViewport } from './viewport';
-import { useSideLayout } from './layout-mode';
+import { keyboardBarLift, useSideLayout } from './layout-mode';
 import { candidatesFor, findGift, chooseGift, chooseSupport, isSupport, freshState, gifts, type GiftState, type Surprise } from './surprises';
 import { esc, md } from './markdown';
 import { pickStarters } from './starters';
@@ -16,7 +16,7 @@ import { bindSubmitButton } from './submit-button';
 import { accessToken, handleRedirect, login, logout, profile } from './auth';
 import { saveCarryover, takeCarryover, type LastTurn, type Pending } from './carryover';
 import { AttachError, shrink, upload } from './attach';
-import { parseSlidesList, seenBefore, loginContinueBox, slidesCard, slidesList, SlidesTracker } from './slides-card';
+import { closeLists, parseSlidesList, seenBefore, loginContinueBox, slidesCard, slidesList, SlidesTracker } from './slides-card';
 import { SlidesStrip } from './slides-strip';
 import { CHIP_LABEL, isDoc, listVideos, startVideo, videoCard, videosList } from './video-card';
 import { EN, switchLang, tr } from './i18n';
@@ -112,7 +112,9 @@ function fitViewport() {
   stage.style.top = (vv?.pageTop ?? scrollY) + 'px';
   if (innerWidth !== restingViewportWidth) { restingViewportHeight = h; restingViewportWidth = innerWidth; }
   if (!focused) { restingViewportHeight = Math.max(restingViewportHeight, h); }
-  stage.classList.toggle('kbd', document.activeElement === q && restingViewportHeight - h > 100);
+  const kbd = document.activeElement === q && restingViewportHeight - h > 100;
+  stage.classList.toggle('kbd', kbd);
+  stage.style.setProperty('--kbar', keyboardBarLift(kbd, navigator.userAgent) + 'px');
   relayout();
 }
 if (window.visualViewport) {
@@ -152,7 +154,8 @@ function layout() {
   // 長いURLなどで入力欄が2行以上に伸びたら、その分だけ注意書き・札・添付の見本を上へずらす（1行のときの高さは左の添付ボタンと同じ）
   dock.style.setProperty('--grow', Math.max(0, write.offsetHeight - $('#clip').offsetHeight) + 'px');
   const inner = comp ? write.offsetHeight + notice.offsetHeight + 10 + (shot.hidden ? 0 : shot.offsetHeight + 14) + (chip.hidden ? 0 : chip.offsetHeight + 14) + (docChip.hidden ? 0 : docChip.offsetHeight + 14) + (reply ? replyTo.offsetHeight + 14 : 0) : has('limited') ? 0 : suggest.offsetHeight;
-  const dockTop = H - pad - inner - (comp ? 10 : 16);
+  const kbar = comp ? parseFloat(stage.style.getPropertyValue('--kbar')) || 0 : 0;
+  const dockTop = H - pad - kbar - inner - (comp ? 10 : 16);
   const avail = dockTop - headB;
   // 通常ブラウザの縦向きは上下、Xのアプリ内と横向きの低い画面は左右に配置する。
   // PCの中央寄せで小さくした会話領域ではなく、実際の表示領域で低い画面かを判定する。
@@ -463,7 +466,7 @@ q.addEventListener('paste', (e) => {
   if (file) { e.preventDefault(); void pickImage(file); }
 });
 // ---- 資料から解説動画（2026-11-26 みのるん選定の案C）：添付ボタンで PDF・PPTX を選ぶと札を出し、押すと作り始める ----
-// 動画はログインした人だけ（1日1本）。ログインしていない人には、札の代わりにログインの案内を出す
+// 動画はスライドと同じくログインなしでも作れる（11/27〜。1日1本）。ログインしていない人の作成中のカードには、ログインの案内を添える
 const docChip = $('#docChip'), docGo = $<HTMLButtonElement>('#docGo');
 let attachedDoc: File | null = null;
 function setDoc(file: File | null) {
@@ -471,8 +474,7 @@ function setDoc(file: File | null) {
   docChip.hidden = !file;
   if (file) {
     slideChip.hidden = true;
-    docGo.textContent = profile() ? CHIP_LABEL : tr('ログインすると、この資料を動画にできます', 'Log in to turn this document into a video');
-    docChip.classList.toggle('login', !profile());
+    docGo.textContent = CHIP_LABEL;
   }
   clip.classList.toggle('has', !!file || !!attached);
   sendBtn.classList.toggle('on', canSend());
@@ -481,7 +483,6 @@ function setDoc(file: File | null) {
 docChip.addEventListener('pointerdown', (e) => e.preventDefault());
 docGo.addEventListener('click', () => {
   if (!attachedDoc) return;
-  if (!profile()) { saveCarryover(sessionStorage, lastTurn, pendingLogin); void login(); return; }
   void makeVideo(attachedDoc, docGo);
 });
 $('#docDrop').addEventListener('click', () => setDoc(null));
@@ -913,7 +914,7 @@ async function makeVideo(file: File, fromEl?: HTMLElement) {
   answer.classList.remove('oops'); answer.innerHTML = ''; answer.scrollTop = 0;
   stage.classList.add('answering');
   if (base) {
-    answer.appendChild(videoCard(base, () => { dropWaitBox(); relayout(); }));
+    answer.appendChild(videoCard(base, () => { dropWaitBox(); relayout(); }, undefined, loginNudge()));
     answer.appendChild(waitBox());
     director.answer(label, false);
   } else {
@@ -953,10 +954,10 @@ function renderList() {
   const box = $('#myslides');
   if (box) box.replaceChildren(slidesList(slides.items, slides.get, new Set([...slides.unseen, ...freshNew])));
 }
-// 作った動画は、メニューを開いたときに確認役から番号をもらって並べる（ログインした人だけ）
+// 作った動画は、メニューを開いたときに確認役から番号をもらって並べる（ログインしていない人は、このブラウザで作った分）
 let videosLoading = false;
 async function renderVideos() {
-  if (!profile() || videosLoading) return;
+  if (videosLoading) return;
   videosLoading = true;
   try {
     const items = await listVideos((body) => postChat(body, AbortSignal.timeout(10000)));
@@ -976,12 +977,12 @@ function renderMe() {
   mePop.innerHTML = p
     ? `<p class="lead">${tr('ログイン中です。', "You're logged in.")}</p>${PERKS}<div id="myslides"></div><div id="myvideos"></div><button class="out" id="logout" type="button">${tr('ログアウト', 'Log out')}</button>`
     : `<p class="lead">${tr('ログインすると、こんなことができます。', 'Logging in lets you:')}</p>${PERKS}
-       <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>${tr('Google でログイン', 'Log in with Google')}</span></button><div id="myslides"></div>`;
+       <button class="gbtn" id="glogin" type="button">${GOOGLE}<span>${tr('Google でログイン', 'Log in with Google')}</span></button><div id="myslides"></div><div id="myvideos"></div>`;
   $('#glogin')?.addEventListener('click', () => { saveCarryover(sessionStorage, lastTurn, pendingLogin); void login(); });
   $('#logout')?.addEventListener('click', () => logout());
   renderList();
 }
-const toggleMe = (on: boolean) => { mePop.classList.toggle('on', on); meBtn.setAttribute('aria-expanded', String(on)); };
+const toggleMe = (on: boolean) => { if (!on) closeLists(); mePop.classList.toggle('on', on); meBtn.setAttribute('aria-expanded', String(on)); };
 meBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   const on = !mePop.classList.contains('on');

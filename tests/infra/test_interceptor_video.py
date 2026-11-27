@@ -1,4 +1,5 @@
-"""資料から動画を作る機能の入口（2026-11-26）：ログインした人だけ・1人1日1本・全体で1日20本・資料の場所は本人のものだけ。"""
+"""資料から動画を作る機能の入口（2026-11-26）：1人1日1本・全体で1日20本・資料の場所は本人のものだけ。
+11/27 からログインなしでも作れる（匿名IDで1日1本・同じIPから1日5本・ログインしたら一覧を移す）。"""
 import base64
 import json
 import unittest
@@ -39,11 +40,44 @@ class VideoTests(unittest.TestCase):
         r = m.handler(event(body), None)['http']['transformedGatewayResponse']
         return r['statusCode'], json.loads(base64.b64decode(r['body']))
 
-    def test_login_is_required(self):
-        for body in ({'docupload': True}, {'video': {'doc': 'a' * 32}}, {'videos': True}):
-            self.assertEqual(self.respond(body), (401, {'error': 'video_login', 'message': m.MESSAGES['video_login']}))
-        self.s3.generate_presigned_post.assert_not_called()
+    def test_guest_can_make_a_video_counted_by_anon_and_ip(self):
+        guest = 'a:' + m._anon(ANON)
+        status, data = self.respond({'docupload': True})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.s3.generate_presigned_post.call_args.args, ('uploads', f"doc/{guest}/{data['doc']}"))
+        with patch.object(m, 'guard_signals', MagicMock(client_ip=lambda r: '203.0.113.5')):
+            status, data = self.respond({'video': {'doc': 'b' * 32}})
+        self.assertEqual(status, 200)
+        items = self.ddb.transact_write_items.call_args.kwargs['TransactItems']
+        self.assertEqual([i['Update']['Key']['pk']['S'].split('#')[0] for i in items], ['guest', 'ip', 'all'])
+        payload = json.loads(self.lam.invoke.call_args.kwargs['Payload'])
+        self.assertEqual((payload['doc'], payload['user']), (f'doc/{guest}/' + 'b' * 32, guest))
+        self.assertEqual(self.ddb.update_item.call_args.kwargs['Key'], {'pk': {'S': f'list#{guest}'}})
+
+    def test_guest_limits(self):
+        with patch.object(m, 'guard_signals', MagicMock(client_ip=lambda r: '203.0.113.5')):
+            self.ddb.transact_write_items.side_effect = Cancelled(['None', 'ConditionalCheckFailed', 'None'])
+            self.assertEqual(self.respond({'video': {'doc': 'b' * 32}})[1]['error'], 'video_limit')
+            self.ddb.transact_write_items.side_effect = Cancelled(['None', 'None', 'ConditionalCheckFailed'])
+            self.assertEqual(self.respond({'video': {'doc': 'b' * 32}})[1]['error'], 'video_full')
         self.lam.invoke.assert_not_called()
+
+    def test_guest_is_never_unlimited(self):
+        with patch.object(m, 'VIDEO_UNLIMITED', {'a:' + m._anon(ANON)}):
+            self.respond({'video': {'doc': 'b' * 32}})
+        self.ddb.transact_write_items.assert_called_once()
+
+    def test_login_moves_guest_videos_to_own_list(self):
+        self.user = USER
+        guest_key = {'pk': {'S': f"list#a:{m._anon(ANON)}"}}
+        lists = {f"list#a:{m._anon(ANON)}": [{'M': {'job': {'S': 'g1'}, 'at': {'N': '9'}}}],
+                 f'list#{USER}': [{'M': {'job': {'S': 'j1'}, 'at': {'N': '5'}}}]}
+        self.ddb.get_item.side_effect = lambda TableName, Key: {'Item': {'jobs': {'L': lists[Key['pk']['S']]}}}
+        status, data = self.respond({'videos': True})
+        self.assertEqual(status, 200)
+        moved = self.ddb.update_item.call_args_list
+        self.assertEqual(moved[0].kwargs['Key'], {'pk': {'S': f'list#{USER}'}})
+        self.assertEqual(moved[1].kwargs, {'TableName': 'videos', 'Key': guest_key, 'UpdateExpression': 'REMOVE jobs'})
 
     def test_upload_ticket_is_own_prefix_and_40mb(self):
         self.user = USER
@@ -56,10 +90,10 @@ class VideoTests(unittest.TestCase):
     def test_upload_is_refused_when_todays_video_is_used(self):
         self.user = USER
         self.ddb.batch_get_item.return_value = {'Responses': {'videos': [{'pk': {'S': f'user#{USER}#x'}, 'n': {'N': '1'}}]}}
-        with patch.object(m, '_video_limits', lambda u, n: [(f'user#{USER}#x', 1), ('all#x', 20)]):
+        with patch.object(m, '_video_limits', lambda w, n: [(f'user#{USER}#x', 1), ('all#x', 20)]):
             status, data = self.respond({'docupload': True})
         self.assertEqual((status, data['error']), (429, 'video_limit'))
-        self.assertIn('1人1日1本', data['message'])
+        self.assertIn('1日1本', data['message'])
         self.s3.generate_presigned_post.assert_not_called()
 
     def test_start_counts_and_launches_with_own_doc(self):

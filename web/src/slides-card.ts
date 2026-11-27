@@ -163,6 +163,29 @@ export function badgeOf(items: SlidesItem[], status: (job: string) => SlidesStat
 }
 
 /** メニューの「作ったスライド」。状態は見張り役から受け取り、その場で描く（開き直すたびに読み直してちらつかせない） */
+/** メニューの一覧は種類ごとに先頭の COLLAPSED 件だけ出し、残りは「ほか◯件」で開く（2026-11-27 みのるん指示：並べすぎない）。
+ * 一覧は状態が変わるたびに描き直すので、開いたかどうかは種類ごとにここで覚える（メニューを閉じたら閉じ直す） */
+export const COLLAPSED = 2;
+const opened = new Set<string>();
+export const closeLists = () => opened.clear();
+export function collapsible(box: HTMLElement, kind: string, heading: string, rows: string[]) {
+  if (!rows.length) return;
+  const rest = rows.length - COLLAPSED;
+  const isOpen = () => opened.has(kind);
+  const label = () => (isOpen() ? tr('たたむ', 'Show less') : tr(`ほか${rest}件を見る`, `Show ${rest} more`));
+  box.classList.toggle('open', isOpen());
+  box.innerHTML = `<p class="mh">${heading}</p><ul>${rows.join('')}</ul>`
+    + (rest > 0 ? `<button type="button" class="mmore" aria-expanded="${isOpen()}">${label()}</button>` : '');
+  const btn = box.querySelector<HTMLButtonElement>('.mmore');
+  btn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (isOpen()) opened.delete(kind); else opened.add(kind);
+    box.classList.toggle('open', isOpen());
+    btn.textContent = label();
+    btn.setAttribute('aria-expanded', String(isOpen()));
+  });
+}
+
 export function slidesList(items: SlidesItem[], status: (job: string) => SlidesStatus | null | undefined, unseen: Set<string> = new Set(), now = Date.now()): HTMLElement {
   const box = document.createElement('div');
   box.className = 'myslides';
@@ -184,7 +207,7 @@ export function slidesList(items: SlidesItem[], status: (job: string) => SlidesS
       rows.push(`<li><span class="t mut">${tr('確かめています…', 'Checking…')}</span>${d}</li>`);
     }
   }
-  if (rows.length) box.innerHTML = `<p class="mh">${tr('作ったスライド', 'Your slides')}</p><ul>${rows.join('')}</ul>`;
+  collapsible(box, 'slides', tr('作ったスライド', 'Your slides'), rows);
   return box;
 }
 

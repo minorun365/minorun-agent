@@ -98,7 +98,7 @@ body{position:absolute;inset:0;overflow:hidden;font-family:-apple-system,BlinkMa
 .replyto b{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .replyto .mark{color:var(--accent);margin-right:5px;vertical-align:-1px}
 .replyto.on{opacity:1;transform:none}
-.stage.kbd .replyto{bottom:calc(94px + var(--grow,0px))}
+.stage.kbd .replyto{bottom:calc(94px + var(--kbar,0px) + var(--grow,0px))}
 .bubble .seeking{margin:.4em 0 0;font-size:13px;color:var(--mut)}
 .caret{display:inline-block;width:.45em;height:1em;vertical-align:-2px;margin-left:2px;background:currentColor;opacity:.4;animation:blink 1s steps(2) infinite}
 @keyframes blink{50%{opacity:0}}
@@ -132,12 +132,12 @@ td:first-child{font-weight:700;white-space:nowrap}
   transform:scale(.25);transform-origin:50% 35%;opacity:0;transition:transform .7s cubic-bezier(.2,.9,.2,1),opacity .5s ease}
 .stage.composing .mist{transform:scale(1);opacity:1}
 .stage.kbd .dock{padding-bottom:0}
-.stage.kbd .write{bottom:0}
+.stage.kbd .write{bottom:var(--kbar,0px)}
 .write{position:absolute;left:12px;right:12px;max-width:640px;margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b));display:flex;align-items:flex-end;gap:6px;
   opacity:0;pointer-events:none;transition:opacity .4s ease .15s}
 /* 入力中はホームバー用余白を重ねない。アプリ内ブラウザのキーボード判定に依存させない。 */
 .stage.composing .dock{padding-bottom:0}
-.stage.composing .write{opacity:1;pointer-events:auto;bottom:0}
+.stage.composing .write{opacity:1;pointer-events:auto;bottom:var(--kbar,0px)}
 /* 入力欄の左：画像を添付するボタン（右の送信ボタンと同じ幅なので、入力欄は中央のまま） */
 /* 入力をやめて元の画面へ戻るボタン */
 .back{flex:none;width:46px;height:46px;border-radius:50%;border:0;background:var(--soft);color:var(--sub);display:grid;place-items:center;cursor:pointer}
@@ -149,14 +149,14 @@ td:first-child{font-weight:700;white-space:nowrap}
   opacity:0;pointer-events:none;transition:opacity .3s ease}
 .attach[hidden]{display:none}
 .stage.composing .attach{opacity:1;pointer-events:auto}
-.stage.kbd .attach{bottom:calc(94px + var(--grow,0px))}
+.stage.kbd .attach{bottom:calc(94px + var(--kbar,0px) + var(--grow,0px))}
 /* 入力にURLが入ったときだけ出す「この記事をスライドにする」の札。添付の見本と同じ高さに置く（画像を添付している間は出さない） */
 .slidechip{position:absolute;left:0;right:0;width:max-content;max-width:calc(100% - 32px);margin:0 auto;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 88px + var(--grow,0px));
   padding:8px 16px;border-radius:999px;border:1.5px solid var(--accent);background:var(--card);color:var(--accent);font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;
   box-shadow:0 4px 18px rgba(20,22,28,.12);opacity:0;pointer-events:none;transition:opacity .3s ease}
 .slidechip[hidden]{display:none}
 .stage.composing .slidechip{opacity:1;pointer-events:auto}
-.stage.kbd .slidechip{bottom:calc(98px + var(--grow,0px))}
+.stage.kbd .slidechip{bottom:calc(98px + var(--kbar,0px) + var(--grow,0px))}
 .slidechip:hover{background:var(--mark)}
 /* 添付ボタンで資料（PDF・PPTX）を選んだときの「◯◯ を3分の動画にする」の札（2026-11-26 案C）。右の×で外せる */
 .docchip{display:flex;align-items:center;gap:4px;padding:0 6px 0 0}
@@ -207,7 +207,7 @@ td:first-child{font-weight:700;white-space:nowrap}
 .notice{position:absolute;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--edge-b) + 58px + var(--grow,0px));margin:0;text-align:center;
   font-size:11.5px;line-height:1.6;color:var(--mut);opacity:0;transform:translateY(6px);pointer-events:none;transition:opacity .4s ease .2s,transform .4s ease .2s}
 .stage.composing .notice{opacity:1;transform:none}
-.stage.kbd .notice{bottom:calc(68px + var(--grow,0px))}
+.stage.kbd .notice{bottom:calc(68px + var(--kbar,0px) + var(--grow,0px))}
 /* 開いて少ししてから左上に出るあいさつ（キャラの方へしっぽを向ける） */
 /* 位置は main.ts の layout() が頭の座標から決める */
 .greet{position:absolute;z-index:4;left:12px;top:0;max-width:235px;margin:0;
@@ -345,6 +345,11 @@ td:first-child{font-weight:700;white-space:nowrap}
 .mepop .myslides .t.mut{color:var(--mut)}
 .mepop .myslides .d{flex:none;font-size:11px;color:var(--mut)}
 .mepop .myslides li.working{justify-content:flex-start}
+/* 種類ごとに先頭2件だけ出し、残りは「ほか◯件を見る」で開く（2026-11-27） */
+.mepop .myslides:not(.open) li:nth-child(n+3){display:none}
+.mepop .myslides .mmore{display:block;margin:2px 0 0;padding:4px 0;border:0;background:none;font:inherit;font-size:12px;font-weight:700;color:var(--sub);cursor:pointer}
+.mepop .myslides .mmore::after{content:' ▾'}
+.mepop .myslides.open .mmore::after{content:' ▴'}
 .mepop .myslides li.working .d{margin-left:auto}
 .mepop .myslides .ph{flex:none;display:grid;place-items:center;width:64px;height:36px;border-radius:4px;background:var(--soft);box-shadow:0 0 0 1px var(--line)}
 .mepop .myslides .ph i{width:9px;height:9px;border-radius:50%;background:var(--accent);animation:slides-pulse 1.2s ease-in-out infinite}
