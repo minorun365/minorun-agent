@@ -118,11 +118,12 @@ export class EntryStack extends cdk.Stack {
       this.interceptor.addEnvironment('VIDEO_TABLE', props.video.table.tableName);
       this.interceptor.addEnvironment('VIDEO_BUCKET', props.video.bucket.bucketName);
       this.interceptor.addEnvironment('VIDEO_LAUNCHER', props.video.launcher.functionName);
-      this.interceptor.addEnvironment('VIDEO_USER_DAILY', '1');
+      this.interceptor.addEnvironment('VIDEO_USER_DAILY', '2');
       this.interceptor.addEnvironment('VIDEO_TOTAL_DAILY', '20');
-      // 11/27 からログインなしでも作れる（スライドと同じ形。匿名IDで1日1本・同じIPから1日5本）
-      this.interceptor.addEnvironment('VIDEO_GUEST_DAILY', '1');
-      this.interceptor.addEnvironment('VIDEO_IP_DAILY', '5');
+      // 11/27 からログインなしでも作れる。同じ日にスライドと同じ上限へ揃えた（匿名IDで1日2本・同じIPから1日30本。会場の Wi-Fi は1つのIPを大勢で使うため）。
+      // ログインした人もログインなしを下回らないよう1日2本。全体の1日20本は据え置きなので、1日の費用の上限（約 $21）は変わらない
+      this.interceptor.addEnvironment('VIDEO_GUEST_DAILY', '2');
+      this.interceptor.addEnvironment('VIDEO_IP_DAILY', '30');
       // 回数を数えない利用者（ログインした人のハッシュのカンマ区切り。運営者のテスト用）
       this.interceptor.addEnvironment('VIDEO_UNLIMITED', process.env.VIDEO_UNLIMITED ?? '');
     }

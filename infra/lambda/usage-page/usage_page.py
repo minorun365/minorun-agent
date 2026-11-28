@@ -7,6 +7,7 @@
   GET <関数URL>?v=hours&d=YYYY-MM-DD      … 1時間ごとの表（会話の数・質問の数・概算コスト）
   GET <関数URL>?v=list&d=YYYY-MM-DD&f=bad&p=2 … 質問の一覧（新しい順・50件ずつ。f で評価あり・良くない・自由入力に絞る）
   GET <関数URL>?v=slides&d=YYYY-MM-DD    … 利用者が作ったスライド（サムネイル・題・頼んだ質問・枚数・作成費）
+  GET <関数URL>?v=videos&d=YYYY-MM-DD    … 利用者が資料から作った解説動画（ポスター・題・資料の名前・長さ・作成費）
   GET <関数URL>?k=<合言葉>&format=json&d=YYYY-MM-DD … その日の要約・1時間ごと・質問の一覧・要注意の一覧（JSON）
   （要約には、公開からの累計・直近7日の1日平均×30日の月額ペースも出す）
   EventBridge から15分おき … 今日の概算コストを MinorunAgent/EstimatedCostUsd に出す（アラームが見る）
@@ -36,6 +37,7 @@ import uuid
 import boto3
 import periods
 import slides_view
+import videos_view
 from transport_errors import read_errors, error_card, error_details
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
@@ -86,7 +88,7 @@ TOKEN_METRICS = {"in": "InputTokenCount", "out": "OutputTokenCount",
                  "cache_read": "CacheReadInputTokenCount", "cache_write": "CacheWriteInputTokenCount"}
 # Claude API（Anthropic）で呼んだモデル。AWS/Bedrock のメトリクスには載らないので、1問1行の表の usage.calls から足す
 API_MODELS = {"claude-sonnet-5-5"}
-LABELS = {"claude_api": "Sonnet 5.5（回答・Claude API）", "opus_api": "Opus 5.5（スライド作成・Claude API）", "sonnet": "Sonnet 5.5（回答・Bedrock）", "haiku": "Haiku 5.5（判定・要約・候補）", "opus": "Opus 5.5（スライド作成）", "runtime": "AgentCore Runtime",
+LABELS = {"claude_api": "Sonnet 5.5（回答・Claude API）", "opus_api": "Opus 5.5（スライド作成・Claude API）", "video_api": "Opus 5.5（解説動画・Claude API）", "sonnet": "Sonnet 5.5（回答・Bedrock）", "haiku": "Haiku 5.5（判定・要約・候補）", "opus": "Opus 5.5（スライド作成）", "runtime": "AgentCore Runtime",
           "web_search": "AgentCore Web Search", "brave": "Brave", "x": "X検索", "kb": "ナレッジベースの検索"}
 REASONS = {"per_minute": "1分の上限", "daily_limit": "1日の上限", "bad_id": "IDの形", "too_long": "文字数", "stopped": "停止中", "banned": "利用停止"}
 FLAG_LABELS = {"off_topic": "目的外", "injection": "指示の書き換え", "personal_info": "個人情報", "bug_report": "不具合の報告", "abuse": "良識の逸脱"}
@@ -254,7 +256,7 @@ def _api_cost(rows):
     return total
 
 
-API_KEYS = ("claude_api", "opus_api")  # Anthropic のクレジットで払う分。AWS の請求には載らない
+API_KEYS = ("claude_api", "opus_api", "video_api")  # Anthropic のクレジットで払う分。AWS の請求には載らない
 
 
 def _aws(cost):
@@ -262,7 +264,7 @@ def _aws(cost):
     return sum(v for k, v in cost.items() if k not in API_KEYS)
 
 
-def _cost(m, when, brave, kb, since=None, x=0, api=0, opus_api=None):
+def _cost(m, when, brave, kb, since=None, x=0, api=0, opus_api=None, video_api=None):
     """when の時台（None なら全部。since があればその時台以降）の概算コストの内訳"""
     def s(key):
         series = m[key]
@@ -280,6 +282,10 @@ def _cost(m, when, brave, kb, since=None, x=0, api=0, opus_api=None):
     series = opus_api or {}
     cost["opus_api"] = (series.get(when, 0.0) if when is not None
                         else sum(v for h, v in series.items() if since is None or h >= since))
+    # 動画作成機能が Claude API で書いた Opus（時台→ドル。videos_view.api_usd_by_hour）
+    series = video_api or {}
+    cost["video_api"] = (series.get(when, 0.0) if when is not None
+                         else sum(v for h, v in series.items() if since is None or h >= since))
     return cost
 
 
@@ -321,17 +327,18 @@ def _compute_pace(now):
     week = max(since, (now - datetime.timedelta(days=7)).replace(minute=0, second=0, microsecond=0))
     fm = TASKS.submit(_metrics, since, now, 3600)
     fo = TASKS.submit(slides_view.api_usd_by_hour, since, now)
+    fv = TASKS.submit(videos_view.api_usd_by_hour, since, now)
     rows = _rows(since, now, ["created_at", "tools", "x_search", "usage.calls"])
-    m, oa = fm.result(), fo.result()
+    m, oa, va = fm.result(), fo.result(), fv.result()
     recent = [r for r in rows if datetime.datetime.fromisoformat(r["created_at"]) >= week]
     _, brave, kb = _tool_costs(rows)
     _, wbrave, wkb = _tool_costs(recent)
-    all_cost = _cost(m, None, brave, kb, x=_x_cost(rows), api=_api_cost(rows), opus_api=oa)
+    all_cost = _cost(m, None, brave, kb, x=_x_cost(rows), api=_api_cost(rows), opus_api=oa, video_api=va)
     total = sum(all_cost.values())
-    week_usd = sum(_cost(m, None, wbrave, wkb, since=week, x=_x_cost(recent), api=_api_cost(recent), opus_api=oa).values())
+    week_usd = sum(_cost(m, None, wbrave, wkb, since=week, x=_x_cost(recent), api=_api_cost(recent), opus_api=oa, video_api=va).values())
     days = max((now - week).total_seconds() / 86400, 1)
     out = {"since": since.isoformat(timespec="minutes"), "total_usd": total, "aws_total_usd": _aws(all_cost),
-           "claude_api_total_usd": all_cost["claude_api"] + all_cost["opus_api"], "week_usd": week_usd,
+           "claude_api_total_usd": all_cost["claude_api"] + all_cost["opus_api"] + all_cost["video_api"], "week_usd": week_usd,
            "week_days": min(days, 7), "day_usd": week_usd / days, "month_usd": week_usd / days * 30}
     _pace_cache["v"] = (time.time(), out)
     return out
@@ -342,10 +349,11 @@ def summary(day=None, pace=True):
     now, start, end = _day(day)
     fp, fj = (TASKS.submit(_pace, now) if pace else None), TASKS.submit(_rejected, start, end)
     fm, fo = TASKS.submit(_metrics, start, end, 86400), TASKS.submit(slides_view.api_usd_by_hour, start, end)
+    fv = TASKS.submit(videos_view.api_usd_by_hour, start, end)
     rows = _rows(start, end, ["created_at", "anon", "tools", "first_ms", "feedback", "via", "x_search", "usage.calls"])
     m = fm.result()
     tools, brave, kb = _tool_costs(rows)
-    cost = _cost(m, None, brave, kb, x=_x_cost(rows), api=_api_cost(rows), opus_api=fo.result())
+    cost = _cost(m, None, brave, kb, x=_x_cost(rows), api=_api_cost(rows), opus_api=fo.result(), video_api=fv.result())
     firsts = sorted(r["first_ms"] for r in rows if r.get("first_ms") is not None)
     return {"now": now, "day": start, "questions": len(rows), "users": len({r.get("anon") for r in rows}),
             "first_p50": statistics.median(firsts) if firsts else None, "rejected": fj.result(),
@@ -361,6 +369,7 @@ def hours(day):
     rows = _rows(start, end, ["created_at", "pk", "tools", "x_search", "usage.calls"])
     by_hour = {}
     oa = slides_view.api_usd_by_hour(start, end)
+    va = videos_view.api_usd_by_hour(start, end)
     for r in rows:
         h = datetime.datetime.fromisoformat(r["created_at"]).replace(minute=0, second=0, microsecond=0)
         by_hour.setdefault(h, []).append(r)
@@ -369,7 +378,7 @@ def hours(day):
         rs = by_hour.get(h, [])
         _, brave, kb = _tool_costs(rs)
         out.append({"hour": h, "sessions": len({r.get("pk") for r in rs}), "questions": len(rs),
-                    "usd": sum(_cost(m, h, brave, kb, x=_x_cost(rs), api=_api_cost(rs), opus_api=oa).values())})
+                    "usd": sum(_cost(m, h, brave, kb, x=_x_cost(rs), api=_api_cost(rs), opus_api=oa, video_api=va).values())})
         h += datetime.timedelta(hours=1)
     total = {"sessions": len({r.get("pk") for r in rows}), "questions": len(rows), "usd": sum(x["usd"] for x in out)}
     return now, start, list(reversed(out)), total
@@ -873,11 +882,12 @@ def report(day=None, u="general", detail=True):
     _, start, end = _range(day)
     fm = TASKS.submit(_metrics, start, end, 3600)
     fo = TASKS.submit(slides_view.api_usd_by_hour, start, end)
+    fv = TASKS.submit(videos_view.api_usd_by_hour, start, end)
     fj = TASKS.submit(_rejected, start, end)
     now, start, rows = questions(day, detail)
     mode, _, period_end = periods.bounds(day, now, COST_SINCE)
     end = min(start + datetime.timedelta(days=1), now) if mode == "day" else period_end
-    m, oa, registered, owners = fm.result(), fo.result(), fr.result(), fw.result()
+    m, oa, va, registered, owners = fm.result(), fo.result(), fv.result(), fr.result(), fw.result()
     groups = {}
     for r in rows:
         r["audience"] = _audience(r, owners)
@@ -895,9 +905,9 @@ def report(day=None, u="general", detail=True):
         rs = groups.get(h, [])
         selected = [r for r in rs if _selected(r, u)]
         _, brave, kb = _tool_costs(rs)
-        hc = _cost(m, h, brave, kb, x=_x_cost(rs), api=_api_cost(rs), opus_api=oa)
+        hc = _cost(m, h, brave, kb, x=_x_cost(rs), api=_api_cost(rs), opus_api=oa, video_api=va)
         # 検索2種類と Claude API は質問の行に残るので、その利用者に直接紐づける。
-        shared = {k: v for k, v in hc.items() if k not in ("brave", "kb", "x", "claude_api", "opus", "opus_api")}
+        shared = {k: v for k, v in hc.items() if k not in ("brave", "kb", "x", "claude_api", "opus", "opus_api", "video_api")}
         per_question = sum(shared.values()) / len(rs) if rs else 0.0
         # スライド作成の Opus は、その時台にスライドを頼んだ質問へ割る（頼んだ質問が無い時台は全体にだけ残す）
         makers = {id(r) for r in rs if "make_slides" in (r.get("tools") or [])}
@@ -905,8 +915,9 @@ def report(day=None, u="general", detail=True):
         per_slide = slide_usd / len(makers) if makers else 0.0
         if not rs:
             unallocated += sum(hc.values())
-        elif not makers:
-            unallocated += slide_usd
+        else:
+            # 動画は質問ではなく添付ボタンから作るので、質問へは割らず全体にだけ残す
+            unallocated += hc.get("video_api", 0.0) + (0.0 if makers else slide_usd)
         for r in rs:
             _, b, k = _tool_costs([r])
             r["estimated_usd"] = per_question + b + k + _x_cost([r]) + _api_cost([r]) + (per_slide if id(r) in makers else 0.0)
@@ -1248,7 +1259,7 @@ REFRESH_SCRIPT = """<script id="dashboard-refresh">
         if (!response.ok || response.redirected) return;
         next = new DOMParser().parseFromString(await response.text(), 'text/html');
       }
-      const selectors = ['#summary-panel', '#people-panel', '#errors-panel', '#hours-panel', '#list-panel', '#slides-panel', 'header .at', '#people-counts', 'header .day', 'nav.tabs'];
+      const selectors = ['#summary-panel', '#people-panel', '#errors-panel', '#hours-panel', '#list-panel', '#slides-panel', '#videos-panel', 'header .at', '#people-counts', 'header .day', 'nav.tabs'];
       if (selectors.some(s => !next.querySelector(s))) return;
       if (next.querySelector('#owner-csrf')) document.querySelector('#owner-csrf').value = next.querySelector('#owner-csrf').value;
       const search = document.querySelector('#person-search');
@@ -1616,7 +1627,7 @@ def _slides(d, rows, view, multi, jobs=None, owners=None):
     if owners is None:
         owners = _owner_actors() if d["u"] in ("general", "owner") else set()
     def keep(user):
-        r = {"user": user, "pk": ""}
+        r = videos_view.row(user)  # 持ち主が「a:匿名ID」のスライドも匿名として振り分ける
         r["audience"] = _audience(r, owners)
         return _selected(r, d["u"])
     if view != "slides":
@@ -1627,12 +1638,37 @@ def _slides(d, rows, view, multi, jobs=None, owners=None):
     return slides_view.panel(jobs, d["now"], multi, _mask, _url, label), len(jobs or [])
 
 
+def _video_jobs(day, end, view):
+    """動画の表（本数だけならこれ）か、開いたときのポスターつきの一覧。"""
+    if view != "videos":
+        try:
+            return videos_view._jobs(day, end) if videos_view.TABLE else []
+        except Exception:
+            return []
+    return videos_view.load(day, end)
+
+
+def _videos(d, view, multi, jobs, owners):
+    """動画のタブ。本数はどのタブでも出し、ポスター・費用は開いたときだけ集める。表示対象（一般・本人・動作テスト）はスライドと同じ振り分け。"""
+    def keep(owner):
+        r = videos_view.row(owner)
+        r["audience"] = _audience(r, owners)
+        return _selected(r, d["u"])
+    if jobs is not None:
+        jobs = [j for j in jobs if keep(j["user"])]
+    if view != "videos":
+        return '<div class="card" hidden></div>', len(jobs or [])
+    label = "この期間" if multi else "この日"
+    return videos_view.panel(jobs, d["now"], multi, _url, label), len(jobs or [])
+
+
 def render(view, day, page, f=None, u=None, qid=None, group="registered"):
-    view = view if view in ("hours", "list", "errors", "people", "slides") else "sum"
+    view = view if view in ("hours", "list", "errors", "people", "slides", "videos") else "sum"
     # 質問の集計と互いに待たない取得（利用停止・通信エラー・スライド・持ち主）を、同時に始める
     _, p_start, p_end = _range(day)
     fb, fe = TASKS.submit(bans), TASKS.submit(_period_errors, p_start, p_end, datetime.datetime.now(JST))
     fs, fw = TASKS.submit(_slide_jobs, p_start, p_end, view), TASKS.submit(_owner_actors)
+    fv = TASKS.submit(_video_jobs, p_start, p_end, view)
     d, hrs, total, rows = report(day, u, detail=view in ("list", "slides"))
     u = d["u"]
     now, start = d["now"], d["day"]
@@ -1644,10 +1680,13 @@ def render(view, day, page, f=None, u=None, qid=None, group="registered"):
     d["follow_today"] = follow_today
     ds = d["selection"]
     date_tabs = ""
-    slides_html, slides_count = _slides(d, rows, view, multi, fs.result(), fw.result() if u in ("general", "owner") else set())
+    owners = fw.result() if u in ("general", "owner") else set()
+    slides_html, slides_count = _slides(d, rows, view, multi, fs.result(), owners)
+    videos_html, videos_count = _videos(d, view, multi, fv.result(), owners)
     tabs = "".join(f'<a class="{on(v).strip()}" href="{html.escape(_url(v=None if v == "sum" else v, d=ds, u=u, f=f, q=qid))}">{n}</a>'
                    for v, n in (("sum", "要約"), ("hours", "日ごと" if multi else "1時間ごと"), ("list", "質問の一覧"),
-                                ("slides", f'スライド<span class="tab-count">{slides_count}</span>' if slides_count else "スライド")))
+                                ("slides", f'スライド<span class="tab-count">{slides_count}</span>' if slides_count else "スライド"),
+                                ("videos", f'動画<span class="tab-count">{videos_count}</span>' if videos_count else "動画")))
     keep = None if view == "sum" else view
     controls = _period_controls(d, view, u, f, group)
     summary_html = _summary_html(d, ban)
@@ -1680,6 +1719,7 @@ def render(view, day, page, f=None, u=None, qid=None, group="registered"):
 <section id="list-panel" class="panel{on('list')}">{list_html}</section></div>
 <section id="errors-panel" class="panel{on('errors')}">{error_list}</section>
 <section id="slides-panel" class="panel{on('slides')}">{slides_html}</section>
+<section id="videos-panel" class="panel{on('videos')}">{videos_html}</section>
 <section id="people-panel" class="panel{on('people')}">{_people_list(d, group)}</section>
 <p class="note">質問一覧のモデル費用は、回答・候補生成・判定・要約などの記録済み使用量から計算した概算です。事前回答はモデルを呼ばないため0円。記録がない・不完全な質問は未計測と表示します。サーバー・検索などの費用は含みません。利用者別の費用は時間帯の費用を質問数で按分した目安です（Braveとナレッジベースの検索は記録回数から計算）。質問0件の時間帯は割り当てず、全体の費用だけに含めます。<br>コストは概算：Bedrock のトークン数はアカウント全体の数字で、同じアカウントの他のアプリの分も入る。評価（Evaluations）・WAF・ログは含まない。Claude API の分は AWS の請求に載らないので、質問ごとに記録した使用量から足している（払いは Anthropic のクレジット）。確定値は AWS Budgets（1日 $30。AWS の分だけ）が数時間遅れで知らせる。1ドル{YEN:.0f}円で換算。</p>
 </div>{REFRESH_SCRIPT}</body></html>"""
@@ -1708,7 +1748,7 @@ def as_json(day, u="all"):
         "registered_google": d["registered_google"], "active_google": d["active_google"], "unallocated_usd": d["unallocated_usd"],
         "summary": {"questions": d["questions"], "users": d["users"], "first_ms_p50": d["first_p50"],
                     "rejected": d["rejected"], "tools": d["tools"], "cost_usd": d["cost"], "total_usd": d["total"],
-                    "aws_usd": d["aws_total"], "claude_api_usd": d["cost"]["claude_api"] + d["cost"].get("opus_api", 0.0),
+                    "aws_usd": d["aws_total"], "claude_api_usd": d["cost"]["claude_api"] + d["cost"].get("opus_api", 0.0) + d["cost"].get("video_api", 0.0),
                     "feedback": d["feedback"], "pace": d["pace"], "via": d["via"]},
         "hours": {"total": total, "rows": [{"at": h["hour"].isoformat(), "hour": h["hour"].strftime("%H"), "sessions": h["sessions"], "users": h["users"],
                                             "questions": h["questions"], "usd": h["usd"]} for h in hrs]},

@@ -466,7 +466,7 @@ q.addEventListener('paste', (e) => {
   if (file) { e.preventDefault(); void pickImage(file); }
 });
 // ---- 資料から解説動画（2026-11-26 みのるん選定の案C）：添付ボタンで PDF・PPTX を選ぶと札を出し、押すと作り始める ----
-// 動画はスライドと同じくログインなしでも作れる（11/27〜。1日1本）。ログインしていない人の作成中のカードには、ログインの案内を添える
+// 動画はスライドと同じくログインなしでも作れる（11/27〜。1日2本・同じIPから30本）。ログインしていない人の作成中のカードには、ログインの案内を添える
 const docChip = $('#docChip'), docGo = $<HTMLButtonElement>('#docGo');
 let attachedDoc: File | null = null;
 function setDoc(file: File | null) {

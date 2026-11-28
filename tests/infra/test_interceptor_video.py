@@ -1,5 +1,5 @@
 """資料から動画を作る機能の入口（2026-11-26）：1人1日1本・全体で1日20本・資料の場所は本人のものだけ。
-11/27 からログインなしでも作れる（匿名IDで1日1本・同じIPから1日5本・ログインしたら一覧を移す）。"""
+11/27 からログインなしでも作れる（匿名IDで1日1本・同じIPから1日5本・ログインしたら一覧を移す）。同日、スライドと同じ匿名IDで1日2本・同じIPから1日30本・ログインした人も1日2本へ上げた。"""
 import base64
 import json
 import unittest
@@ -62,6 +62,24 @@ class VideoTests(unittest.TestCase):
             self.assertEqual(self.respond({'video': {'doc': 'b' * 32}})[1]['error'], 'video_full')
         self.lam.invoke.assert_not_called()
 
+    def test_guest_refusal_tells_guest_limit(self):
+        with patch.object(m, 'VIDEO_GUEST_DAILY', 3), patch.object(m, 'VIDEO_USER_DAILY', 7), \
+                patch.object(m, 'guard_signals', MagicMock(client_ip=lambda r: '203.0.113.5')):
+            self.ddb.transact_write_items.side_effect = Cancelled(['ConditionalCheckFailed', 'None', 'None'])
+            self.assertIn('1日3本', self.respond({'video': {'doc': 'b' * 32}})[1]['message'])
+
+    def test_guest_limits_match_slides(self):
+        # 動画のログインなしの上限はスライドと揃える（11/27 みのるん指示）
+        import re
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[2]
+        entry = (root / 'infra/lib/entry-stack.ts').read_text()
+        agent = (root / 'infra/lib/agent-stack.ts').read_text()
+        for video, slides in (('VIDEO_GUEST_DAILY', 'SLIDES_GUEST_DAILY'), ('VIDEO_IP_DAILY', 'SLIDES_IP_DAILY')):
+            v = re.search(rf"'{video}', '(\d+)'", entry).group(1)
+            s = re.search(rf"{slides}: '(\d+)'", agent).group(1)
+            self.assertEqual(v, s, video)
+
     def test_guest_is_never_unlimited(self):
         with patch.object(m, 'VIDEO_UNLIMITED', {'a:' + m._anon(ANON)}):
             self.respond({'video': {'doc': 'b' * 32}})
@@ -93,7 +111,7 @@ class VideoTests(unittest.TestCase):
         with patch.object(m, '_video_limits', lambda w, n: [(f'user#{USER}#x', 1), ('all#x', 20)]):
             status, data = self.respond({'docupload': True})
         self.assertEqual((status, data['error']), (429, 'video_limit'))
-        self.assertIn('1日1本', data['message'])
+        self.assertIn(f'1日{m.VIDEO_USER_DAILY}本', data['message'])
         self.s3.generate_presigned_post.assert_not_called()
 
     def test_start_counts_and_launches_with_own_doc(self):

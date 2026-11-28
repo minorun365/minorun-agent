@@ -219,7 +219,7 @@ def card(j, now, multi, mask, url):
     kind = state(j, now)
     base = f"/s/{j['job']}/"
     row = j.get("row") or {}
-    identifier = "G-" + j["user"]
+    identifier = ("A-" + j["user"][2:]) if j["user"].startswith("a:") else ("G-" + j["user"])
     if kind == "done":
         thumb = (f'<a class="slide-thumb" href="{esc(base)}" target="_blank" rel="noopener">'
                  f'<img src="{esc(base)}og.jpg" alt="" loading="lazy" width="1200" height="675"></a>')

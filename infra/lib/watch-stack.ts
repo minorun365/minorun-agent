@@ -270,11 +270,19 @@ export class WatchStack extends cdk.Stack {
         SLIDES_TABLE: 'minorun-agent-slides',
         SLIDES_BUCKET: `minorun-agent-slides-${this.account}`,
         SLIDES_LOG_GROUP: `${props.slides.logGroup},/aws/lambda/minorun-agent-slides`,
+        // 「動画」タブ。ロググループの名前は Runtime の ID 入りなので前方一致で探す（MinorunVideo を参照しない）
+        VIDEOS_TABLE: 'minorun-agent-videos',
+        VIDEOS_BUCKET: `minorun-agent-videos-${this.account}`,
+        VIDEOS_LOG_PREFIX: '/aws/bedrock-agentcore/runtimes/minorun_agent_video-',
       },
     });
     dynamodb.Table.fromTableName(this, 'SlidesTableByName', 'minorun-agent-slides').grant(usagePage, 'dynamodb:Scan');
     usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [`arn:${this.partition}:s3:::minorun-agent-slides-${this.account}/s/*/status.json`] }));
     usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:FilterLogEvents'], resources: [`${props.slides.logGroup}:*`, '/aws/lambda/minorun-agent-slides:*'].map((resourceName) => this.formatArn({ service: 'logs', resource: 'log-group', resourceName, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME })) }));
+    dynamodb.Table.fromTableName(this, 'VideosTableByName', 'minorun-agent-videos').grant(usagePage, 'dynamodb:Scan');
+    usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: ['status.json', 'meta.json'].map((f) => `arn:${this.partition}:s3:::minorun-agent-videos-${this.account}/v/*/${f}`) }));
+    usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:DescribeLogGroups'], resources: ['*'] }));
+    usagePage.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:FilterLogEvents'], resources: [this.formatArn({ service: 'logs', resource: 'log-group', resourceName: '/aws/bedrock-agentcore/runtimes/minorun_agent_video-*:*', arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME })] }));
     // 表は名前で指す（MinorunAgent からの参照を増やすと、そちらを出し直すまでこのスタックを出せない）
     // 利用停止のページは、止めた人の決め手の会話を会話IDの Query で読む（点数の経過）
     dynamodb.Table.fromTableName(this, 'ConversationLogByName', 'minorun-agent-conversations').grant(usagePage, 'dynamodb:Scan', 'dynamodb:Query');
