@@ -88,6 +88,8 @@ LABELS_EN = {
 }
 SORRY = "いまうまく答えられませんでした。少し時間をおいて、もう一度送ってください。"
 VERIFY_WAIT = 6.0
+# 回答の後に次の質問の候補を待つ秒数。1秒では速い回答で候補が間に合わず出ないことがあった（11/28 の smoke で13問中4問）
+SUGGEST_WAIT = 2.5
 FOLLOW_UP_LEAD = "もう少し追加で調べてみますね…"
 FOLLOW_UP_FAILED = "追加で調べようとしましたが、うまくいきませんでした。"
 # 英語の画面（payload の lang が en）で出す文（2026-11-24）。日本語の文と同じ意味にそろえる
@@ -382,7 +384,7 @@ async def _prebaked_turn(conv, turn, pb, model_question, started, base, ledger, 
         items = prebaked.suggestions(pb)
     else:
         try:
-            items = await asyncio.wait_for(asyncio.shield(nexts), 1.0)
+            items = await asyncio.wait_for(asyncio.shield(nexts), SUGGEST_WAIT)
         except Exception:
             items = []
     if items:
@@ -608,7 +610,7 @@ async def invoke(payload, context):
         if not failed:
             # 受付直後に並行して作った候補を1回だけ使う。
             try:
-                items = await asyncio.wait_for(asyncio.shield(nexts), 1.0)
+                items = await asyncio.wait_for(asyncio.shield(nexts), SUGGEST_WAIT)
             except Exception:
                 items = []
             if items:
